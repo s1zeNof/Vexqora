@@ -1,4 +1,4 @@
-import { createBybitClient, decryptSecret } from "@crypto-bot/exchange";
+import { createBybitClient, createPaperExchangeClient, decryptSecret } from "@crypto-bot/exchange";
 import type { RiskSettingsRow, Signal } from "@crypto-bot/shared";
 import { createTradePreview, protectFilledPosition, submitEntry, type TradePreview } from "@crypto-bot/trading";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -14,8 +14,9 @@ export interface ExecutionJobData {
   signal_raw: string;
   exchange_kind: string;
   exchange_env: "live" | "demo";
-  api_key_enc: string;
-  api_secret_enc: string;
+  api_key_enc: string | null;
+  api_secret_enc: string | null;
+  paper_balance?: number | null;
 }
 
 export async function processJob(
@@ -61,14 +62,12 @@ export async function processJob(
   }
 
   // 2. Decrypt exchange credentials & create exchange client
-  const apiKey = decryptSecret(job.api_key_enc, masterKey);
-  const apiSecret = decryptSecret(job.api_secret_enc, masterKey);
-
-  const client = createBybitClient({
-    apiKey,
-    apiSecret,
-    environment: job.exchange_env
-  });
+  const client = job.exchange_kind === "paper"
+    ? createPaperExchangeClient({ balance: job.paper_balance ?? 0 })
+    : (() => {
+        if (!job.api_key_enc || !job.api_secret_enc) throw new Error("Exchange credentials are missing");
+        return createBybitClient({ apiKey: decryptSecret(job.api_key_enc, masterKey), apiSecret: decryptSecret(job.api_secret_enc, masterKey), environment: job.exchange_env });
+      })();
 
   // 3. Fetch latest market data & balance
   const [balance, instrument, ticker] = await Promise.all([
@@ -78,7 +77,7 @@ export async function processJob(
   ]);
 
   if (balance.available <= 0) {
-    throw new Error(`Insufficient available balance on Bybit (${balance.available} USDT)`);
+    throw new Error(`Insufficient available balance (${balance.available} USDT)`);
   }
 
   // 4. Calculate validated trade preview
@@ -127,7 +126,7 @@ export async function processJob(
   const tradeId = String(tradeData.id);
 
   // 6. Submit Entry Order
-  logger.info({ tradeId, symbol: signal.symbol, qty: preview.qty }, "Submitting entry order to Bybit");
+  logger.info({ tradeId, symbol: signal.symbol, qty: preview.qty, exchange: job.exchange_kind }, "Submitting entry order");
   const entryResult = await submitEntry(client, preview, tradeId);
 
   // Persist entry order
@@ -158,7 +157,7 @@ export async function processJob(
   // Notify Discord
   await sendDiscordAlert(discordWebhook, {
     title: `Order Submitted: ${signal.symbol} ${signal.side.toUpperCase()}`,
-    description: `Entry order sent to Bybit (${job.exchange_env.toUpperCase()}). Quantity: ${preview.qty}, Entry: ${preview.entryPrice}`,
+    description: `Entry order sent to ${job.exchange_kind} (${job.exchange_env.toUpperCase()}). Quantity: ${preview.qty}, Entry: ${preview.entryPrice}`,
     symbol: signal.symbol,
     side: signal.side,
     price: preview.entryPrice,
@@ -220,7 +219,7 @@ export async function processJob(
       account_id,
       role: "system",
       kind: "order_event",
-      content: `Entry filled at ${preview.entryPrice}. Exchange-hosted Stop Loss set at ${signal.stopLoss}. ${protection.takeProfitOrders.length} TP limit targets active on Bybit.`,
+      content: `Entry filled at ${preview.entryPrice}. Stop Loss set at ${signal.stopLoss}. ${protection.takeProfitOrders.length} TP targets are active.`,
       payload: { tradeId, sl: signal.stopLoss, targetsCount: protection.takeProfitOrders.length }
     });
 

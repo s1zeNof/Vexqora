@@ -1,11 +1,11 @@
 "use server";
 
-import { createBybitClient, decryptSecret } from "@crypto-bot/exchange";
 import { createTradePreview, parseSignalText, type TradePreview } from "@crypto-bot/trading";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 
 export interface PreviewState {
   error?: string;
@@ -17,19 +17,6 @@ function textField(formData: FormData, name: string): string {
   const value = formData.get(name);
   return typeof value === "string" ? value : "";
 }
-
-function masterKey(): string {
-  const value = process.env.ENCRYPTION_MASTER_KEY;
-  if (!value) throw new Error("ENCRYPTION_MASTER_KEY is missing");
-  return value;
-}
-
-const accountRow = z.object({
-  id: z.string().uuid(),
-  environment: z.enum(["live", "demo"]),
-  api_key_enc: z.string(),
-  api_secret_enc: z.string()
-});
 
 const riskRow = z.object({
   risk_per_trade_pct: z.coerce.number(),
@@ -49,12 +36,12 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
     if (!user) return { error: "Authentication required" };
 
     const { data: rawAccount, error: accountError } = await supabase.from("exchange_accounts")
-      .select("id, environment, api_key_enc, api_secret_enc")
+      .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
       .eq("user_id", user.id)
       .eq("is_active", true)
       .single();
-    if (accountError || !rawAccount) return { error: "Connect and activate a Bybit account first" };
-    const account = accountRow.parse(rawAccount);
+    if (accountError || !rawAccount) return { error: "Your trading workspace is not ready yet. Open Accounts and create a paper account." };
+    const account = accountConnectionSchema.parse(rawAccount);
 
     const { data: rawSettings, error: settingsError } = await supabase.from("risk_settings")
       .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
@@ -63,12 +50,7 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
     if (settingsError || !rawSettings) return { error: "Risk settings are missing" };
     const settings = riskRow.parse(rawSettings);
 
-    const key = masterKey();
-    const client = createBybitClient({
-      environment: account.environment,
-      apiKey: decryptSecret(account.api_key_enc, key),
-      apiSecret: decryptSecret(account.api_secret_enc, key)
-    });
+    const client = createAccountClient(account);
     const [balance, instrument, ticker] = await Promise.all([
       client.getBalance(), client.getInstrument(signal.symbol), client.getTicker(signal.symbol)
     ]);

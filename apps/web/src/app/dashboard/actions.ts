@@ -38,7 +38,7 @@ export async function connectBybitAccount(formData: FormData) {
     apiKey: textField(formData, "apiKey"),
     apiSecret: textField(formData, "apiSecret")
   });
-  if (!parsed.success) redirect(`/dashboard?error=${encodeURIComponent("Invalid account details")}`);
+  if (!parsed.success) redirect(`/dashboard/accounts?error=${encodeURIComponent("Invalid account details")}`);
 
   const { supabase, user } = await authenticatedContext();
   const client = createBybitClient(parsed.data);
@@ -46,7 +46,7 @@ export async function connectBybitAccount(formData: FormData) {
     await client.getBalance();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Bybit verification failed";
-    redirect(`/dashboard?error=${encodeURIComponent(message)}`);
+    redirect(`/dashboard/accounts?error=${encodeURIComponent(message)}`);
   }
 
   const { count } = await supabase
@@ -64,12 +64,12 @@ export async function connectBybitAccount(formData: FormData) {
     api_secret_enc: encryptSecret(parsed.data.apiSecret, key),
     is_active: count === 0
   }).select("id").single();
-  if (error) redirect(`/dashboard?error=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`/dashboard/accounts?error=${encodeURIComponent(error.message)}`);
 
   const { error: riskError } = await supabase.from("risk_settings").insert({ account_id: account.id });
-  if (riskError) redirect(`/dashboard?error=${encodeURIComponent(riskError.message)}`);
+  if (riskError) redirect(`/dashboard/accounts?error=${encodeURIComponent(riskError.message)}`);
   revalidatePath("/dashboard");
-  redirect("/dashboard?connected=1");
+  redirect("/dashboard/accounts?connected=1");
 }
 
 export async function activateAccount(formData: FormData) {
@@ -107,5 +107,34 @@ export async function requestDemoFunds(formData: FormData) {
   });
   await client.requestDemoFunds?.(amount);
   revalidatePath("/dashboard");
+}
+
+export async function ensurePaperAccount() {
+  const { supabase, user } = await authenticatedContext();
+  const { error } = await supabase.rpc("ensure_user_workspace", { target_user_id: user.id });
+  if (error) redirect(`/dashboard/accounts?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/accounts?paper=1");
+}
+
+export async function topUpPaperBalance(formData: FormData) {
+  const accountId = textField(formData, "accountId");
+  const amount = Number(textField(formData, "amount"));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) throw new Error("Paper amount must be between 0 and 100000 USDT");
+  const { supabase } = await authenticatedContext();
+  const { error } = await supabase.rpc("top_up_paper_balance", { target_account_id: accountId, amount });
+  if (error) redirect(`/dashboard/accounts?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/accounts?toppedUp=1");
+}
+
+export async function updateProfile(formData: FormData) {
+  const displayName = textField(formData, "displayName").trim();
+  if (!displayName || displayName.length > 80) throw new Error("Display name must be between 1 and 80 characters");
+  const { supabase, user } = await authenticatedContext();
+  const { error } = await supabase.from("profiles").update({ display_name: displayName }).eq("id", user.id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/profile?saved=1");
 }
 

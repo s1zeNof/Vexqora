@@ -8,4 +8,5 @@ coverage/
 *.log
 *.tsbuildinfo
 .turbo/
+supabase/.temp/
 

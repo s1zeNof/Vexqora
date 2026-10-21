@@ -63,7 +63,7 @@ async function claimNextJob(supabase: SupabaseClient): Promise<ExecutionJobData 
   // Fetch signal and exchange account
   const [signalRes, accountRes] = await Promise.all([
     supabase.from("signals").select("raw_text, parsed").eq("id", lockedJob.signal_id).single(),
-    supabase.from("exchange_accounts").select("exchange, environment, api_key_enc, api_secret_enc").eq("id", lockedJob.account_id).single()
+    supabase.from("exchange_accounts").select("exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("id", lockedJob.account_id).single()
   ]);
 
   if (signalRes.error || accountRes.error || !signalRes.data || !accountRes.data) {
@@ -86,8 +86,9 @@ async function claimNextJob(supabase: SupabaseClient): Promise<ExecutionJobData 
     signal_raw: typeof signalData.raw_text === "string" ? signalData.raw_text : "",
     exchange_kind: String(accountData.exchange),
     exchange_env: accountData.environment as "live" | "demo",
-    api_key_enc: String(accountData.api_key_enc),
-    api_secret_enc: String(accountData.api_secret_enc)
+    api_key_enc: typeof accountData.api_key_enc === "string" ? accountData.api_key_enc : null,
+    api_secret_enc: typeof accountData.api_secret_enc === "string" ? accountData.api_secret_enc : null,
+    paper_balance: accountData.paper_balance === null ? null : Number(accountData.paper_balance)
   };
 }
 

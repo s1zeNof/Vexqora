@@ -7,11 +7,13 @@ export interface ProfileRow {
 export interface ExchangeAccountRow {
   id: string;
   user_id: string;
-  exchange: "bybit" | "binance";
+  exchange: "paper" | "bybit" | "binance";
   environment: "live" | "demo";
   label: string;
-  api_key_enc: string;
-  api_secret_enc: string;
+  api_key_enc: string | null;
+  api_secret_enc: string | null;
+  paper_balance: number | null;
+  is_managed: boolean;
   is_active: boolean;
   created_at: string;
 }

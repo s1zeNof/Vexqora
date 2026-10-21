@@ -15,9 +15,9 @@ export default async function PositionsPage() {
         <div>
           <span className="eyebrow">Realtime Execution</span>
           <h1 style={{ marginTop: "6px" }}>Open Positions</h1>
-          <p className="lead">Positions currently held on Bybit USDT-perpetual exchange.</p>
+          <p className="lead">Open positions for the active paper or exchange-backed workspace.</p>
         </div>
-        <button className="button danger">Close all positions</button>
+        <button className="button danger" disabled={!trades?.length}>Close all positions</button>
       </div>
 
       <div className="table-wrap">
@@ -45,12 +45,12 @@ export default async function PositionsPage() {
                   <td className="mono">{trade.entry_avg}</td>
                   <td className="mono">—</td>
                   <td className="mono negative">{trade.sl ?? "—"}</td>
-                  <td className="mono warning">active</td>
-                  <td className="mono positive font-bold">+$184.20 (+1.84%)</td>
+                  <td className="mono warning">{trade.trailing_stop ? "configured" : "—"}</td>
+                  <td className="mono">—</td>
                   <td>
                     <div style={{ display: "flex", gap: "6px" }}>
-                      <button className="button secondary" style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>Close 50%</button>
-                      <button className="button danger" style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>Market Close</button>
+                      <button className="button secondary" disabled style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>Close 50%</button>
+                      <button className="button danger" disabled style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>Market Close</button>
                     </div>
                   </td>
                 </tr>

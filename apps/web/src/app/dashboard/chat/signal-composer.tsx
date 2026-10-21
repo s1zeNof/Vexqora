@@ -28,7 +28,7 @@ export function SignalComposer() {
         </article>
       ) : null}
       <form className="composer-bar" action={action}>
-        <textarea aria-label="Signal" id="signal" name="signal" rows={1} defaultValue={`BTCUSDT LONG
+        <textarea aria-label="Signal" id="signal" name="signal" rows={1} placeholder={`BTCUSDT LONG
 entry market
 tp 66000 40%, 67000 30%, 68500 30%
 sl 64000

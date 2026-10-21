@@ -1,12 +1,14 @@
 import type { ProfileRow } from "@crypto-bot/shared";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { signOut } from "../../login/actions";
+import { updateProfile } from "../actions";
 
-export default async function ProfilePage() {
+export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   const profileRes = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
   const profile = profileRes.data as ProfileRow | null;
+  const query = await searchParams;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%", maxWidth: "800px" }}>
@@ -15,10 +17,22 @@ export default async function ProfilePage() {
         <h1 style={{ marginTop: "6px" }}>Account & Security</h1>
         <p className="lead">Manage your Vexqora account details and authentication methods.</p>
       </div>
+      {query.saved ? <p className="notice success">Profile updated.</p> : null}
 
       <div className="card">
-        <h3>User Credentials</h3>
+        <h3>SaaS Profile</h3>
         <div style={{ display: "grid", gap: "16px", marginTop: "16px" }}>
+          <form action={updateProfile} className="form-group">
+            <label>Display name</label>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <input name="displayName" defaultValue={profile?.display_name ?? user?.email?.split("@")[0] ?? "Trader"} maxLength={80} required />
+              <button className="button primary">Save</button>
+            </div>
+          </form>
+          <div>
+            <div className="kicker">Plan</div>
+            <div style={{ marginTop: "6px" }}><span className="badge demo">Free · Paper Trading</span></div>
+          </div>
           <div>
             <div className="kicker">Email Address</div>
             <div style={{ fontSize: "16px", fontWeight: "600", marginTop: "4px" }}>{user?.email}</div>

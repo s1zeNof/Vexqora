@@ -12,7 +12,7 @@ Positioning:
 
 Repository: `https://github.com/s1zeNof/Vexqora`
 
-The local directory is still named `crypto-bot`; do not rename it unless the user explicitly requests that change.
+The local directory is `Vexqora-trade`.
 
 ## Read these files before changing code
 
@@ -45,6 +45,8 @@ Completed:
 - Mode-agnostic executor primitives for entry, exchange-hosted SL, multiple reduce-only TP orders and trailing stop.
 - Unit test proving identical executor calls for demo and live clients.
 - Vexqora Trade visual system and responsive terminal layout.
+- SaaS user profiles and an automatically provisioned Vexqora Paper workspace with keyless virtual balance.
+- Clear separation between internal Vexqora Paper and external Bybit Demo/Live accounts.
 
 Not completed:
 
@@ -164,7 +166,7 @@ Current expected baseline:
 
 - Typecheck passes.
 - ESLint passes.
-- 17 unit tests pass.
+- 19 unit tests pass.
 - Next.js production build passes.
 
 For UI changes, compare the rendered result with the supplied PNG references at desktop and mobile widths.

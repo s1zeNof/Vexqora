@@ -8,7 +8,7 @@ export async function reconcileOnStartup(supabase: SupabaseClient, masterKey: st
 
   const { data: rawAccounts, error: accountsError } = await supabase
     .from("exchange_accounts")
-    .select("id, label, environment, api_key_enc, api_secret_enc")
+    .select("id, label, exchange, environment, api_key_enc, api_secret_enc")
     .eq("is_active", true);
 
   if (accountsError || !rawAccounts) {
@@ -16,10 +16,12 @@ export async function reconcileOnStartup(supabase: SupabaseClient, masterKey: st
     return;
   }
 
-  const accounts = rawAccounts as Array<Pick<ExchangeAccountRow, "id" | "label" | "environment" | "api_key_enc" | "api_secret_enc">>;
+  const accounts = rawAccounts as Array<Pick<ExchangeAccountRow, "id" | "label" | "exchange" | "environment" | "api_key_enc" | "api_secret_enc">>;
 
   for (const account of accounts) {
+    if (account.exchange === "paper") continue;
     try {
+      if (!account.api_key_enc || !account.api_secret_enc) throw new Error("Exchange credentials are missing");
       const apiKey = decryptSecret(account.api_key_enc, masterKey);
       const apiSecret = decryptSecret(account.api_secret_enc, masterKey);
       const client = createBybitClient({
