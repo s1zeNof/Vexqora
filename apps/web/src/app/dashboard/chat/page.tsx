@@ -7,6 +7,21 @@ import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { analyzePulseAction, confirmSignal, enhanceSignalAction, scanMarketOpportunityAction } from "./actions";
 import { SignalComposer } from "./signal-composer";
 
+function formatTimeAgo(dateInput?: string | number | null): string {
+  if (!dateInput) return "just now";
+  const timestamp = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
+  if (!Number.isFinite(timestamp)) return "just now";
+  const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (diffSec < 5) return "just now";
+  if (diffSec < 60) return `${diffSec} sec ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} h ago`;
+  const diffDays = Math.floor(diffHour / 24);
+  return `${diffDays} d ago`;
+}
+
 const messageSchema = z.object({
   id: z.string(),
   role: z.string(),
@@ -221,6 +236,9 @@ export default async function ChatPage({
                         <div className="pulse-tags">
                           <span className="pulse-tag">{eventType.replaceAll("_", " ").toUpperCase()}</span>
                           <span className="pulse-tag">HIGH VOLATILITY</span>
+                          <span className="pulse-tag mono" style={{ color: "var(--soft-violet)" }}>
+                            ⏱ {formatTimeAgo(message.created_at)}
+                          </span>
                         </div>
                       </div>
 
@@ -289,6 +307,9 @@ export default async function ChatPage({
                                 Memory: {Number(hist.sampleCount ?? 0)} Matches · {Number(hist.winRatePct ?? 0)}% Win Rate
                               </span>
                             ) : null}
+                            <span className="pulse-tag mono" style={{ color: "var(--soft-violet)", marginLeft: "auto" }}>
+                              ⏱ {formatTimeAgo(message.created_at)}
+                            </span>
                           </div>
                           <span className="kicker">{oppStrategy}</span>
                         </div>
@@ -341,7 +362,10 @@ export default async function ChatPage({
 
                   return (
                     <article className={`message ${message.role}`} key={message.id}>
-                      <small>{String(message.kind || "").replaceAll("_", " ")}</small>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <small>{String(message.kind || "").replaceAll("_", " ")}</small>
+                        <small style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{formatTimeAgo(message.created_at)}</small>
+                      </div>
                       <p>{message.content}</p>
                     </article>
                   );

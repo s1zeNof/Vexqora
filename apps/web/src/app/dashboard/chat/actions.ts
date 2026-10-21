@@ -8,6 +8,7 @@ import {
   parseSignalText,
   type TradePreview
 } from "@crypto-bot/trading";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -35,231 +36,285 @@ const riskRow = z.object({
 });
 
 export async function scanMarketOpportunityAction(formData: FormData): Promise<void> {
-  const symbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  try {
+    const symbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-  const { data: rawAccount, error: accountError } = await supabase.from("exchange_accounts")
-    .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
-    .eq("user_id", user.id)
-    .eq("is_active", true)
-    .single();
-  if (accountError || !rawAccount) redirect("/dashboard/accounts");
-  const account = accountConnectionSchema.parse(rawAccount);
+    const { data: rawAccount, error: accountError } = await supabase.from("exchange_accounts")
+      .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (accountError || !rawAccount) redirect("/dashboard/accounts");
+    const account = accountConnectionSchema.parse(rawAccount);
 
-  const { data: rawSettings, error: settingsError } = await supabase.from("risk_settings")
-    .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
-    .eq("account_id", account.id)
-    .single();
-  if (settingsError || !rawSettings) redirect("/dashboard/risk");
-  const settings = riskRow.parse(rawSettings);
+    const { data: rawSettings } = await supabase.from("risk_settings")
+      .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
+      .eq("account_id", account.id)
+      .limit(1)
+      .maybeSingle();
+    const settings = rawSettings ? riskRow.parse(rawSettings) : {
+      risk_per_trade_pct: 1,
+      max_leverage: 5,
+      max_open_positions: 3,
+      max_daily_loss_pct: 5,
+      allowed_symbols: null,
+      kill_switch: false
+    };
 
-  const client = createAccountClient(account);
-  const [balance, instrument, ticker] = await Promise.all([
-    client.getBalance(),
-    client.getInstrument(symbol),
-    client.getTicker(symbol)
-  ]);
+    const client = createAccountClient(account);
+    const [balance, instrument, ticker] = await Promise.all([
+      client.getBalance(),
+      client.getInstrument(symbol),
+      client.getTicker(symbol)
+    ]);
 
-  const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5);
-  const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
-    tickSize: instrument.tickSize,
-    leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
-    riskPct: Number(settings.risk_per_trade_pct),
-    historicalContext: hist
-  });
+    const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5);
+    const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
+      tickSize: instrument.tickSize,
+      leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
+      riskPct: Number(settings.risk_per_trade_pct),
+      historicalContext: hist
+    });
 
-  const { count: openPositions } = await supabase.from("trades")
-    .select("id", { count: "exact", head: true })
-    .eq("account_id", account.id)
-    .in("status", ["entry_open", "active"]);
+    const { count: openPositions } = await supabase.from("trades")
+      .select("id", { count: "exact", head: true })
+      .eq("account_id", account.id)
+      .in("status", ["entry_open", "active"]);
 
-  const dayStart = new Date();
-  dayStart.setUTCHours(0, 0, 0, 0);
-  const { data: pnlRows } = await supabase.from("trades")
-    .select("realized_pnl")
-    .eq("account_id", account.id)
-    .gte("closed_at", dayStart.toISOString());
-  const dailyPnl = (pnlRows ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const { data: pnlRows } = await supabase.from("trades")
+      .select("realized_pnl")
+      .eq("account_id", account.id)
+      .gte("closed_at", dayStart.toISOString());
+    const dailyPnl = (pnlRows ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
 
-  const preview = createTradePreview(opp.parsedSignal, instrument, {
-    riskPerTradePct: settings.risk_per_trade_pct,
-    maxLeverage: settings.max_leverage,
-    maxOpenPositions: settings.max_open_positions,
-    maxDailyLossPct: settings.max_daily_loss_pct,
-    ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
-    killSwitch: settings.kill_switch
-  }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: openPositions ?? 0, dailyPnl });
+    const preview = createTradePreview(opp.parsedSignal, instrument, {
+      riskPerTradePct: settings.risk_per_trade_pct,
+      maxLeverage: settings.max_leverage,
+      maxOpenPositions: settings.max_open_positions,
+      maxDailyLossPct: settings.max_daily_loss_pct,
+      ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
+      killSwitch: settings.kill_switch
+    }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: openPositions ?? 0, dailyPnl });
 
-  const { data: stored, error: insertError } = await supabase.from("signals").insert({
-    account_id: account.id,
-    raw_text: opp.rawSignal,
-    parsed: preview,
-    source: "chat",
-    status: "preview"
-  }).select("id").single();
+    const { data: stored, error: insertError } = await supabase.from("signals").insert({
+      account_id: account.id,
+      raw_text: opp.rawSignal,
+      parsed: preview,
+      source: "chat",
+      status: "preview"
+    }).select("id").limit(1).maybeSingle();
 
-  if (insertError || !stored) {
-    redirect(`/dashboard/chat?error=${encodeURIComponent(insertError?.message ?? "Failed to save signal")}`);
-  }
-
-  const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
-
-  await supabase.from("chat_messages").insert({
-    account_id: account.id,
-    role: "assistant",
-    kind: "ai_signal",
-    content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
-    payload: {
-      opportunity: opp,
-      preview,
-      signalId: storedSignal.id,
-      rawSignal: opp.rawSignal,
-      historicalMatch: hist
+    if (insertError || !stored) {
+      redirect(`/dashboard/chat?error=${encodeURIComponent(insertError?.message ?? "Failed to save signal")}`);
     }
-  });
 
-  revalidatePath("/dashboard/chat");
-  redirect("/dashboard/chat?tab=signals");
+    const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "assistant",
+      kind: "ai_signal",
+      content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+      payload: {
+        opportunity: opp,
+        preview,
+        signalId: storedSignal.id,
+        rawSignal: opp.rawSignal,
+        historicalMatch: hist
+      }
+    });
+
+    revalidatePath("/dashboard/chat");
+    redirect("/dashboard/chat?tab=signals");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Failed to scan market opportunity";
+    redirect(`/dashboard/chat?error=${encodeURIComponent(message)}`);
+  }
 }
 
 export async function analyzePulseAction(formData: FormData): Promise<void> {
-  const symbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
-  const rawAnomalyType = textField(formData, "eventType") || "liquidity_sweep";
-  const changePct = Number(textField(formData, "changePct") || "2.5");
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  try {
+    const symbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
+    const rawAnomalyType = textField(formData, "eventType") || "liquidity_sweep";
+    const changePct = Number(textField(formData, "changePct") || "2.5");
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-  const { data: rawAccount } = await supabase.from("exchange_accounts")
-    .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
-    .eq("user_id", user.id)
-    .eq("is_active", true)
-    .single();
-  if (!rawAccount) redirect("/dashboard/accounts");
-  const account = accountConnectionSchema.parse(rawAccount);
+    const { data: rawAccount } = await supabase.from("exchange_accounts")
+      .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (!rawAccount) redirect("/dashboard/accounts");
+    const account = accountConnectionSchema.parse(rawAccount);
 
-  const client = createAccountClient(account);
-  const [ticker, instrument] = await Promise.all([
-    client.getTicker(symbol),
-    client.getInstrument(symbol)
-  ]);
+    const client = createAccountClient(account);
+    const [ticker, instrument] = await Promise.all([
+      client.getTicker(symbol),
+      client.getInstrument(symbol)
+    ]);
 
-  const hist = findHistoricalPatternMatch(symbol, rawAnomalyType, changePct);
-  const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
-    tickSize: instrument.tickSize,
-    historicalContext: hist
-  });
+    const { data: rawSettings } = await supabase.from("risk_settings")
+      .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
+      .eq("account_id", account.id)
+      .limit(1)
+      .maybeSingle();
+    const settings = rawSettings ? riskRow.parse(rawSettings) : {
+      risk_per_trade_pct: 1,
+      max_leverage: 5,
+      max_open_positions: 3,
+      max_daily_loss_pct: 5,
+      allowed_symbols: null,
+      kill_switch: false
+    };
 
-  const { data: rawSettings } = await supabase.from("risk_settings")
-    .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
-    .eq("account_id", account.id)
-    .single();
-  const settings = riskRow.parse(rawSettings);
+    const hist = findHistoricalPatternMatch(symbol, rawAnomalyType, changePct);
+    const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
+      tickSize: instrument.tickSize,
+      leverage: Math.min(Number(settings.max_leverage || 5), 5),
+      riskPct: Number(settings.risk_per_trade_pct || 1),
+      historicalContext: hist
+    });
 
-  const balance = await client.getBalance();
-  const preview = createTradePreview(opp.parsedSignal, instrument, {
-    riskPerTradePct: settings.risk_per_trade_pct,
-    maxLeverage: settings.max_leverage,
-    maxOpenPositions: settings.max_open_positions,
-    maxDailyLossPct: settings.max_daily_loss_pct,
-    ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
-    killSwitch: settings.kill_switch
-  }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: 0, dailyPnl: 0 });
+    const balance = await client.getBalance();
+    const preview = createTradePreview(opp.parsedSignal, instrument, {
+      riskPerTradePct: settings.risk_per_trade_pct,
+      maxLeverage: settings.max_leverage,
+      maxOpenPositions: settings.max_open_positions,
+      maxDailyLossPct: settings.max_daily_loss_pct,
+      ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
+      killSwitch: settings.kill_switch
+    }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: 0, dailyPnl: 0 });
 
-  const { data: stored } = await supabase.from("signals").insert({
-    account_id: account.id,
-    raw_text: opp.rawSignal,
-    parsed: preview,
-    source: "chat",
-    status: "preview"
-  }).select("id").single();
+    const { data: stored, error: insertError } = await supabase.from("signals").insert({
+      account_id: account.id,
+      raw_text: opp.rawSignal,
+      parsed: preview,
+      source: "chat",
+      status: "preview"
+    }).select("id").limit(1).maybeSingle();
 
-  const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
-
-  await supabase.from("chat_messages").insert({
-    account_id: account.id,
-    role: "assistant",
-    kind: "ai_signal",
-    content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
-    payload: {
-      opportunity: opp,
-      preview,
-      signalId: storedSignal.id,
-      rawSignal: opp.rawSignal,
-      historicalMatch: hist
+    if (insertError || !stored) {
+      redirect(`/dashboard/chat?error=${encodeURIComponent(insertError?.message ?? "Failed to save signal")}`);
     }
-  });
 
-  revalidatePath("/dashboard/chat");
-  redirect("/dashboard/chat?tab=signals");
+    const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "assistant",
+      kind: "ai_signal",
+      content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+      payload: {
+        opportunity: opp,
+        preview,
+        signalId: storedSignal.id,
+        rawSignal: opp.rawSignal,
+        historicalMatch: hist
+      }
+    });
+
+    revalidatePath("/dashboard/chat");
+    redirect("/dashboard/chat?tab=signals");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Failed to analyze market pulse";
+    redirect(`/dashboard/chat?error=${encodeURIComponent(message)}`);
+  }
 }
 
 export async function enhanceSignalAction(formData: FormData): Promise<void> {
-  const rawSignal = textField(formData, "rawSignal");
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  try {
+    const rawSignal = textField(formData, "rawSignal");
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-  const { data: rawAccount } = await supabase.from("exchange_accounts")
-    .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
-    .eq("user_id", user.id)
-    .eq("is_active", true)
-    .single();
-  if (!rawAccount) redirect("/dashboard/accounts");
-  const account = accountConnectionSchema.parse(rawAccount);
+    const { data: rawAccount } = await supabase.from("exchange_accounts")
+      .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (!rawAccount) redirect("/dashboard/accounts");
+    const account = accountConnectionSchema.parse(rawAccount);
 
-  const client = createAccountClient(account);
-  const parsed = parseSignalText(rawSignal, "chat");
-  const [balance, instrument, ticker] = await Promise.all([
-    client.getBalance(),
-    client.getInstrument(parsed.symbol),
-    client.getTicker(parsed.symbol)
-  ]);
+    const client = createAccountClient(account);
+    const parsed = parseSignalText(rawSignal, "chat");
+    const [balance, instrument, ticker] = await Promise.all([
+      client.getBalance(),
+      client.getInstrument(parsed.symbol),
+      client.getTicker(parsed.symbol)
+    ]);
 
-  const enhanced = await enhanceNemotronSignal(rawSignal, ticker.lastPrice, instrument.tickSize);
+    const enhanced = await enhanceNemotronSignal(rawSignal, ticker.lastPrice, instrument.tickSize);
 
-  const { data: rawSettings } = await supabase.from("risk_settings")
-    .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
-    .eq("account_id", account.id)
-    .single();
-  const settings = riskRow.parse(rawSettings);
+    const { data: rawSettings } = await supabase.from("risk_settings")
+      .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
+      .eq("account_id", account.id)
+      .limit(1)
+      .maybeSingle();
+    const settings = rawSettings ? riskRow.parse(rawSettings) : {
+      risk_per_trade_pct: 1,
+      max_leverage: 5,
+      max_open_positions: 3,
+      max_daily_loss_pct: 5,
+      allowed_symbols: null,
+      kill_switch: false
+    };
 
-  const preview = createTradePreview(enhanced.parsedSignal, instrument, {
-    riskPerTradePct: settings.risk_per_trade_pct,
-    maxLeverage: settings.max_leverage,
-    maxOpenPositions: settings.max_open_positions,
-    maxDailyLossPct: settings.max_daily_loss_pct,
-    ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
-    killSwitch: settings.kill_switch
-  }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: 0, dailyPnl: 0 });
+    const preview = createTradePreview(enhanced.parsedSignal, instrument, {
+      riskPerTradePct: settings.risk_per_trade_pct,
+      maxLeverage: settings.max_leverage,
+      maxOpenPositions: settings.max_open_positions,
+      maxDailyLossPct: settings.max_daily_loss_pct,
+      ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
+      killSwitch: settings.kill_switch
+    }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: 0, dailyPnl: 0 });
 
-  const { data: stored } = await supabase.from("signals").insert({
-    account_id: account.id,
-    raw_text: enhanced.rawText,
-    parsed: preview,
-    source: "chat",
-    status: "preview"
-  }).select("id").single();
+    const { data: stored, error: insertError } = await supabase.from("signals").insert({
+      account_id: account.id,
+      raw_text: enhanced.rawText,
+      parsed: preview,
+      source: "chat",
+      status: "preview"
+    }).select("id").limit(1).maybeSingle();
 
-  const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
-
-  await supabase.from("chat_messages").insert({
-    account_id: account.id,
-    role: "assistant",
-    kind: "ai_signal",
-    content: `✨ ${enhanced.summary}`,
-    payload: {
-      improvements: enhanced.improvements,
-      preview,
-      signalId: storedSignal.id,
-      rawSignal: enhanced.rawText
+    if (insertError || !stored) {
+      redirect(`/dashboard/chat?error=${encodeURIComponent(insertError?.message ?? "Failed to save enhanced signal")}`);
     }
-  });
 
-  revalidatePath("/dashboard/chat");
-  redirect("/dashboard/chat?tab=signals");
+    const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "assistant",
+      kind: "ai_signal",
+      content: `✨ ${enhanced.summary}`,
+      payload: {
+        improvements: enhanced.improvements,
+        preview,
+        signalId: storedSignal.id,
+        rawSignal: enhanced.rawText
+      }
+    });
+
+    revalidatePath("/dashboard/chat");
+    redirect("/dashboard/chat?tab=signals");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Failed to enhance signal";
+    redirect(`/dashboard/chat?error=${encodeURIComponent(message)}`);
+  }
 }
 
 export async function previewSignal(_previous: PreviewState, formData: FormData): Promise<PreviewState> {
