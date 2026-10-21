@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "../../lib/supabase/server";
 import { signOut } from "../login/actions";
+import { VexqoraLogo } from "../../components/logo";
 import { z } from "zod";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -26,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="terminal-layout">
       <aside className="sidebar">
         <Link className="brand" href="/dashboard/chat">
-          <span className="brand-mark" />
+          <VexqoraLogo size={24} />
           <span>Vexqora Trade</span>
         </Link>
         <nav className="side-nav">

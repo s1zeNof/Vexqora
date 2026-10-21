@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { SignalComposer } from "./signal-composer";
+import { VexqoraLogo } from "../../../components/logo";
 import { z } from "zod";
 
 export default async function ChatPage({ searchParams }: { searchParams: Promise<{ error?: string; queued?: string }> }) {
@@ -60,7 +61,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
               ))
             ) : (
               <div style={{ margin: "auto", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", padding: "40px 20px" }}>
-                <span className="brand-mark" style={{ width: "36px", height: "36px" }} />
+                <VexqoraLogo size={42} />
                 <h2>Ultraviolet Signal Desk</h2>
                 <p style={{ color: "var(--muted)", maxWidth: "420px", fontSize: "14px", lineHeight: "1.6" }}>
                   Paste or type a trading signal below to parse entry, stop loss, take profits and risk calculation before execution.

@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { VexqoraLogo } from "../../../components/logo";
 
 export default async function PositionsPage() {
   const supabase = await createSupabaseServerClient();
@@ -55,7 +56,7 @@ export default async function PositionsPage() {
               <tr>
                 <td colSpan={9} style={{ textAlign: "center", padding: "48px 16px", color: "var(--muted)" }}>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-                    <span className="brand-mark" style={{ width: "32px", height: "32px" }} />
+                    <VexqoraLogo size={36} />
                     <p style={{ fontSize: "15px", fontWeight: "600", color: "var(--text)" }}>No active open positions</p>
                     <p style={{ fontSize: "13px" }}>Signals executed through the Signals Chat desk will appear here in real time.</p>
                   </div>

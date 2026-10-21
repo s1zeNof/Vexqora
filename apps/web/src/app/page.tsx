@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "../lib/supabase/server";
+import { VexqoraLogo } from "../components/logo";
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<{ code?: string }> }) {
   const params = await searchParams;
@@ -28,8 +29,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", width: "100%" }}>
       {/* Top Header */}
       <header className="landing-nav">
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          <span className="brand-mark" />
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <VexqoraLogo size={28} />
           <span style={{ fontSize: "18px", fontWeight: "700", letterSpacing: "-0.01em" }}>Vexqora Trade</span>
           <span className="badge demo" style={{ marginLeft: "6px" }}>V5 Perpetual</span>
         </div>

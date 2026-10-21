@@ -7,7 +7,12 @@ const jetbrains = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" }
 
 export const metadata: Metadata = {
   title: "Vexqora Trade",
-  description: "Intelligent Trade Execution Platform"
+  description: "Intelligent Trade Execution Platform · Signals, Risk, Automation",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg"
+  }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

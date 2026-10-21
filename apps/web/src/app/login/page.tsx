@@ -1,5 +1,6 @@
 import { signIn, signUp, signInWithGoogle } from "./actions";
 import Link from "next/link";
+import { VexqoraLogo } from "../../components/logo";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
@@ -7,8 +8,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <div className="auth-page">
       <div className="panel auth-card">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span className="brand-mark" />
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <VexqoraLogo size={24} />
             <strong style={{ fontSize: "16px" }}>Vexqora Trade</strong>
           </div>
           <Link href="/" className="eyebrow" style={{ fontSize: "11px" }}>Home →</Link>
