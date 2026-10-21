@@ -28,13 +28,14 @@ export function SignalComposer() {
         </article>
       ) : null}
       <form className="composer-bar" action={action}>
-        <textarea aria-label="Signal" id="signal" name="signal" rows={1} placeholder={`BTCUSDT LONG
-entry market
-tp 66000 40%, 67000 30%, 68500 30%
-sl 64000
-trail 1% after tp1
-lev 5
-risk 1%`} required />
+        <textarea
+          aria-label="Signal"
+          id="signal"
+          name="signal"
+          rows={1}
+          placeholder='Ask AI to scan (e.g. "Scan SOL", "BTC") or paste a signal...'
+          required
+        />
         <button className="button secondary" type="button">Form</button>
         <button className="button primary" disabled={pending}>{pending ? "Checking…" : "Send"}</button>
       </form>
