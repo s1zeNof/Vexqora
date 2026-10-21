@@ -4,16 +4,27 @@ import Link from "next/link";
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
   return (
-    <main className="shell">
-      <Link href="/" className="eyebrow">← Back to home</Link>
-      <h1 style={{ marginTop: "16px" }}>Sign in to Vexqora</h1>
-      <p className="lead">Intelligent trade execution and risk automation workspace.</p>
+    <div className="auth-page">
+      <div className="panel auth-card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span className="brand-mark" />
+            <strong style={{ fontSize: "16px" }}>Vexqora Trade</strong>
+          </div>
+          <Link href="/" className="eyebrow" style={{ fontSize: "11px" }}>Home →</Link>
+        </div>
 
-      <div className="auth" style={{ marginTop: "28px" }}>
+        <div>
+          <h2 style={{ fontSize: "22px", marginTop: "4px" }}>Sign In</h2>
+          <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: "4px" }}>
+            Intelligent trade execution and risk workspace.
+          </p>
+        </div>
+
         {error ? <p className="notice error">{error}</p> : null}
 
         <form action={signInWithGoogle}>
-          <button className="button google-btn" type="submit" style={{ width: "100%" }}>
+          <button className="button google-btn" type="submit">
             <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -26,13 +37,23 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
         <div className="auth-divider">or with email</div>
 
-        <form style={{ display: "grid", gap: "15px" }}>
-          <label>Email<input name="email" type="email" autoComplete="email" placeholder="name@example.com" required /></label>
-          <label>Password<input name="password" type="password" autoComplete="current-password" minLength={8} placeholder="••••••••" required /></label>
-          <button formAction={signIn}>Sign in</button>
-          <button formAction={signUp} className="button secondary">Create account</button>
+        <form style={{ display: "grid", gap: "14px" }}>
+          <div className="form-group">
+            <label>Email</label>
+            <input name="email" type="email" autoComplete="email" placeholder="name@example.com" required />
+          </div>
+          <div className="form-group">
+            <label>Password</label>
+            <input name="password" type="password" autoComplete="current-password" minLength={8} placeholder="••••••••" required />
+          </div>
+          <button formAction={signIn} className="button primary" style={{ width: "100%", marginTop: "4px" }}>
+            Sign In
+          </button>
+          <button formAction={signUp} className="button secondary" style={{ width: "100%" }}>
+            Create Account
+          </button>
         </form>
       </div>
-    </main>
+    </div>
   );
 }

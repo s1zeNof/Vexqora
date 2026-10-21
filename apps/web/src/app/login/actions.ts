@@ -44,3 +44,9 @@ export async function signInWithGoogle() {
   if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
   if (data?.url) redirect(data.url);
 }
+
+export async function signOut() {
+  const supabase = await createSupabaseServerClient();
+  await supabase.auth.signOut();
+  redirect("/login");
+}

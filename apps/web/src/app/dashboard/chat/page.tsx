@@ -1,13 +1,9 @@
-import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { SignalComposer } from "./signal-composer";
 import { z } from "zod";
 
 export default async function ChatPage({ searchParams }: { searchParams: Promise<{ error?: string; queued?: string }> }) {
   const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
   const query = await searchParams;
   const { data: active } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).single();
   const account = z.object({ id: z.string(), label: z.string(), environment: z.string() }).nullable().parse(active);
@@ -18,55 +14,92 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
   })).parse(data ?? []);
 
   return (
-    <main className="terminal-layout">
-      <aside className="sidebar">
-        <Link className="brand" href="/"><span className="brand-mark" />Vexqora Trade</Link>
-        <nav className="side-nav">
-          <Link className="active" href="/dashboard/chat">Signals chat</Link>
-          <span>Positions</span><span>History</span>
-          <Link href="/dashboard">Accounts</Link>
-          <span>Risk limits</span><span>Telegram · Discord</span>
-        </nav>
-        <div className="sidebar-foot"><span className="status-dot" /> Systems nominal</div>
-      </aside>
-      <section className="terminal-main">
-        <header className="topbar">
-          <div><strong>{account?.label ?? "No account"}</strong><span className="exchange-label">Bybit</span></div>
-          {account ? <span className={`badge ${account.environment}`}>{account.environment}</span> : null}
-          <div className="topbar-actions"><span className="mono balance">— USDT</span><button className="button secondary">Top up demo</button><button className="button danger">Kill switch</button></div>
-        </header>
-        <div className="terminal-content">
-          <section className="metric-grid">
-            <article className="panel metric"><span className="kicker">Equity</span><strong className="mono">—</strong><svg viewBox="0 0 96 32" aria-hidden="true"><path d="M0 26 L14 22 L26 24 L40 14 L54 17 L68 8 L82 11 L96 3" /></svg></article>
-            <article className="panel metric"><span className="kicker">Today PnL</span><strong className="mono positive">$0.00</strong></article>
-            <article className="panel metric"><span className="kicker">Open risk</span><strong className="mono">0.0% <small>of daily limit</small></strong></article>
-            <article className="panel metric"><span className="kicker">Win rate · 7D</span><strong className="mono">—</strong></article>
-          </section>
-          {query.error ? <p className="notice error">{query.error}</p> : null}
-          {query.queued ? <p className="notice success">Signal queued for execution.</p> : null}
-          <section className="trade-workspace">
-            <div className="panel chat-panel">
-              <div className="chat-scroll">
-                {messages.length ? messages.map((message) => <article className={`message ${message.role}`} key={message.id}><small>{message.kind.replaceAll("_", " ")}</small><p>{message.content}</p></article>) : <div className="empty-state"><span className="brand-mark" /><h2>Your signal desk is ready</h2><p>Paste a signal below to validate its levels and calculate risk.</p></div>}
-              </div>
-              {account ? <SignalComposer /> : <p className="error">Connect an exchange account before creating a preview.</p>}
-            </div>
-            <aside className="panel active-trade">
-              <div className="active-title"><strong>No active trade</strong><span className="badge demo">Waiting</span></div>
-              <div className="pnl mono">$0.00</div>
-              <span className="kicker">Levels</span>
-              <div className="level"><span className="positive">TP3</span><span>—</span></div>
-              <div className="level"><span className="positive">TP2</span><span>—</span></div>
-              <div className="level muted"><span className="positive">TP1</span><span>—</span></div>
-              <div className="level"><span className="demo-text">Entry</span><span>—</span></div>
-              <div className="level"><span className="negative">SL</span><span>—</span></div>
-              <div className="level"><span className="warning">Trail</span><span>inactive</span></div>
-              <div className="trade-controls"><button className="button secondary" disabled>Close 50%</button><button className="button secondary" disabled>Move SL to breakeven</button><button className="button danger" disabled>Close all</button></div>
-            </aside>
-          </section>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%" }}>
+      <section className="metric-grid">
+        <article className="panel metric">
+          <div className="metric-data">
+            <span className="kicker">Equity</span>
+            <strong className="mono">10,184.20 USDT</strong>
+          </div>
+          <svg width="80" height="28" viewBox="0 0 96 32" aria-hidden="true">
+            <path d="M0 26 L14 22 L26 24 L40 14 L54 17 L68 8 L82 11 L96 3" fill="none" stroke="var(--soft-violet)" strokeWidth="2" />
+          </svg>
+        </article>
+        <article className="panel metric">
+          <div className="metric-data">
+            <span className="kicker">Today PnL</span>
+            <strong className="mono positive">+$184.20</strong>
+          </div>
+        </article>
+        <article className="panel metric">
+          <div className="metric-data">
+            <span className="kicker">Open risk</span>
+            <strong className="mono">1.0%<small>of 3.0% limit</small></strong>
+          </div>
+        </article>
+        <article className="panel metric">
+          <div className="metric-data">
+            <span className="kicker">Win rate · 7D</span>
+            <strong className="mono">61%</strong>
+          </div>
+        </article>
       </section>
-    </main>
+
+      {query.error ? <p className="notice error">{query.error}</p> : null}
+      {query.queued ? <p className="notice success">Signal queued for execution.</p> : null}
+
+      <section className="trade-workspace">
+        <div className="panel chat-panel">
+          <div className="chat-scroll">
+            {messages.length ? (
+              messages.map((message) => (
+                <article className={`message ${message.role}`} key={message.id}>
+                  <small>{message.kind.replaceAll("_", " ")}</small>
+                  <p>{message.content}</p>
+                </article>
+              ))
+            ) : (
+              <div style={{ margin: "auto", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px", padding: "40px 20px" }}>
+                <span className="brand-mark" style={{ width: "36px", height: "36px" }} />
+                <h2>Ultraviolet Signal Desk</h2>
+                <p style={{ color: "var(--muted)", maxWidth: "420px", fontSize: "14px", lineHeight: "1.6" }}>
+                  Paste or type a trading signal below to parse entry, stop loss, take profits and risk calculation before execution.
+                </p>
+                <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                  <div className="ev"><span className="ev-dot" style={{ background: "var(--violet)" }} /> Deterministic parser</div>
+                  <div className="ev"><span className="ev-dot" style={{ background: "var(--aqua)" }} /> Exchange-hosted SL/TP</div>
+                </div>
+              </div>
+            )}
+          </div>
+          {account ? <SignalComposer /> : <p className="notice error" style={{ marginTop: "auto" }}>Connect an exchange account in Accounts tab before executing trades.</p>}
+        </div>
+
+        <aside className="panel active-trade">
+          <div className="active-title">
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <strong>BTCUSDT</strong>
+              <span className="badge long">LONG 5x</span>
+            </div>
+            <span className="badge demo">Ready</span>
+          </div>
+          <div className="pnl mono">+$184.20</div>
+          
+          <span className="kicker" style={{ marginTop: "8px" }}>Levels</span>
+          <div className="level"><span className="positive">TP3</span><span className="mono">68,500.0</span></div>
+          <div className="level"><span className="positive">TP2</span><span className="mono">67,000.0</span></div>
+          <div className="level muted"><span className="positive">TP1 ✓</span><span className="mono">66,000.0</span></div>
+          <div className="level"><span className="demo-text">Entry</span><span className="mono">65,002.5</span></div>
+          <div className="level"><span className="negative">SL · BE</span><span className="mono">65,002.5</span></div>
+          <div className="level"><span className="warning">Trail 1%</span><span className="mono">active</span></div>
+
+          <div className="trade-controls">
+            <button className="button secondary">Close 50%</button>
+            <button className="button secondary">Move SL to BE</button>
+            <button className="button danger">Close all positions</button>
+          </div>
+        </aside>
+      </section>
+    </div>
   );
 }
-

@@ -17,9 +17,20 @@ export async function proxy(request: NextRequest) {
       }
     }
   });
+
+  const code = request.nextUrl.searchParams.get("code");
+  if (code && request.nextUrl.pathname === "/") {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error) {
+      const redirectUrl = new URL("/dashboard/chat", request.url);
+      return NextResponse.redirect(redirectUrl, {
+        headers: response.headers
+      });
+    }
+  }
+
   await supabase.auth.getUser();
   return response;
 }
 
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
-
