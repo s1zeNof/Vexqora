@@ -482,6 +482,95 @@ p.lead { color: var(--muted); font-size: clamp(15px, 2vw, 18px); line-height: 1.
   flex-wrap: wrap;
 }
 
+/* Channel Switcher Tabs */
+.channel-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.channel-tab {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font: 600 13px var(--font-sans), sans-serif;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all .15s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.channel-tab:hover {
+  color: var(--text);
+  background: var(--plum);
+}
+.channel-tab.active {
+  color: #fff;
+  background: #171229;
+  border-color: #7c4dff66;
+  box-shadow: 0 0 12px #7c4dff18;
+}
+
+/* Vexqora Pulse Cards */
+.pulse-card {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #0e0b1acc;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pulse-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pulse-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pulse-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pulse-tag {
+  font: 500 11px var(--font-mono), monospace;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #171229;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.pulse-rationale {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #c4bcdc;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #07050f80;
+  border-left: 2px solid var(--aqua);
+}
+.memory-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 11px var(--font-mono), monospace;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #35f2d014;
+  color: var(--aqua);
+  border: 1px solid #35f2d033;
+}
+
 /* Composer */
 .composer { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding-top: 16px; }
 .composer-bar { display: flex; gap: 10px; align-items: stretch; }

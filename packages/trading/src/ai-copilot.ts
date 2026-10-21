@@ -1,4 +1,5 @@
 import type { Signal } from "@crypto-bot/shared";
+import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
 
@@ -19,6 +20,7 @@ export interface AISignalOpportunity {
   takeProfits: Array<{ price: number; sharePct: number }>;
   trailingDistancePct: number;
   suggestedLeverage: number;
+  historicalMatch?: HistoricalPatternMatch;
 }
 
 export interface EnhancedSignalResult {
@@ -123,7 +125,8 @@ risk ${risk}%`;
       { price: tp3, sharePct: 25 }
     ],
     trailingDistancePct: 1,
-    suggestedLeverage: lev
+    suggestedLeverage: lev,
+    historicalMatch: findHistoricalPatternMatch(normSymbol, "liquidity_sweep", 2.5)
   };
 }
 

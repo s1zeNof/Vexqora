@@ -3,6 +3,7 @@
 import {
   createTradePreview,
   enhanceNemotronSignal,
+  findHistoricalPatternMatch,
   generateNemotronOpportunity,
   parseSignalText,
   type TradePreview
@@ -61,11 +62,12 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
     client.getTicker(symbol)
   ]);
 
-  // Powered by Nvidia Nemotron 3 Ultra 550B via OpenRouter
+  const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5);
   const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
     tickSize: instrument.tickSize,
     leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
-    riskPct: Number(settings.risk_per_trade_pct)
+    riskPct: Number(settings.risk_per_trade_pct),
+    historicalContext: hist
   });
 
   const { count: openPositions } = await supabase.from("trades")
@@ -113,12 +115,85 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
       opportunity: opp,
       preview,
       signalId: storedSignal.id,
-      rawSignal: opp.rawSignal
+      rawSignal: opp.rawSignal,
+      historicalMatch: hist
     }
   });
 
   revalidatePath("/dashboard/chat");
-  redirect("/dashboard/chat");
+  redirect("/dashboard/chat?tab=signals");
+}
+
+export async function analyzePulseAction(formData: FormData): Promise<void> {
+  const symbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
+  const rawAnomalyType = textField(formData, "eventType") || "liquidity_sweep";
+  const changePct = Number(textField(formData, "changePct") || "2.5");
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: rawAccount } = await supabase.from("exchange_accounts")
+    .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .single();
+  if (!rawAccount) redirect("/dashboard/accounts");
+  const account = accountConnectionSchema.parse(rawAccount);
+
+  const client = createAccountClient(account);
+  const [ticker, instrument] = await Promise.all([
+    client.getTicker(symbol),
+    client.getInstrument(symbol)
+  ]);
+
+  const hist = findHistoricalPatternMatch(symbol, rawAnomalyType, changePct);
+  const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
+    tickSize: instrument.tickSize,
+    historicalContext: hist
+  });
+
+  const { data: rawSettings } = await supabase.from("risk_settings")
+    .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
+    .eq("account_id", account.id)
+    .single();
+  const settings = riskRow.parse(rawSettings);
+
+  const balance = await client.getBalance();
+  const preview = createTradePreview(opp.parsedSignal, instrument, {
+    riskPerTradePct: settings.risk_per_trade_pct,
+    maxLeverage: settings.max_leverage,
+    maxOpenPositions: settings.max_open_positions,
+    maxDailyLossPct: settings.max_daily_loss_pct,
+    ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
+    killSwitch: settings.kill_switch
+  }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: 0, dailyPnl: 0 });
+
+  const { data: stored } = await supabase.from("signals").insert({
+    account_id: account.id,
+    raw_text: opp.rawSignal,
+    parsed: preview,
+    source: "chat",
+    status: "preview"
+  }).select("id").single();
+
+  const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+
+  await supabase.from("chat_messages").insert({
+    account_id: account.id,
+    role: "assistant",
+    kind: "ai_signal",
+    content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+    payload: {
+      opportunity: opp,
+      preview,
+      signalId: storedSignal.id,
+      rawSignal: opp.rawSignal,
+      historicalMatch: hist
+    }
+  });
+
+  revalidatePath("/dashboard/chat");
+  redirect("/dashboard/chat?tab=signals");
 }
 
 export async function enhanceSignalAction(formData: FormData): Promise<void> {
@@ -143,7 +218,6 @@ export async function enhanceSignalAction(formData: FormData): Promise<void> {
     client.getTicker(parsed.symbol)
   ]);
 
-  // Powered by Nvidia Nemotron 3 Ultra 550B
   const enhanced = await enhanceNemotronSignal(rawSignal, ticker.lastPrice, instrument.tickSize);
 
   const { data: rawSettings } = await supabase.from("risk_settings")
@@ -185,7 +259,7 @@ export async function enhanceSignalAction(formData: FormData): Promise<void> {
   });
 
   revalidatePath("/dashboard/chat");
-  redirect("/dashboard/chat");
+  redirect("/dashboard/chat?tab=signals");
 }
 
 export async function previewSignal(_previous: PreviewState, formData: FormData): Promise<PreviewState> {
@@ -205,7 +279,6 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
 
     const client = createAccountClient(account);
 
-    // If user asked to scan or typed just a coin ticker (e.g., "SOL", "BTC", "ETH", "scan SOL")
     const words = rawText.toUpperCase().split(/\s+/);
     const isScanRequest = rawText.toLowerCase().includes("scan") || (!rawText.includes("LONG") && !rawText.includes("SHORT"));
     if (isScanRequest) {
@@ -217,8 +290,11 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
         client.getInstrument(targetSymbol)
       ]);
 
-      // Use Nvidia Nemotron 3 Ultra
-      const opp = await generateNemotronOpportunity(targetSymbol, ticker.lastPrice, { tickSize: instrument.tickSize });
+      const hist = findHistoricalPatternMatch(targetSymbol, "liquidity_sweep", 2.5);
+      const opp = await generateNemotronOpportunity(targetSymbol, ticker.lastPrice, {
+        tickSize: instrument.tickSize,
+        historicalContext: hist
+      });
 
       const { data: rawSettings } = await supabase.from("risk_settings")
         .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
@@ -256,7 +332,8 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
             opportunity: opp,
             preview,
             signalId: storedSignal.id,
-            rawSignal: opp.rawSignal
+            rawSignal: opp.rawSignal,
+            historicalMatch: hist
           }
         }
       ]);

@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Signal } from "@crypto-bot/shared";
 import { getWorkerConfig } from "./config";
 import { logger } from "./logger";
+import { startPulseScanner } from "./pulse-scanner";
 import { reconcileOnStartup } from "./reconciler";
 import { processJob, type ExecutionJobData } from "./runner";
 
@@ -103,6 +104,9 @@ async function startWorker() {
   // Run startup reconciliation
   await reconcileOnStartup(supabase, config.masterKey);
 
+  // Start 24/7 Vexqora Pulse Universe Scanner
+  const stopPulse = startPulseScanner(supabase);
+
   logger.info({ pollIntervalMs: config.pollIntervalMs }, "Worker queue consumer active. Waiting for execution jobs...");
 
   let isRunning = true;
@@ -110,6 +114,7 @@ async function startWorker() {
   const shutdown = () => {
     logger.info("Shutdown signal received. Stopping worker loop...");
     isRunning = false;
+    stopPulse();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

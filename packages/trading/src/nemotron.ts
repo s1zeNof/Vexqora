@@ -1,5 +1,6 @@
 import type { AISignalOpportunity, EnhancedSignalResult } from "./ai-copilot";
 import { generateOpportunityFromTicker } from "./ai-copilot";
+import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
 
@@ -106,21 +107,24 @@ export async function generateNemotronOpportunity(
     tickSize?: number;
     riskPct?: number;
     leverage?: number;
+    historicalContext?: HistoricalPatternMatch;
   }
 ): Promise<AISignalOpportunity> {
   const normSymbol = symbol.toUpperCase();
   const tickSize = options?.tickSize ?? 0.1;
+  const hist = options?.historicalContext ?? findHistoricalPatternMatch(normSymbol, "liquidity_sweep", 2.5);
 
   try {
     const res = await callNemotron([
       {
         role: "system",
         content: `You are Vexqora AI Copilot powered by Nvidia Nemotron 3 Ultra 550B, an institutional cryptocurrency futures trader.
-Analyze the requested asset and output ONLY valid JSON matching this exact structure:
+Vexqora Memory Historical Context: Pattern matches "${hist.patternName}" (${hist.marketRegime}). Historical Sample Count: ${hist.sampleCount} episodes, ${hist.winRatePct}% historical win rate. ${hist.historicalContext}
+Analyze the requested asset with this historical edge in mind and output ONLY valid JSON matching this exact structure:
 {
   "symbol": "${normSymbol}",
   "side": "long" or "short",
-  "strategy": "concise institutional strategy name (e.g. Order Block Liquidity Sweep, Momentum Continuation, FVG Retest)",
+  "strategy": "concise institutional strategy name (e.g. ${hist.patternName})",
   "reasoning": "2-3 sentences of deep quantitative and structural reasoning for this trade",
   "stopLoss": number,
   "tp1": number,
@@ -136,7 +140,7 @@ Rules:
       },
       {
         role: "user",
-        content: `Asset: ${normSymbol}, Live Bybit Price: ${currentPrice} USDT. Formulate the highest probability setup.`
+        content: `Asset: ${normSymbol}, Live Bybit Price: ${currentPrice} USDT. Historical analog win-rate is ${hist.winRatePct}%. Formulate the highest probability setup.`
       }
     ]);
 
@@ -193,7 +197,8 @@ risk ${risk}%`;
             { price: tp3, sharePct: 25 }
           ],
           trailingDistancePct: 1,
-          suggestedLeverage: lev
+          suggestedLeverage: lev,
+          historicalMatch: hist
         };
       }
     }
