@@ -3,5 +3,5 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "npm run build --workspace=@crypto-bot/web",
-  "outputDirectory": "apps/web/.next"
+  "outputDirectory": ".next"
 }
