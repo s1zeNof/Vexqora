@@ -4,16 +4,25 @@ import { createSupabaseServerClient } from "../lib/supabase/server";
 
 export default async function HomePage({ searchParams }: { searchParams: Promise<{ code?: string }> }) {
   const params = await searchParams;
-  const supabase = await createSupabaseServerClient();
+  let user = null;
 
-  if (params.code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(params.code);
-    if (!error) {
-      redirect("/dashboard/chat");
+  try {
+    const supabase = await createSupabaseServerClient();
+
+    if (params.code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(params.code);
+      if (!error) {
+        redirect("/dashboard/chat");
+      }
+    }
+
+    const { data } = await supabase.auth.getUser();
+    user = data?.user ?? null;
+  } catch (error) {
+    if ((error as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")) {
+      throw error;
     }
   }
-
-  const { data: { user } } = await supabase.auth.getUser();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", width: "100%" }}>
