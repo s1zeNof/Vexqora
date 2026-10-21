@@ -13,7 +13,7 @@ interface AccountSummary {
 
 export default async function AccountsPage({ searchParams }: { searchParams: Promise<{ error?: string; connected?: string; paper?: string; toppedUp?: string }> }) {
   const supabase = await createSupabaseServerClient();
-  const query = await searchParams;
+  const query = (await searchParams) ?? {};
   const { data } = await supabase
     .from("exchange_accounts")
     .select("id, label, exchange, environment, is_active, created_at, paper_balance")
@@ -28,10 +28,10 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         <p className="lead">Start with Vexqora Paper without API keys. Connect Bybit only for exchange-backed demo or live execution.</p>
       </div>
 
-      {query.error ? <p className="notice error">{query.error}</p> : null}
-      {query.connected ? <p className="notice success">Bybit account verified and connected successfully.</p> : null}
-      {query.paper ? <p className="notice success">Vexqora Paper is ready with 10,000 virtual USDT.</p> : null}
-      {query.toppedUp ? <p className="notice success">Paper balance updated.</p> : null}
+      {query?.error ? <p className="notice error">{query.error}</p> : null}
+      {query?.connected ? <p className="notice success">Bybit account verified and connected successfully.</p> : null}
+      {query?.paper ? <p className="notice success">Vexqora Paper is ready with 10,000 virtual USDT.</p> : null}
+      {query?.toppedUp ? <p className="notice success">Paper balance updated.</p> : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: "16px" }}>
         {accounts.length ? (

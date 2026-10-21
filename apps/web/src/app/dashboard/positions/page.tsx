@@ -4,7 +4,7 @@ import { VexqoraLogo } from "../../../components/logo";
 
 export default async function PositionsPage() {
   const supabase = await createSupabaseServerClient();
-  const { data: active } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).single();
+  const { data: active } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).limit(1).maybeSingle();
   const trades = (active
     ? (await supabase.from("trades").select("*").eq("account_id", active.id).eq("status", "active")).data
     : []) as TradeRow[] | null;

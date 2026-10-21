@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export default async function HistoryPage() {
   const supabase = await createSupabaseServerClient();
-  const { data: active } = await supabase.from("exchange_accounts").select("id").eq("is_active", true).single();
+  const { data: active } = await supabase.from("exchange_accounts").select("id").eq("is_active", true).limit(1).maybeSingle();
   const closedTrades = (active
     ? (await supabase.from("trades").select("*").eq("account_id", active.id).order("opened_at", { ascending: false }).limit(50)).data
     : []) as TradeRow[] | null;

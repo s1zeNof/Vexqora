@@ -12,7 +12,7 @@ const messageSchema = z.object({
   role: z.string(),
   kind: z.string(),
   content: z.string(),
-  payload: z.record(z.string(), z.unknown()).nullable().optional(),
+  payload: z.unknown().optional(),
   created_at: z.string()
 });
 
@@ -34,13 +34,15 @@ export default async function ChatPage({
   searchParams: Promise<{ error?: string; queued?: string; tab?: string }>;
 }) {
   const supabase = await createSupabaseServerClient();
-  const query = await searchParams;
-  const activeTab = query.tab === "pulse" ? "pulse" : "signals";
+  const query = (await searchParams) ?? {};
+  const activeTab = query?.tab === "pulse" ? "pulse" : "signals";
 
-  const { data: rawAccount } = await supabase.from("exchange_accounts")
-    .select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
-    .eq("is_active", true).single();
-  const account = accountConnectionSchema.nullable().parse(rawAccount);
+  const { data: { user } } = await supabase.auth.getUser();
+  const rawAccountQuery = user
+    ? supabase.from("exchange_accounts").select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("user_id", user.id).eq("is_active", true).limit(1).maybeSingle()
+    : supabase.from("exchange_accounts").select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("is_active", true).limit(1).maybeSingle();
+  const { data: rawAccount } = await rawAccountQuery;
+  const account = accountConnectionSchema.nullable().safeParse(rawAccount).data ?? null;
   let balance: number | null = null;
   if (account) {
     try { balance = (await createAccountClient(account).getBalance()).equity; } catch { balance = null; }
@@ -53,10 +55,11 @@ export default async function ChatPage({
     supabase.from("trades").select("id, symbol, side, status, entry_avg, qty, leverage, sl, realized_pnl").eq("account_id", account.id).in("status", ["entry_open", "active"]).order("opened_at", { ascending: false }).limit(1),
     supabase.from("trades").select("realized_pnl").eq("account_id", account.id).gte("closed_at", dayStart.toISOString()),
     supabase.from("trades").select("realized_pnl").eq("account_id", account.id).gte("closed_at", weekStart).eq("status", "closed"),
-    supabase.from("risk_settings").select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch").eq("account_id", account.id).single()
+    supabase.from("risk_settings").select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch").eq("account_id", account.id).maybeSingle()
   ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: null }];
 
-  let messages = z.array(messageSchema).parse(messagesResult.data ?? []);
+  const parsedMessages = z.array(messageSchema).safeParse(messagesResult.data ?? []);
+  let messages = parsedMessages.success ? parsedMessages.data : [];
 
   // Proactive Seeding: If chat is empty, automatically seed live AI signal & market pulse
   if (account && messages.length === 0) {
@@ -131,7 +134,8 @@ export default async function ChatPage({
     }
   }
 
-  const activeTrade = z.array(tradeSchema).parse(openTradesResult.data ?? [])[0] ?? null;
+  const parsedTrades = z.array(tradeSchema).safeParse(openTradesResult.data ?? []);
+  const activeTrade = parsedTrades.success ? parsedTrades.data[0] ?? null : null;
   const todayPnl = (todayResult.data ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
   const weekly = weekResult.data ?? [];
   const winRate = weekly.length ? Math.round(weekly.filter((row: { realized_pnl: unknown }) => Number(row.realized_pnl ?? 0) > 0).length / weekly.length * 100) : null;
@@ -196,13 +200,13 @@ export default async function ChatPage({
             {activeTab === "pulse" ? (
               pulseMessages.length ? (
                 pulseMessages.map((message) => {
-                  const payload = message.payload as Record<string, unknown> | null;
-                  const symbol = typeof payload?.symbol === "string" ? payload.symbol : "BTCUSDT";
-                  const changePct = typeof payload?.changePct === "number" ? payload.changePct : 0;
-                  const timeframeSec = typeof payload?.timeframeSec === "number" ? payload.timeframeSec : 30;
-                  const eventType = typeof payload?.eventType === "string" ? payload.eventType : "price_spike";
-                  const rationale = typeof payload?.rationale === "string" ? payload.rationale : message.content;
-                  const hist = payload?.historicalMatch as HistoricalPatternMatch | undefined;
+                  const payload = (message.payload && typeof message.payload === "object" ? message.payload : {}) as Record<string, unknown>;
+                  const symbol = typeof payload.symbol === "string" ? payload.symbol : "BTCUSDT";
+                  const changePct = typeof payload.changePct === "number" ? payload.changePct : 0;
+                  const timeframeSec = typeof payload.timeframeSec === "number" ? payload.timeframeSec : 30;
+                  const eventType = typeof payload.eventType === "string" ? payload.eventType : "price_spike";
+                  const rationale = typeof payload.rationale === "string" ? payload.rationale : message.content;
+                  const hist = payload.historicalMatch && typeof payload.historicalMatch === "object" ? payload.historicalMatch as HistoricalPatternMatch : undefined;
 
                   return (
                     <article className="pulse-card" key={message.id}>
@@ -215,7 +219,7 @@ export default async function ChatPage({
                           <span className="badge demo">Bybit Linear</span>
                         </div>
                         <div className="pulse-tags">
-                          <span className="pulse-tag">{eventType.replace("_", " ").toUpperCase()}</span>
+                          <span className="pulse-tag">{eventType.replaceAll("_", " ").toUpperCase()}</span>
                           <span className="pulse-tag">HIGH VOLATILITY</span>
                         </div>
                       </div>
@@ -227,7 +231,7 @@ export default async function ChatPage({
                       {hist ? (
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                           <span className="memory-badge">
-                            Vexqora Memory: {hist.sampleCount} Historical Matches · {hist.winRatePct}% Win Rate
+                            Vexqora Memory: {Number(hist.sampleCount ?? 0)} Historical Matches · {Number(hist.winRatePct ?? 0)}% Win Rate
                           </span>
                         </div>
                       ) : null}
@@ -256,52 +260,59 @@ export default async function ChatPage({
             ) : (
               signalMessages.length ? (
                 signalMessages.map((message) => {
-                  const payload = message.payload as Record<string, unknown> | null;
-                  const opp = payload?.opportunity as { symbol?: string; side?: string; qualityScore?: number; qualityTier?: string; strategy?: string; rationale?: string; riskReward?: number; winProbabilityPct?: number; stopLoss?: number } | undefined;
-                  const preview = payload?.preview as { entryPrice?: number; qty?: number; notional?: number; riskAmount?: number; riskPct?: number; leverage?: number; weightedRewardRisk?: number } | undefined;
-                  const signalId = (payload?.signalId as string | undefined) ?? null;
-                  const rawSignal = (payload?.rawSignal as string | undefined) ?? null;
-                  const hist = payload?.historicalMatch as HistoricalPatternMatch | undefined;
+                  const payload = (message.payload && typeof message.payload === "object" ? message.payload : {}) as Record<string, unknown>;
+                  const opp = payload.opportunity && typeof payload.opportunity === "object" ? payload.opportunity as Record<string, unknown> : undefined;
+                  const preview = payload.preview && typeof payload.preview === "object" ? payload.preview as Record<string, unknown> : undefined;
+                  const signalId = typeof payload.signalId === "string" ? payload.signalId : null;
+                  const rawSignal = typeof payload.rawSignal === "string" ? payload.rawSignal : null;
+                  const hist = payload.historicalMatch && typeof payload.historicalMatch === "object" ? payload.historicalMatch as HistoricalPatternMatch : undefined;
+
+                  const oppSymbol = typeof opp?.symbol === "string" ? opp.symbol : "BTCUSDT";
+                  const oppSide = typeof opp?.side === "string" ? opp.side : "long";
+                  const oppQualityScore = typeof opp?.qualityScore === "number" ? opp.qualityScore.toFixed(1) : "9.2";
+                  const oppQualityTier = typeof opp?.qualityTier === "string" ? opp.qualityTier : "A+";
+                  const oppStrategy = typeof opp?.strategy === "string" ? opp.strategy : "Nemotron Strategy";
+                  const oppRationale = typeof opp?.rationale === "string" ? opp.rationale : message.content;
 
                   if (message.kind === "ai_signal" && opp) {
                     return (
                       <article className="ai-signal-card" key={message.id}>
                         <div className="ai-card-header">
                           <div className="ai-card-title">
-                            <strong style={{ fontSize: "16px" }}>{opp.symbol}</strong>
-                            <span className={`badge ${opp.side === "long" ? "long" : "short"}`}>
-                              {(opp.side ?? "LONG").toUpperCase()}
+                            <strong style={{ fontSize: "16px" }}>{oppSymbol}</strong>
+                            <span className={`badge ${oppSide === "long" ? "long" : "short"}`}>
+                              {oppSide.toUpperCase()}
                             </span>
-                            <span className="ai-score-badge">★ {opp.qualityScore ?? 9.2}/10 {opp.qualityTier ?? "A+"}</span>
+                            <span className="ai-score-badge">★ {oppQualityScore}/10 {oppQualityTier}</span>
                             {hist ? (
                               <span className="memory-badge">
-                                Memory: {hist.sampleCount} Matches · {hist.winRatePct}% Win Rate
+                                Memory: {Number(hist.sampleCount ?? 0)} Matches · {Number(hist.winRatePct ?? 0)}% Win Rate
                               </span>
                             ) : null}
                           </div>
-                          <span className="kicker">{opp.strategy}</span>
+                          <span className="kicker">{oppStrategy}</span>
                         </div>
 
                         <div className="ai-rationale">
-                          <strong>Nemotron Reasoning:</strong> {opp.rationale}
+                          <strong>Nemotron Reasoning:</strong> {oppRationale}
                         </div>
 
                         <div className="ai-setup-grid">
                           <div className="ai-setup-item">
                             <span>Entry Price</span>
-                            <strong>${preview?.entryPrice?.toLocaleString() ?? "Market"}</strong>
+                            <strong>${preview?.entryPrice != null ? Number(preview.entryPrice).toLocaleString() : "Market"}</strong>
                           </div>
                           <div className="ai-setup-item">
                             <span>Stop Loss</span>
-                            <strong className="negative">${opp.stopLoss?.toLocaleString() ?? "—"}</strong>
+                            <strong className="negative">${opp.stopLoss != null ? Number(opp.stopLoss).toLocaleString() : "—"}</strong>
                           </div>
                           <div className="ai-setup-item">
                             <span>Win Prob / R:R</span>
-                            <strong className="positive">{opp.winProbabilityPct}% · 1:{preview?.weightedRewardRisk?.toFixed(2) ?? opp.riskReward ?? 3.0}</strong>
+                            <strong className="positive">{Number(opp.winProbabilityPct ?? 70)}% · 1:{preview?.weightedRewardRisk != null ? Number(preview.weightedRewardRisk).toFixed(2) : (opp.riskReward != null ? Number(opp.riskReward).toFixed(2) : "3.00")}</strong>
                           </div>
                           <div className="ai-setup-item">
                             <span>Risk Allocation</span>
-                            <strong>${preview?.riskAmount?.toFixed(2) ?? "—"} ({preview?.riskPct?.toFixed(1) ?? 1}%)</strong>
+                            <strong>${preview?.riskAmount != null ? Number(preview.riskAmount).toFixed(2) : "—"} ({preview?.riskPct != null ? Number(preview.riskPct).toFixed(1) : "1.0"}%)</strong>
                           </div>
                         </div>
 
@@ -330,7 +341,7 @@ export default async function ChatPage({
 
                   return (
                     <article className={`message ${message.role}`} key={message.id}>
-                      <small>{message.kind.replaceAll("_", " ")}</small>
+                      <small>{String(message.kind || "").replaceAll("_", " ")}</small>
                       <p>{message.content}</p>
                     </article>
                   );

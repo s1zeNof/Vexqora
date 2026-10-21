@@ -6,9 +6,9 @@ import { updateProfile } from "../actions";
 export default async function ProfilePage({ searchParams }: { searchParams: Promise<{ saved?: string }> }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const profileRes = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
+  const profileRes = user ? await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle() : { data: null };
   const profile = profileRes.data as ProfileRow | null;
-  const query = await searchParams;
+  const query = (await searchParams) ?? {};
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%", maxWidth: "800px" }}>
