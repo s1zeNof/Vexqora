@@ -1,4 +1,4 @@
-import { createTradePreview, generateOpportunityFromTicker } from "@crypto-bot/trading";
+import { createTradePreview, generateNemotronOpportunity } from "@crypto-bot/trading";
 import { z } from "zod";
 import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
@@ -51,7 +51,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
 
   let messages = z.array(messageSchema).parse(messagesResult.data ?? []);
 
-  // Proactive AI Seeding: If chat is empty, automatically scan BTCUSDT live market & post initial opportunity
+  // Proactive Nemotron 3 Ultra Seeding: If chat is empty, automatically scan BTCUSDT live market & post initial opportunity
   if (account && messages.length === 0) {
     try {
       const client = createAccountClient(account);
@@ -59,7 +59,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
         client.getTicker("BTCUSDT"),
         client.getInstrument("BTCUSDT")
       ]);
-      const opp = generateOpportunityFromTicker("BTCUSDT", ticker.lastPrice, { tickSize: instrument.tickSize });
+      const opp = await generateNemotronOpportunity("BTCUSDT", ticker.lastPrice, { tickSize: instrument.tickSize });
       const riskRow = riskResult.data as { risk_per_trade_pct?: number; max_leverage?: number; max_open_positions?: number; max_daily_loss_pct?: number; kill_switch?: boolean } | null;
       const preview = createTradePreview(opp.parsedSignal, instrument, {
         riskPerTradePct: Number(riskRow?.risk_per_trade_pct ?? 1),
@@ -83,7 +83,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
           account_id: account.id,
           role: "assistant",
           kind: "ai_signal",
-          content: `AI Opportunity: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+          content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
           payload: {
             opportunity: opp,
             preview,
@@ -124,7 +124,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
           <div className="ai-scanner-bar">
             <div className="ai-scanner-pulse">
               <span className="ai-pulse-dot" />
-              <span>AI Copilot Live</span>
+              <span>Nemotron 3 Ultra 550B Live</span>
             </div>
             <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
               <input type="hidden" name="symbol" value="BTCUSDT" />
@@ -163,7 +163,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
                     </div>
 
                     <div className="ai-rationale">
-                      <strong>AI Edge:</strong> {opp.rationale}
+                      <strong>Nemotron Reasoning:</strong> {opp.rationale}
                     </div>
 
                     <div className="ai-setup-grid">
@@ -199,7 +199,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
                         <form action={enhanceSignalAction}>
                           <input type="hidden" name="rawSignal" value={rawSignal} />
                           <button className="button secondary" type="submit">
-                            ✨ AI Optimize & Tighten SL
+                            ✨ Nemotron Optimize & Tighten SL
                           </button>
                         </form>
                       ) : null}
@@ -218,7 +218,7 @@ export default async function ChatPage({ searchParams }: { searchParams: Promise
               <div className="empty-state">
                 <VexqoraLogo size={42} />
                 <h2>Vexqora Signal Desk</h2>
-                <p>AI Copilot is actively scanning Bybit market setups. Click a pair above to generate an immediate verified signal.</p>
+                <p>Nvidia Nemotron 3 Ultra is actively scanning Bybit market setups. Click a pair above to generate an immediate verified signal.</p>
               </div>
             )}
           </div>

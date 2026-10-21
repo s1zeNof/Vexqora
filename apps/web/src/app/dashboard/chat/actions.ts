@@ -2,8 +2,8 @@
 
 import {
   createTradePreview,
-  enhanceSignal,
-  generateOpportunityFromTicker,
+  enhanceNemotronSignal,
+  generateNemotronOpportunity,
   parseSignalText,
   type TradePreview
 } from "@crypto-bot/trading";
@@ -61,7 +61,8 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
     client.getTicker(symbol)
   ]);
 
-  const opp = generateOpportunityFromTicker(symbol, ticker.lastPrice, {
+  // Powered by Nvidia Nemotron 3 Ultra 550B via OpenRouter
+  const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
     tickSize: instrument.tickSize,
     leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
     riskPct: Number(settings.risk_per_trade_pct)
@@ -107,7 +108,7 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
     account_id: account.id,
     role: "assistant",
     kind: "ai_signal",
-    content: `AI Opportunity: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+    content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
     payload: {
       opportunity: opp,
       preview,
@@ -142,7 +143,8 @@ export async function enhanceSignalAction(formData: FormData): Promise<void> {
     client.getTicker(parsed.symbol)
   ]);
 
-  const enhanced = enhanceSignal(rawSignal, ticker.lastPrice, instrument.tickSize);
+  // Powered by Nvidia Nemotron 3 Ultra 550B
+  const enhanced = await enhanceNemotronSignal(rawSignal, ticker.lastPrice, instrument.tickSize);
 
   const { data: rawSettings } = await supabase.from("risk_settings")
     .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
@@ -214,7 +216,9 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
         client.getTicker(targetSymbol),
         client.getInstrument(targetSymbol)
       ]);
-      const opp = generateOpportunityFromTicker(targetSymbol, ticker.lastPrice, { tickSize: instrument.tickSize });
+
+      // Use Nvidia Nemotron 3 Ultra
+      const opp = await generateNemotronOpportunity(targetSymbol, ticker.lastPrice, { tickSize: instrument.tickSize });
 
       const { data: rawSettings } = await supabase.from("risk_settings")
         .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
@@ -247,7 +251,7 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
           account_id: account.id,
           role: "assistant",
           kind: "ai_signal",
-          content: `AI Opportunity: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+          content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
           payload: {
             opportunity: opp,
             preview,
