@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BybitClient, signBybitHmac } from "./bybit.js";
+import { BybitClient, signBybitHmac } from "./bybit";
 
 describe("BybitClient", () => {
   it("creates the documented HMAC SHA-256 signature", () => {

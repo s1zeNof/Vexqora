@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { signalSchema } from "./signal.js";
+import { signalSchema } from "./signal";
 
 describe("signalSchema", () => {
   it("accepts a valid multi-target signal", () => {

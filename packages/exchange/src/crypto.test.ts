@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptSecret, encryptSecret } from "./crypto.js";
+import { decryptSecret, encryptSecret } from "./crypto";
 
 describe("secret encryption", () => {
   it("round-trips with AES-256-GCM without embedding plaintext", () => {
