@@ -1,0 +1,56 @@
+import type { ExchangeClient, OrderAck, OrderRequest, TradingStopParams } from "@crypto-bot/shared";
+import { describe, expect, it, vi } from "vitest";
+import { protectFilledPosition, reduceTradeStatus, submitEntry } from "./executor";
+import type { TradePreview } from "./risk";
+
+function mockClient(label: string) {
+  const calls: unknown[] = [];
+  const client: ExchangeClient = {
+    capabilities: { requestDemoFunds: label === "demo", nativeTrailingStop: true },
+    getBalance: vi.fn(), getInstrument: vi.fn(), getTicker: vi.fn(), cancelOrder: vi.fn(),
+    getPositions: vi.fn(), getOpenOrders: vi.fn(), closePosition: vi.fn(), subscribeUserStream: vi.fn(),
+    setLeverage: vi.fn((symbol: string, leverage: number) => { calls.push(["setLeverage", symbol, leverage]); return Promise.resolve(); }),
+    placeOrder: vi.fn((order: OrderRequest): Promise<OrderAck> => {
+      calls.push(["placeOrder", order]);
+      return Promise.resolve({ orderId: `order-${calls.length}`, orderLinkId: order.orderLinkId });
+    }),
+    setTradingStop: vi.fn((params: TradingStopParams) => { calls.push(["setTradingStop", params]); return Promise.resolve(); })
+  };
+  return { client, calls };
+}
+
+const preview: TradePreview = {
+  signal: {
+    symbol: "BTCUSDT", side: "long", entry: { type: "limit", price: 65_000 }, stopLoss: 64_000,
+    takeProfits: [{ price: 66_000, sharePct: 40 }, { price: 67_000, sharePct: 60 }], source: "chat"
+  },
+  entryPrice: 65_000, qty: 0.1, qtyStep: 0.001, tickSize: 0.1, notional: 6_500, riskAmount: 100, riskPct: 1, leverage: 5, weightedRewardRisk: 1.6
+};
+
+describe("executor", () => {
+  it("uses the exact same execution sequence for demo and live clients", async () => {
+    const demo = mockClient("demo");
+    const live = mockClient("live");
+    await submitEntry(demo.client, preview, "trade-1");
+    await protectFilledPosition(demo.client, preview, "trade-1");
+    await submitEntry(live.client, preview, "trade-1");
+    await protectFilledPosition(live.client, preview, "trade-1");
+    expect(demo.calls).toEqual(live.calls);
+  });
+
+  it("places stop protection before reduce-only targets", async () => {
+    const mock = mockClient("demo");
+    await protectFilledPosition(mock.client, preview, "trade-1");
+    expect(mock.calls[0]).toEqual(["setTradingStop", { symbol: "BTCUSDT", stopLoss: 64_000 }]);
+    expect(mock.calls).toHaveLength(3);
+    expect(mock.calls[1]).toMatchObject(["placeOrder", { reduceOnly: true, qty: 0.04 }]);
+    expect(mock.calls[2]).toMatchObject(["placeOrder", { reduceOnly: true, qty: 0.06 }]);
+  });
+
+  it("rejects invalid state transitions", () => {
+    expect(reduceTradeStatus("pending", { type: "ENTRY_SUBMITTED" })).toBe("entry_open");
+    expect(reduceTradeStatus("entry_open", { type: "ENTRY_FILLED" })).toBe("active");
+    expect(() => reduceTradeStatus("closed", { type: "ENTRY_FILLED" })).toThrow("Invalid trade transition");
+  });
+});
+

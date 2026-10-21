@@ -1,0 +1,27 @@
+{
+  "name": "@crypto-bot/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@crypto-bot/exchange": "*",
+    "@crypto-bot/shared": "*",
+    "@crypto-bot/trading": "*",
+    "dotenv": "latest",
+    "pino": "latest"
+  },
+  "devDependencies": {
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}
+
