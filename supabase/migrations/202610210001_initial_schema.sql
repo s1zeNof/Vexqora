@@ -59,7 +59,7 @@ create table public.trades (
   qty numeric,
   leverage numeric,
   sl numeric,
-  trailing jsonb,
+  trailing_stop jsonb,
   realized_pnl numeric,
   opened_at timestamptz,
   closed_at timestamptz
