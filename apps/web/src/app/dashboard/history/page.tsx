@@ -1,9 +1,12 @@
+import type { TradeRow } from "@crypto-bot/shared";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export default async function HistoryPage() {
   const supabase = await createSupabaseServerClient();
   const { data: active } = await supabase.from("exchange_accounts").select("id").eq("is_active", true).single();
-  const { data: closedTrades } = active ? await supabase.from("trades").select("*").eq("account_id", active.id).order("opened_at", { ascending: false }).limit(50) : { data: [] };
+  const closedTrades = (active
+    ? (await supabase.from("trades").select("*").eq("account_id", active.id).order("opened_at", { ascending: false }).limit(50)).data
+    : []) as TradeRow[] | null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>

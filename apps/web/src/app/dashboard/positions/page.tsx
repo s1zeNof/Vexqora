@@ -1,10 +1,13 @@
+import type { TradeRow } from "@crypto-bot/shared";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { VexqoraLogo } from "../../../components/logo";
 
 export default async function PositionsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: active } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).single();
-  const { data: trades } = active ? await supabase.from("trades").select("*").eq("account_id", active.id).eq("status", "active") : { data: [] };
+  const trades = (active
+    ? (await supabase.from("trades").select("*").eq("account_id", active.id).eq("status", "active")).data
+    : []) as TradeRow[] | null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
@@ -58,7 +61,7 @@ export default async function PositionsPage() {
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
                     <VexqoraLogo size={36} />
                     <p style={{ fontSize: "15px", fontWeight: "600", color: "var(--text)" }}>No active open positions</p>
-                    <p style={{ fontSize: "13px" }}>Signals executed through the Signals Chat desk will appear here in real time.</p>
+                    <p style={{ fontSize: "13px" }}>Executed trades will display live position telemetry, trailing state and instant close triggers here.</p>
                   </div>
                 </td>
               </tr>

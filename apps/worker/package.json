@@ -15,8 +15,10 @@
     "@crypto-bot/exchange": "*",
     "@crypto-bot/shared": "*",
     "@crypto-bot/trading": "*",
+    "@supabase/supabase-js": "latest",
     "dotenv": "latest",
-    "pino": "latest"
+    "pino": "latest",
+    "zod": "latest"
   },
   "devDependencies": {
     "tsx": "latest",

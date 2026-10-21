@@ -1,10 +1,12 @@
+import type { ProfileRow } from "@crypto-bot/shared";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { signOut } from "../../login/actions";
 
 export default async function ProfilePage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
+  const profileRes = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
+  const profile = profileRes.data as ProfileRow | null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%", maxWidth: "800px" }}>
@@ -25,7 +27,7 @@ export default async function ProfilePage() {
             <div className="kicker">Authentication Provider</div>
             <div style={{ marginTop: "6px" }}>
               <span className="badge" style={{ background: "#4285f422", color: "#4285f4", border: "1px solid #4285f444" }}>
-                {user?.app_metadata?.provider ? `Connected via ${user.app_metadata.provider.toUpperCase()}` : "Email / Password"}
+                {user?.app_metadata?.provider ? `Connected via ${String(user.app_metadata.provider).toUpperCase()}` : "Email / Password"}
               </span>
             </div>
           </div>
@@ -48,7 +50,9 @@ export default async function ProfilePage() {
           Sign out of your active browser session on this device.
         </p>
         <form action={signOut} style={{ marginTop: "16px" }}>
-          <button className="button danger" type="submit">Sign Out of Vexqora</button>
+          <button className="button danger" type="submit">
+            Log Out of Vexqora
+          </button>
         </form>
       </div>
     </div>

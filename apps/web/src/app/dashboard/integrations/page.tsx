@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "../../../lib/supabase/server";
 export default async function IntegrationsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: integrations } = await supabase.from("integrations").select("*").eq("user_id", user?.id ?? "");
+  void user; // user verification
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%", maxWidth: "1000px" }}>

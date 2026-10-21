@@ -1,9 +1,11 @@
+import type { RiskSettingsRow } from "@crypto-bot/shared";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export default async function RiskSettingsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: active } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).single();
-  const { data: risk } = active ? await supabase.from("risk_settings").select("*").eq("account_id", active.id).single() : { data: null };
+  const riskRes = active ? await supabase.from("risk_settings").select("*").eq("account_id", active.id).single() : { data: null };
+  const risk = riskRes.data as RiskSettingsRow | null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%", maxWidth: "1000px" }}>
