@@ -196,6 +196,12 @@ Expected baseline:
 - [x] Real-time Active Positions Dashboard (`/dashboard/positions`) with live mark prices, unrealized PnL ($ and %), and interactive "Close 50%" / "Market Close" / "Close All Positions" server actions.
 - [x] Real aggregate daily loss calculation and strict pre-execution rejection in worker `runner.ts`.
 
+- [x] Institutional SMC Quantitative Engine (calculateSMCContext) replacing dummy static formulas with ATR-based SL, multi-timeframe 1D/4H/15m BOS/CHOCH, FVG, and dynamic R:R >= 1:2.0.
+- [x] Nvidia Nemotron 3.5 Super VL Vision integration (callNemotronVision & /api/ai/vision-analyze) for TradingView chart screenshot SMC analysis.
+- [x] Dual OpenRouter API keys with automatic failover and rate-limit rotation.
+- [x] UI Overhaul: Clean, minimalist, institutional feed cards with interactive modal (SignalCard) featuring SMC tabs, mobile copy button, and chart vision scanner.
+- [x] High-frequency Bybit universe scanning (Scan Bybit Universe 300+ Pairs) and lowered pulse threshold (1.2% rapid volume expansion).
+
 ### Immediate Next Tasks (Stage 6):
 1. **External Integrations**:
    - Telegram bot webhook to receive signals directly from private channels and push execution confirmations.

@@ -56,8 +56,8 @@ export function startPulseScanner(
                 }
               });
 
-              // If extreme impulse (>3.5%), automatically evaluate with Nemotron 3 Ultra
-              if (Math.abs(anomaly.changePct) >= 3.5) {
+              // If anomaly detected (>=1.2% rapid momentum, sweep or breakout), evaluate for AI Signal
+              if (Math.abs(anomaly.changePct) >= 1.2 || anomaly.eventType === "volume_spike") {
                 try {
                   const opp = await generateNemotronOpportunity(anomaly.symbol, anomaly.price, {
                     historicalContext: anomaly.historicalMatch

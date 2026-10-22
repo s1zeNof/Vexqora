@@ -38,7 +38,10 @@ const riskRow = z.object({
 
 export async function scanMarketOpportunityAction(formData: FormData): Promise<void> {
   try {
-    const symbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
+    const rawSymbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
+    const symbolsToScan = (rawSymbol === "ALL" || rawSymbol === "UNIVERSE")
+      ? ["SOLUSDT", "SUIUSDT", "BTCUSDT", "ETHUSDT"]
+      : [rawSymbol];
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) redirect("/login");
@@ -67,21 +70,7 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
     };
 
     const client = createAccountClient(account);
-    const [balance, instrument, ticker, klines] = await Promise.all([
-      client.getBalance(),
-      client.getInstrument(symbol),
-      client.getTicker(symbol),
-      fetchRecentKlines(symbol, "15", 15).catch(() => [])
-    ]);
-
-    const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5, klines);
-    const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
-      tickSize: instrument.tickSize,
-      leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
-      riskPct: Number(settings.risk_per_trade_pct),
-      historicalContext: hist,
-      klines
-    });
+    const balance = await client.getBalance();
 
     const { count: openPositions } = await supabase.from("trades")
       .select("id", { count: "exact", head: true })
@@ -96,42 +85,60 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
       .gte("closed_at", dayStart.toISOString());
     const dailyPnl = (pnlRows ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
 
-    const preview = createTradePreview(opp.parsedSignal, instrument, {
-      riskPerTradePct: settings.risk_per_trade_pct,
-      maxLeverage: settings.max_leverage,
-      maxOpenPositions: settings.max_open_positions,
-      maxDailyLossPct: settings.max_daily_loss_pct,
-      ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
-      killSwitch: settings.kill_switch
-    }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: openPositions ?? 0, dailyPnl });
+    for (const symbol of symbolsToScan) {
+      try {
+        const [instrument, ticker, klines] = await Promise.all([
+          client.getInstrument(symbol),
+          client.getTicker(symbol),
+          fetchRecentKlines(symbol, "15", 15).catch(() => [])
+        ]);
 
-    const { data: stored, error: insertError } = await supabase.from("signals").insert({
-      account_id: account.id,
-      raw_text: opp.rawSignal,
-      parsed: preview,
-      source: "chat",
-      status: "preview"
-    }).select("id").limit(1).maybeSingle();
+        const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5, klines);
+        const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
+          tickSize: instrument.tickSize,
+          leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
+          riskPct: Number(settings.risk_per_trade_pct),
+          historicalContext: hist,
+          klines
+        });
 
-    if (insertError || !stored) {
-      redirect(`/dashboard/chat?error=${encodeURIComponent(insertError?.message ?? "Failed to save signal")}`);
-    }
+        const preview = createTradePreview(opp.parsedSignal, instrument, {
+          riskPerTradePct: settings.risk_per_trade_pct,
+          maxLeverage: settings.max_leverage,
+          maxOpenPositions: settings.max_open_positions,
+          maxDailyLossPct: settings.max_daily_loss_pct,
+          ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
+          killSwitch: settings.kill_switch
+        }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: openPositions ?? 0, dailyPnl });
 
-    const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+        const { data: stored } = await supabase.from("signals").insert({
+          account_id: account.id,
+          raw_text: opp.rawSignal,
+          parsed: preview,
+          source: "chat",
+          status: "preview"
+        }).select("id").limit(1).maybeSingle();
 
-    await supabase.from("chat_messages").insert({
-      account_id: account.id,
-      role: "assistant",
-      kind: "ai_signal",
-      content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
-      payload: {
-        opportunity: opp,
-        preview,
-        signalId: storedSignal.id,
-        rawSignal: opp.rawSignal,
-        historicalMatch: hist
+        if (stored) {
+          const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+          await supabase.from("chat_messages").insert({
+            account_id: account.id,
+            role: "assistant",
+            kind: "ai_signal",
+            content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
+            payload: {
+              opportunity: opp,
+              preview,
+              signalId: storedSignal.id,
+              rawSignal: opp.rawSignal,
+              historicalMatch: hist
+            }
+          });
+        }
+      } catch (scanErr) {
+        console.warn(`Scan error for ${symbol}:`, scanErr);
       }
-    });
+    }
 
     revalidatePath("/dashboard/chat");
     redirect("/dashboard/chat?tab=signals");

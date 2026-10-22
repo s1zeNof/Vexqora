@@ -1,12 +1,13 @@
 import { fetchRecentKlines } from "@crypto-bot/exchange";
-import { createTradePreview, generateNemotronOpportunity, type HistoricalPatternMatch } from "@crypto-bot/trading";
+import { createTradePreview, generateNemotronOpportunity, type AISignalOpportunity, type HistoricalPatternMatch, type TradePreview } from "@crypto-bot/trading";
 import Link from "next/link";
 import { z } from "zod";
 import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { closeAllPositions, closeTradePosition } from "../actions";
-import { analyzePulseAction, confirmSignal, enhanceSignalAction, scanMarketOpportunityAction } from "./actions";
+import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
+import { SignalCard } from "./signal-card";
 import { SignalComposer } from "./signal-composer";
 
 function formatTimeAgo(dateInput?: string | number | null): string {
@@ -309,149 +310,25 @@ export default async function ChatPage({
               signalMessages.length ? (
                 signalMessages.map((message) => {
                   const payload = (message.payload && typeof message.payload === "object" ? message.payload : {}) as Record<string, unknown>;
-                  const opp = payload.opportunity && typeof payload.opportunity === "object" ? payload.opportunity as Record<string, unknown> : undefined;
-                  const preview = payload.preview && typeof payload.preview === "object" ? payload.preview as Record<string, unknown> : undefined;
+                  const opp = payload.opportunity && typeof payload.opportunity === "object" ? payload.opportunity as unknown as AISignalOpportunity : undefined;
+                  const preview = payload.preview && typeof payload.preview === "object" ? payload.preview as unknown as TradePreview : undefined;
                   const signalId = typeof payload.signalId === "string" ? payload.signalId : null;
                   const rawSignal = typeof payload.rawSignal === "string" ? payload.rawSignal : null;
                   const hist = payload.historicalMatch && typeof payload.historicalMatch === "object" ? payload.historicalMatch as HistoricalPatternMatch : undefined;
 
-                  const previewSignal = preview?.signal as { symbol?: string; side?: string; stopLoss?: number; takeProfits?: Array<{ price: number; sharePct: number }>; leverage?: number } | undefined;
-
-                  const oppSymbol = typeof opp?.symbol === "string" ? opp.symbol : (previewSignal?.symbol ?? "BTCUSDT");
-                  const oppSide = (typeof opp?.side === "string" ? opp.side : (previewSignal?.side ?? "long")) as "long" | "short";
-                  const oppQualityScore = typeof opp?.qualityScore === "number" ? opp.qualityScore.toFixed(1) : "9.2";
-                  const oppQualityTier = typeof opp?.qualityTier === "string" ? opp.qualityTier : "A+";
-                  const oppStrategy = typeof opp?.strategy === "string" ? opp.strategy : "Institutional Setup";
-                  const oppRationale = typeof opp?.rationale === "string" ? opp.rationale : message.content;
-
-                  const entryPrice = preview?.entryPrice != null ? Number(preview.entryPrice) : (opp?.entryPrice != null ? Number(opp.entryPrice) : Number(opp?.currentPrice ?? 0));
-                  const stopLoss = opp?.stopLoss != null ? Number(opp.stopLoss) : (previewSignal?.stopLoss != null ? Number(previewSignal.stopLoss) : 0);
-                  const leverage = preview?.leverage != null ? Number(preview.leverage) : (opp?.suggestedLeverage != null ? Number(opp.suggestedLeverage) : 5);
-                  const riskPct = preview?.riskPct != null ? Number(preview.riskPct).toFixed(1) : "1.0";
-                  const riskAmount = preview?.riskAmount != null ? Number(preview.riskAmount).toFixed(2) : null;
-                  const qty = preview?.qty != null ? Number(preview.qty) : 0;
-                  const winProb = Number(opp?.winProbabilityPct ?? 70);
-                  const rr = preview?.weightedRewardRisk != null ? Number(preview.weightedRewardRisk).toFixed(2) : (opp?.riskReward != null ? Number(opp.riskReward).toFixed(2) : "3.00");
-
-                  const rawTps = (opp?.takeProfits as Array<{ price: number; sharePct: number }> | undefined) ?? previewSignal?.takeProfits ?? [];
-                  const takeProfits = rawTps.map((t, idx) => {
-                    const price = Number(t.price);
-                    const sharePct = Number(t.sharePct);
-                    const pctGain = entryPrice > 0 ? (oppSide === "long" ? ((price - entryPrice) / entryPrice) * 100 : ((entryPrice - price) / entryPrice) * 100) : 0;
-                    const estProfit = qty > 0 ? (oppSide === "long" ? (price - entryPrice) * qty * (sharePct / 100) : (entryPrice - price) * qty * (sharePct / 100)) : 0;
-                    return { idx: idx + 1, price, sharePct, pctGain: Number(pctGain.toFixed(2)), estProfit: Number(estProfit.toFixed(2)) };
-                  });
-
-                  const maxTotalProfit = takeProfits.reduce((acc, curr) => acc + curr.estProfit, 0);
-                  const slPct = entryPrice > 0 ? (oppSide === "long" ? ((entryPrice - stopLoss) / entryPrice) * 100 : ((stopLoss - entryPrice) / entryPrice) * 100) : 0;
-
                   if ((message.kind === "ai_signal" && opp) || message.kind === "signal_preview") {
                     return (
-                      <article className="ai-signal-card" key={message.id}>
-                        <div className="ai-card-header">
-                          <div className="ai-card-title">
-                            <strong style={{ fontSize: "16px" }}>{oppSymbol}</strong>
-                            <span className={`badge ${oppSide === "long" ? "long" : "short"}`}>
-                              {oppSide.toUpperCase()} {leverage}x
-                            </span>
-                            <span className="ai-score-badge">★ {oppQualityScore}/10 {oppQualityTier}</span>
-                            {hist ? (
-                              <span className="memory-badge">
-                                Memory: {Number(hist.sampleCount ?? 0)} Matches · {Number(hist.winRatePct ?? 0)}% Win Rate
-                              </span>
-                            ) : null}
-                            <span className="pulse-tag mono" style={{ color: "var(--soft-violet)", marginLeft: "auto" }}>
-                              ⏱ {formatTimeAgo(message.created_at)}
-                            </span>
-                          </div>
-                          <span className="kicker">{oppStrategy}</span>
-                        </div>
-
-                        <div className="ai-rationale">
-                          <strong>Nemotron Reasoning:</strong> {oppRationale}
-                        </div>
-
-                        <div className="ai-setup-grid">
-                          <div className="ai-setup-item">
-                            <span>Вхід (Entry)</span>
-                            <strong>${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}</strong>
-                          </div>
-                          <div className="ai-setup-item">
-                            <span>Стоп-лосс (SL)</span>
-                            <strong className="negative">${stopLoss > 0 ? stopLoss.toLocaleString() : "—"} (-{slPct.toFixed(2)}%)</strong>
-                          </div>
-                          <div className="ai-setup-item">
-                            <span>Win Prob / R:R</span>
-                            <strong className="positive">{winProb}% · 1:{rr}</strong>
-                          </div>
-                          <div className="ai-setup-item">
-                            <span>Ризик (Risk)</span>
-                            <strong>{riskAmount ? `$${riskAmount}` : "—"} ({riskPct}%)</strong>
-                          </div>
-                        </div>
-
-                        {takeProfits.length > 0 ? (
-                          <div className="ai-targets-section">
-                            <div className="ai-targets-header">
-                              <span className="kicker" style={{ color: "var(--aqua)", fontWeight: "600" }}>
-                                🎯 Take Profit Targets (Фіксація прибутку / Вихід)
-                              </span>
-                              {maxTotalProfit > 0 ? (
-                                <span className="mono positive" style={{ fontWeight: "700" }}>
-                                  Очікуваний прибуток: +${maxTotalProfit.toFixed(2)}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="ai-targets-grid">
-                              {takeProfits.map((tp) => (
-                                <div className="ai-target-item" key={tp.idx}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                    <span className="target-badge">TP {tp.idx}</span>
-                                    <span style={{ fontSize: "10px", color: "var(--soft-violet)" }}>{tp.sharePct}% позиції</span>
-                                  </div>
-                                  <strong className="target-price">${tp.price.toLocaleString()}</strong>
-                                  <span className="target-meta positive">
-                                    +{tp.pctGain}% {tp.estProfit > 0 ? `(+$${tp.estProfit.toFixed(2)})` : ""}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        <div className="signal-quick-text">
-                          <div className="quick-text-header">
-                            📱 Інструкція для входу з телефону (Bybit Mobile / Manual):
-                          </div>
-                          <pre className="signal-pre">
-{`#${oppSymbol} ${oppSide.toUpperCase()} ${leverage}x
-📍 Вхід: $${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}
-🛑 Стоп-лосс: $${stopLoss.toLocaleString()} (-${slPct.toFixed(2)}%)
-${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctGain}%) [${t.sharePct}%]`).join("\n")}
-${maxTotalProfit > 0 ? `💰 Очікуваний профіт: +$${maxTotalProfit.toFixed(2)}\n` : ""}⚖️ Плече: ${leverage}x | Ризик: ${riskPct}%`}
-                          </pre>
-                        </div>
-
-                        <div className="ai-card-actions">
-                          {signalId ? (
-                            <form action={confirmSignal}>
-                              <input type="hidden" name="signalId" value={signalId} />
-                              <button className="button primary" type="submit">
-                                🚀 Confirm & Execute Trade
-                              </button>
-                            </form>
-                          ) : null}
-
-                          {rawSignal ? (
-                            <form action={enhanceSignalAction}>
-                              <input type="hidden" name="rawSignal" value={rawSignal} />
-                              <button className="button secondary" type="submit">
-                                ✨ Nemotron Optimize & Tighten SL
-                              </button>
-                            </form>
-                          ) : null}
-                        </div>
-                      </article>
+                      <SignalCard
+                        key={message.id}
+                        messageId={message.id}
+                        createdAt={message.created_at}
+                        opp={opp}
+                        preview={preview}
+                        signalId={signalId}
+                        rawSignal={rawSignal}
+                        hist={hist}
+                        formatTimeAgo={formatTimeAgo}
+                      />
                     );
                   }
 
