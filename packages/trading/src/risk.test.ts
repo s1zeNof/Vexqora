@@ -34,4 +34,18 @@ describe("risk preview", () => {
     expect(roundToStep(0.12399, 0.001, "down")).toBe(0.123);
     expect(roundToStep(65_000.04, 0.1)).toBe(65_000);
   });
+
+  it("sizes accurately when customMargin is explicitly provided", () => {
+    // Custom margin $100 with 5x leverage -> Notional $500 -> 500 / 65,000 = 0.007692 -> 0.007 BTC
+    const preview = createTradePreview(longSignal, instrument, settings, {
+      balance: 10_000,
+      marketPrice: 65_000,
+      openPositions: 0,
+      dailyPnl: 0,
+      customMargin: 100
+    });
+    expect(preview.qty).toBe(0.007);
+    expect(preview.notional).toBe(455);
+    expect(preview.riskAmount).toBe(7);
+  });
 });

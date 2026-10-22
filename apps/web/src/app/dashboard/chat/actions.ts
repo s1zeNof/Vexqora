@@ -486,6 +486,9 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
 
 export async function confirmSignal(formData: FormData) {
   const signalId = textField(formData, "signalId");
+  const marginStr = textField(formData, "margin");
+  const customMargin = marginStr && !isNaN(Number(marginStr)) && Number(marginStr) > 0 ? Number(marginStr) : undefined;
+
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -503,7 +506,7 @@ export async function confirmSignal(formData: FormData) {
 
   if (signalErr || !signalRow) {
     revalidatePath("/dashboard/chat");
-    redirect("/dashboard/chat?queued=1");
+    redirect("/dashboard/chat?error=Signal+not+found");
   }
 
   const signal = z.object({
@@ -523,7 +526,7 @@ export async function confirmSignal(formData: FormData) {
 
   if (accErr || !rawAccount) {
     revalidatePath("/dashboard/chat");
-    redirect("/dashboard/chat?queued=1");
+    redirect("/dashboard/chat?error=Account+not+found");
   }
 
   const account = accountConnectionSchema.parse(rawAccount);
@@ -591,22 +594,29 @@ export async function confirmSignal(formData: FormData) {
           });
         })();
 
-    // 6. Build or extract preview
-    let preview: TradePreview;
+    // 6. Build or extract preview with customMargin if supplied
+    let preview: TradePreview | undefined;
     const rawParsed = signal.parsed;
+    let parsedSignal: Signal | null = null;
+
     if (rawParsed && typeof rawParsed === "object" && "signal" in rawParsed && "entryPrice" in rawParsed && "qty" in rawParsed) {
-      preview = rawParsed as TradePreview;
-    } else {
-      let parsedSignal: Signal;
-      if (rawParsed && typeof rawParsed === "object" && "symbol" in rawParsed && "side" in rawParsed) {
-        parsedSignal = rawParsed as Signal;
+      if (!customMargin) {
+        preview = rawParsed as TradePreview;
       } else {
-        parsedSignal = parseSignalText(signal.raw_text ?? "", "chat");
+        parsedSignal = (rawParsed as TradePreview).signal;
       }
+    } else if (rawParsed && typeof rawParsed === "object" && "symbol" in rawParsed && "side" in rawParsed) {
+      parsedSignal = rawParsed as Signal;
+    } else {
+      parsedSignal = parseSignalText(signal.raw_text ?? "", "chat");
+    }
+
+    if (!preview) {
+      const sym = parsedSignal?.symbol ?? "BTCUSDT";
       const [balance, instrument, ticker] = await Promise.all([
         client.getBalance(),
-        client.getInstrument(parsedSignal.symbol),
-        client.getTicker(parsedSignal.symbol)
+        client.getInstrument(sym),
+        client.getTicker(sym)
       ]);
       const dayStart = new Date();
       dayStart.setUTCHours(0, 0, 0, 0);
@@ -616,7 +626,7 @@ export async function confirmSignal(formData: FormData) {
         .gte("closed_at", dayStart.toISOString());
       const dailyPnl = (pnlRows ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
 
-      preview = createTradePreview(parsedSignal, instrument, {
+      preview = createTradePreview(parsedSignal!, instrument, {
         riskPerTradePct: settings.risk_per_trade_pct,
         maxLeverage: settings.max_leverage,
         maxOpenPositions: settings.max_open_positions,
@@ -627,7 +637,8 @@ export async function confirmSignal(formData: FormData) {
         balance: balance.equity,
         marketPrice: ticker.lastPrice,
         openPositions: openPositions ?? 0,
-        dailyPnl
+        dailyPnl,
+        ...(customMargin ? { customMargin } : {})
       });
     }
 

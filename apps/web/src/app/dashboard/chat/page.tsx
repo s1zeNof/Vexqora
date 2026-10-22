@@ -13,12 +13,12 @@ import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { formatTimeAgo } from "../../../lib/date";
-import { formatCryptoPrice } from "../../../lib/format";
 import { closeAllPositions, closeTradePosition } from "../actions";
 import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
 import { LiveUniversePoller } from "./live-poller";
 import { SignalCard } from "./signal-card";
 import { SignalComposer } from "./signal-composer";
+import { TerminalSidePanel } from "./terminal-side-panel";
 
 const messageSchema = z.object({
   id: z.string(),
@@ -204,7 +204,7 @@ export default async function ChatPage({
       </section>
       {query.error ? <p className="notice error">{query.error}</p> : null}
       {query.executed ? <p className="notice success">⚡ Ордер успішно виконано! Позицію відкрито, рівні SL та TP розміщено на біржі.</p> : null}
-      {query.queued ? <p className="notice success">Signal confirmed! Sent to execution queue for Paper / Bybit.</p> : null}
+      {query.queued ? <p className="notice success">⚡ Ордер передано у виконання! Відстежуйте відкриту позицію на панелі терміналу праворуч.</p> : null}
       <section className="trade-workspace">
         <div className="panel chat-panel">
           {/* Channel Selector Tabs */}
@@ -400,69 +400,16 @@ export default async function ChatPage({
           )}
         </div>
 
-        <aside className="panel active-trade">
-          {activeTrade ? (
-            <>
-              <div className="active-title">
-                <div>
-                  <strong>{activeTrade.symbol}</strong>
-                  <span className={`badge ${activeTrade.side}`}>{activeTrade.side} {activeTrade.leverage ?? 1}x</span>
-                </div>
-                <span className="badge demo">{activeTrade.status}</span>
-              </div>
-              <div className={`pnl mono ${unrealizedPnl >= 0 ? "positive" : "negative"}`}>
-                {unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}
-                <small style={{ fontSize: "12px", marginLeft: "6px" }}>({unrealizedRoiPct >= 0 ? "+" : ""}{unrealizedRoiPct.toFixed(2)}% ROI)</small>
-              </div>
-              <span className="kicker">Position Levels</span>
-              <div className="level"><span className="demo-text">Mark Price</span><span className="mono">{currentMark > 0 ? formatCryptoPrice(currentMark) : "—"}</span></div>
-              <div className="level"><span className="demo-text">Entry Avg</span><span className="mono">{activeTrade.entry_avg ? formatCryptoPrice(Number(activeTrade.entry_avg)) : "—"}</span></div>
-              <div className="level"><span>Quantity</span><span className="mono">{activeTrade.qty ?? "—"}</span></div>
-              <div className="level"><span className="negative">Stop Loss</span><span className="mono">{activeTrade.sl ? formatCryptoPrice(Number(activeTrade.sl)) : "—"}</span></div>
-
-              {activeTradeTargets.length > 0 ? (
-                <div style={{ marginTop: "12px", borderTop: "1px solid var(--line)", paddingTop: "8px" }}>
-                  <span className="kicker">Take Profit Targets</span>
-                  {activeTradeTargets.map((t) => (
-                    <div className="level" key={t.target_index}>
-                      <span style={{ color: t.status === "filled" ? "var(--aqua)" : "var(--muted)" }}>
-                        TP{t.target_index} ({t.share_pct}%) {t.status === "filled" ? "✓ Filled" : "Open"}
-                      </span>
-                      <span className="mono">{t.price ? formatCryptoPrice(Number(t.price)) : "—"}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <div className="empty-state">
-              <span className="kicker">Active trade</span>
-              <h2>No open position</h2>
-              <p>Confirmed positions and their exchange or paper status will appear here.</p>
-            </div>
-          )}
-          <div className="trade-controls">
-            <form action={closeTradePosition} style={{ flex: 1 }}>
-              <input type="hidden" name="tradeId" value={activeTrade?.id ?? ""} />
-              <input type="hidden" name="percentage" value="50" />
-              <button className="button secondary" style={{ width: "100%", fontSize: "12px", padding: "0 8px" }} disabled={!activeTrade} type="submit">
-                Close 50%
-              </button>
-            </form>
-            <form action={closeTradePosition} style={{ flex: 1 }}>
-              <input type="hidden" name="tradeId" value={activeTrade?.id ?? ""} />
-              <input type="hidden" name="percentage" value="100" />
-              <button className="button secondary" style={{ width: "100%", fontSize: "12px", padding: "0 8px" }} disabled={!activeTrade} type="submit">
-                Market Close
-              </button>
-            </form>
-            <form action={closeAllPositions} style={{ flex: 1 }}>
-              <button className="button danger" style={{ width: "100%", fontSize: "12px", padding: "0 8px" }} disabled={!activeTrade} type="submit">
-                Close all
-              </button>
-            </form>
-          </div>
-        </aside>
+        <TerminalSidePanel
+          activeTrade={activeTrade}
+          currentMark={currentMark}
+          activeTradeTargets={activeTradeTargets}
+          unrealizedPnl={unrealizedPnl}
+          unrealizedRoiPct={unrealizedRoiPct}
+          closeTradeAction={closeTradePosition}
+          closeAllAction={closeAllPositions}
+          defaultSymbol={activeTrade?.symbol ?? "BTCUSDT"}
+        />
       </section>
     </div>
   );

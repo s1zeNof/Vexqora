@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import type { AISignalOpportunity, HistoricalPatternMatch, NemotronVisionAnalysis, TradePreview } from "@crypto-bot/trading";
+import { TradingViewChart } from "../../../components/trading-view-chart";
 import { formatTimeAgo } from "../../../lib/date";
 import { formatCryptoPrice } from "../../../lib/format";
 import { confirmSignal, enhanceSignalAction } from "./actions";
@@ -26,7 +27,8 @@ export function SignalCard({
   hist
 }: SignalCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"smc" | "targets" | "mobile" | "vision">("smc");
+  const [activeTab, setActiveTab] = useState<"chart" | "smc" | "targets" | "mobile" | "vision">("chart");
+  const [customMargin, setCustomMargin] = useState<number>(100);
   const [copied, setCopied] = useState(false);
   const [visionImage, setVisionImage] = useState<string | null>(null);
   const [visionAnalyzing, setVisionAnalyzing] = useState(false);
@@ -87,6 +89,10 @@ export function SignalCard({
         ? Number(opp.riskReward).toFixed(2)
         : "2.40");
 
+  const effectiveMargin = customMargin > 0 ? customMargin : 100;
+  const notionalPosition = effectiveMargin * leverage;
+  const effectiveQty = entryPrice > 0 ? notionalPosition / entryPrice : (qty > 0 ? qty : 0);
+
   const rawTps = opp?.takeProfits ?? previewSignal?.takeProfits ?? [];
   const takeProfits = rawTps.map((t, idx) => {
     const price = Number(t?.price ?? 0);
@@ -94,8 +100,8 @@ export function SignalCard({
     const pctGain = entryPrice > 0
       ? (side === "long" ? ((price - entryPrice) / entryPrice) * 100 : ((entryPrice - price) / entryPrice) * 100)
       : 0;
-    const estProfit = qty > 0
-      ? (side === "long" ? (price - entryPrice) * qty * (sharePct / 100) : (entryPrice - price) * qty * (sharePct / 100))
+    const estProfit = effectiveQty > 0
+      ? (side === "long" ? (price - entryPrice) * effectiveQty * (sharePct / 100) : (entryPrice - price) * effectiveQty * (sharePct / 100))
       : 0;
     return {
       idx: idx + 1,
@@ -107,6 +113,9 @@ export function SignalCard({
   });
 
   const maxTotalProfit = takeProfits.reduce((acc, curr) => acc + (Number.isFinite(curr.estProfit) ? curr.estProfit : 0), 0);
+  const estSlLoss = effectiveQty > 0 && entryPrice > 0 && stopLoss > 0
+    ? Math.abs(entryPrice - stopLoss) * effectiveQty
+    : (riskAmount ? Number(riskAmount) : 0);
   const rawSlPct = entryPrice > 0
     ? (side === "long" ? ((entryPrice - stopLoss) / entryPrice) * 100 : ((stopLoss - entryPrice) / entryPrice) * 100)
     : 0;
@@ -215,17 +224,19 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pc
             className="button secondary compact-btn"
             onClick={() => setIsModalOpen(true)}
           >
-            🔍 Деталі
+            📈 Графік / $
           </button>
           {signalId ? (
             <form action={confirmSignal}>
               <input type="hidden" name="signalId" value={signalId} />
+              <input type="hidden" name="margin" value={effectiveMargin} />
               <button
                 type="submit"
                 className="button primary compact-btn-primary"
                 disabled={isPending}
+                title={`Увійти в угоду з маржею ${effectiveMargin} USDT (${leverage}x)`}
               >
-                ⚡ Виконати
+                ⚡ Увійти (${effectiveMargin})
               </button>
             </form>
           ) : null}
@@ -267,6 +278,13 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pc
             <div className="modal-tabs">
               <button
                 type="button"
+                className={`modal-tab ${activeTab === "chart" ? "active" : ""}`}
+                onClick={() => setActiveTab("chart")}
+              >
+                📈 Графік OKX (Live)
+              </button>
+              <button
+                type="button"
                 className={`modal-tab ${activeTab === "smc" ? "active" : ""}`}
                 onClick={() => setActiveTab("smc")}
               >
@@ -297,6 +315,20 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pc
 
             {/* Modal Body */}
             <div className="modal-body">
+              {activeTab === "chart" ? (
+                <div className="tab-pane" style={{ padding: 0 }}>
+                  <TradingViewChart symbol={symbol} height="440px" interval="15" />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "#0e0b1a", borderTop: "1px solid var(--line)" }}>
+                    <span className="mono" style={{ fontSize: "11px", color: "var(--aqua)" }}>
+                      ⚡ Bybit Linear Perpetual · Свічки 15m · Стиль OKX / Vexqora
+                    </span>
+                    <span className="mono" style={{ fontSize: "11px", color: "var(--muted)" }}>
+                      Вхід: {entryPrice > 0 ? `$${formatCryptoPrice(entryPrice)}` : "Market"} | SL: ${formatCryptoPrice(stopLoss)} | TP1: ${formatCryptoPrice(tp1?.price ?? 0)}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
               {activeTab === "smc" ? (
                 <div className="tab-pane">
                   {/* Multi-Timeframe SMC Grid */}
@@ -456,45 +488,110 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pc
             </div>
 
             {/* Modal Actions Footer */}
-            <div className="modal-footer">
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                {signalId ? (
-                  <form action={confirmSignal}>
-                    <input type="hidden" name="signalId" value={signalId} />
+            <div className="modal-footer" style={{ flexDirection: "column", gap: "12px", alignItems: "stretch" }}>
+              {/* Sizing & Margin Selector */}
+              <div style={{ background: "#0e0b1a", padding: "12px", borderRadius: "8px", border: "1px solid var(--line)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span className="kicker" style={{ color: "var(--soft-violet)", fontSize: "11px", margin: 0 }}>
+                    Сума маржі для входу (Margin USDT):
+                  </span>
+                  <span className="mono" style={{ fontSize: "12px", color: "var(--text-main)" }}>
+                    Позиція з плечем: <strong style={{ color: "var(--aqua)" }}>${notionalPosition.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} USDT</strong> ({leverage}x)
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+                  {[25, 50, 100, 250, 500, 1000].map((amt) => (
                     <button
-                      type="submit"
-                      className="button primary"
-                      disabled={isPending}
+                      key={amt}
+                      type="button"
+                      onClick={() => setCustomMargin(amt)}
+                      className="ai-chip"
+                      style={{
+                        border: customMargin === amt ? "1px solid var(--aqua)" : "1px solid var(--line)",
+                        background: customMargin === amt ? "rgba(53, 242, 208, 0.15)" : "#171229",
+                        color: customMargin === amt ? "var(--aqua)" : "var(--text-main)",
+                        fontWeight: customMargin === amt ? "700" : "500",
+                        cursor: "pointer",
+                        padding: "4px 12px",
+                        fontSize: "12px"
+                      }}
                     >
-                      ⚡ Підтвердити та відкрити ордер
+                      ${amt}
                     </button>
-                  </form>
-                ) : null}
-
-                {rawSignal && signalId ? (
-                  <form action={enhanceSignalAction}>
-                    <input type="hidden" name="signalId" value={signalId} />
-                    <input type="hidden" name="symbol" value={symbol} />
-                    <input type="hidden" name="rawSignal" value={rawSignal} />
-                    <input type="hidden" name="rawText" value={rawSignal} />
-                    <button
-                      type="submit"
-                      className="button secondary"
-                      disabled={isPending}
-                    >
-                      ✨ Nemotron Optimize & Tighten SL
-                    </button>
-                  </form>
-                ) : null}
+                  ))}
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginLeft: "auto" }}>
+                    <span style={{ fontSize: "11px", color: "var(--muted)" }}>Своя сума:</span>
+                    <input
+                      type="number"
+                      min="5"
+                      max="100000"
+                      step="5"
+                      value={customMargin}
+                      onChange={(e) => setCustomMargin(Math.max(1, Number(e.target.value) || 0))}
+                      style={{
+                        width: "84px",
+                        height: "28px",
+                        background: "#171229",
+                        border: "1px solid var(--line)",
+                        borderRadius: "4px",
+                        color: "var(--text-main)",
+                        padding: "0 6px",
+                        fontSize: "12px",
+                        textAlign: "right"
+                      }}
+                    />
+                    <span style={{ fontSize: "11px", color: "var(--muted)" }}>USDT</span>
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" }}>
+                  <span className="negative mono">Ризик при SL: -${estSlLoss.toFixed(2)}</span>
+                  <span className="positive mono">Очікуваний прибуток: +${maxTotalProfit.toFixed(2)}</span>
+                </div>
               </div>
 
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setIsModalOpen(false)}
-              >
-                Закрити
-              </button>
+              {/* Action Buttons */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  {signalId ? (
+                    <form action={confirmSignal}>
+                      <input type="hidden" name="signalId" value={signalId} />
+                      <input type="hidden" name="margin" value={effectiveMargin} />
+                      <button
+                        type="submit"
+                        className="button primary"
+                        disabled={isPending}
+                        style={{ minHeight: "38px", fontSize: "13px", fontWeight: "700" }}
+                      >
+                        ⚡ Увійти в угоду ({effectiveMargin}$ USDT)
+                      </button>
+                    </form>
+                  ) : null}
+
+                  {rawSignal && signalId ? (
+                    <form action={enhanceSignalAction}>
+                      <input type="hidden" name="signalId" value={signalId} />
+                      <input type="hidden" name="symbol" value={symbol} />
+                      <input type="hidden" name="rawSignal" value={rawSignal} />
+                      <input type="hidden" name="rawText" value={rawSignal} />
+                      <button
+                        type="submit"
+                        className="button secondary"
+                        disabled={isPending}
+                      >
+                        ✨ Nemotron Optimize & Tighten SL
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => setIsModalOpen(false)}
+                >
+                  Закрити
+                </button>
+              </div>
             </div>
           </div>
         </div>

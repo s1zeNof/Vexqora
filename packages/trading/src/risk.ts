@@ -14,6 +14,7 @@ export interface TradeContext {
   marketPrice: number;
   openPositions: number;
   dailyPnl: number;
+  customMargin?: number | undefined;
 }
 
 export interface TradePreview {
@@ -89,15 +90,27 @@ export function createTradePreview(
   const riskPct = original.riskPct ?? settings.riskPerTradePct;
   if (riskPct <= 0 || riskPct > settings.riskPerTradePct) throw new RiskValidationError("Risk exceeds account risk settings");
   const stopDistance = Math.abs(normalizedEntry - stopLoss);
+  let qty: number;
   const riskBudget = context.balance * riskPct / 100;
-  const riskQty = riskBudget / stopDistance;
-  const leverageQty = context.balance * leverage / normalizedEntry;
-  const qty = roundToStep(Math.min(riskQty, leverageQty), instrument.qtyStep, "down");
-  if (qty < instrument.minQty) throw new RiskValidationError("Calculated quantity is below the instrument minimum");
+
+  if (context.customMargin && context.customMargin > 0) {
+    const customLeverageQty = (context.customMargin * leverage) / normalizedEntry;
+    qty = roundToStep(customLeverageQty, instrument.qtyStep, "down");
+    if (qty < instrument.minQty) {
+      qty = instrument.minQty;
+    }
+  } else {
+    const riskQty = riskBudget / stopDistance;
+    const leverageQty = context.balance * leverage / normalizedEntry;
+    qty = roundToStep(Math.min(riskQty, leverageQty), instrument.qtyStep, "down");
+    if (qty < instrument.minQty) throw new RiskValidationError("Calculated quantity is below the instrument minimum");
+    if (qty * stopDistance > riskBudget + instrument.qtyStep * stopDistance) throw new RiskValidationError("Calculated risk exceeds the risk budget");
+  }
+
   const notional = qty * normalizedEntry;
   if (notional < instrument.minNotional) throw new RiskValidationError("Calculated notional is below the instrument minimum");
   const riskAmount = qty * stopDistance;
-  if (riskAmount > riskBudget + instrument.qtyStep * stopDistance) throw new RiskValidationError("Calculated risk exceeds the risk budget");
+  const calculatedRiskPct = context.balance > 0 ? (riskAmount / context.balance) * 100 : riskPct;
   const weightedReward = takeProfits.reduce((sum, target) => sum + Math.abs(target.price - normalizedEntry) * target.sharePct / 100, 0);
 
   return {
@@ -115,7 +128,7 @@ export function createTradePreview(
     tickSize: instrument.tickSize,
     notional,
     riskAmount,
-    riskPct: riskAmount / context.balance * 100,
+    riskPct: calculatedRiskPct,
     leverage,
     weightedRewardRisk: weightedReward / stopDistance
   };
