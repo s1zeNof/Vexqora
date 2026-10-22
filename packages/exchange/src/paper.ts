@@ -114,6 +114,7 @@ export class PaperExchangeClient implements ExchangeClient {
       return { symbol: item.symbol, lastPrice: Number(item.lastPrice) };
     } catch {
       // Fallback to Binance Futures or Spot price if Bybit is blocked (e.g. HTTP 403 on US IP)
+      let symbolNotFound = false;
       try {
         const res = await this.fetcher(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${norm}`, {
           headers: { "User-Agent": "Mozilla/5.0" }
@@ -123,22 +124,31 @@ export class PaperExchangeClient implements ExchangeClient {
           if (data?.price) {
             return { symbol: norm, lastPrice: Number(data.price) };
           }
+        } else if (res.status === 400) {
+          symbolNotFound = true;
         }
       } catch {
         // Fallback to Binance Spot
-        try {
-          const res = await this.fetcher(`https://api.binance.com/api/v3/ticker/price?symbol=${norm}`, {
-            headers: { "User-Agent": "Mozilla/5.0" }
-          });
-          if (res.ok) {
-            const data = await res.json() as { symbol: string; price: string };
-            if (data?.price) {
-              return { symbol: norm, lastPrice: Number(data.price) };
-            }
+      }
+
+      try {
+        const res = await this.fetcher(`https://api.binance.com/api/v3/ticker/price?symbol=${norm}`, {
+          headers: { "User-Agent": "Mozilla/5.0" }
+        });
+        if (res.ok) {
+          const data = await res.json() as { symbol: string; price: string };
+          if (data?.price) {
+            return { symbol: norm, lastPrice: Number(data.price) };
           }
-        } catch {
-          // ignore
+        } else if (res.status === 400) {
+          symbolNotFound = true;
         }
+      } catch {
+        // ignore
+      }
+
+      if (symbolNotFound) {
+        throw new Error(`Монету ${norm} не знайдено на біржі. Будь ласка, перевірте правильність тикера (наприклад: BTCUSDT, ETHUSDT, SOLUSDT, SUIUSDT).`);
       }
       throw new Error(`Market data HTTP 403: Bybit geoblocked this region and fallbacks were unreachable for ${norm}`);
     }
