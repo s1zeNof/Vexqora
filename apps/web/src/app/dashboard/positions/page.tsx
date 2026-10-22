@@ -1,13 +1,46 @@
 import type { TradeRow } from "@crypto-bot/shared";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { VexqoraLogo } from "../../../components/logo";
+import { closeAllPositions, closeTradePosition } from "../actions";
+
+async function getMarketPrices(symbols: string[]): Promise<Record<string, number>> {
+  if (symbols.length === 0) return {};
+  const prices: Record<string, number> = {};
+  await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const res = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${encodeURIComponent(symbol.toUpperCase())}`, {
+          next: { revalidate: 2 }
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { result?: { list?: Array<{ lastPrice: string }> } };
+          const last = data.result?.list?.[0]?.lastPrice;
+          if (last) prices[symbol.toUpperCase()] = Number(last);
+        }
+      } catch {
+        // ignore
+      }
+    })
+  );
+  return prices;
+}
+
+interface ActiveAccount {
+  id: string;
+  label: string;
+  environment: string;
+}
 
 export default async function PositionsPage() {
   const supabase = await createSupabaseServerClient();
-  const { data: active } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).limit(1).maybeSingle();
+  const { data: rawActive } = await supabase.from("exchange_accounts").select("id, label, environment").eq("is_active", true).limit(1).maybeSingle();
+  const active: ActiveAccount | null = rawActive ? { id: String(rawActive.id), label: String(rawActive.label), environment: String(rawActive.environment) } : null;
   const trades = (active
-    ? (await supabase.from("trades").select("*").eq("account_id", active.id).eq("status", "active")).data
+    ? (await supabase.from("trades").select("*").eq("account_id", active.id).eq("status", "active").order("opened_at", { ascending: false })).data
     : []) as TradeRow[] | null;
+
+  const uniqueSymbols = Array.from(new Set((trades ?? []).map((t) => t.symbol)));
+  const prices = await getMarketPrices(uniqueSymbols);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px", width: "100%" }}>
@@ -17,7 +50,12 @@ export default async function PositionsPage() {
           <h1 style={{ marginTop: "6px" }}>Open Positions</h1>
           <p className="lead">Open positions for the active paper or exchange-backed workspace.</p>
         </div>
-        <button className="button danger" disabled={!trades?.length}>Close all positions</button>
+        {active && (
+          <form action={closeAllPositions}>
+            <input type="hidden" name="accountId" value={active.id} />
+            <button type="submit" className="button danger" disabled={!trades?.length}>Close all positions</button>
+          </form>
+        )}
       </div>
 
       <div className="table-wrap">
@@ -37,24 +75,57 @@ export default async function PositionsPage() {
           </thead>
           <tbody>
             {trades && trades.length > 0 ? (
-              trades.map((trade) => (
-                <tr key={trade.id}>
-                  <td><strong>{trade.symbol}</strong></td>
-                  <td><span className={`badge ${trade.side}`}>{trade.side} {trade.leverage}x</span></td>
-                  <td className="mono">{trade.qty}</td>
-                  <td className="mono">{trade.entry_avg}</td>
-                  <td className="mono">—</td>
-                  <td className="mono negative">{trade.sl ?? "—"}</td>
-                  <td className="mono warning">{trade.trailing_stop ? "configured" : "—"}</td>
-                  <td className="mono">—</td>
-                  <td>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button className="button secondary" disabled style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>Close 50%</button>
-                      <button className="button danger" disabled style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>Market Close</button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+              trades.map((trade) => {
+                const markPrice = prices[trade.symbol.toUpperCase()] ?? (trade.entry_avg ? Number(trade.entry_avg) : null);
+                const entryPrice = trade.entry_avg ? Number(trade.entry_avg) : 0;
+                const qty = Number(trade.qty) || 0;
+                const leverage = Number(trade.leverage) || 1;
+                const direction = trade.side === "long" ? 1 : -1;
+
+                let pnlDisplay = "—";
+                let isProfit = true;
+
+                if (markPrice !== null && entryPrice > 0 && qty > 0) {
+                  const diff = markPrice - entryPrice;
+                  const unrealizedPnl = diff * qty * direction;
+                  const pnlPct = (diff / entryPrice) * leverage * 100 * direction;
+                  isProfit = unrealizedPnl >= 0;
+                  pnlDisplay = `${isProfit ? "+" : ""}${unrealizedPnl.toFixed(2)} USDT (${isProfit ? "+" : ""}${pnlPct.toFixed(2)}%)`;
+                }
+
+                return (
+                  <tr key={trade.id}>
+                    <td><strong>{trade.symbol}</strong></td>
+                    <td><span className={`badge ${trade.side}`}>{trade.side} {trade.leverage}x</span></td>
+                    <td className="mono">{trade.qty}</td>
+                    <td className="mono">{trade.entry_avg}</td>
+                    <td className="mono">{markPrice !== null ? markPrice.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "—"}</td>
+                    <td className="mono negative">{trade.sl ?? "—"}</td>
+                    <td className="mono warning">{trade.trailing_stop ? "configured" : "—"}</td>
+                    <td className={`mono ${pnlDisplay === "—" ? "" : isProfit ? "positive" : "negative"}`}>
+                      {pnlDisplay}
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <form action={closeTradePosition}>
+                          <input type="hidden" name="tradeId" value={trade.id} />
+                          <input type="hidden" name="qtyPct" value="50" />
+                          <button type="submit" className="button secondary" style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>
+                            Close 50%
+                          </button>
+                        </form>
+                        <form action={closeTradePosition}>
+                          <input type="hidden" name="tradeId" value={trade.id} />
+                          <input type="hidden" name="qtyPct" value="100" />
+                          <button type="submit" className="button danger" style={{ minHeight: "32px", padding: "0 10px", fontSize: "12px" }}>
+                            Market Close
+                          </button>
+                        </form>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan={9} style={{ textAlign: "center", padding: "48px 16px", color: "var(--muted)" }}>
@@ -72,3 +143,4 @@ export default async function PositionsPage() {
     </div>
   );
 }
+

@@ -80,6 +80,22 @@ export async function processJob(
     throw new Error(`Insufficient available balance (${balance.available} USDT)`);
   }
 
+  // 3b. Compute realized daily PnL (since UTC midnight) to enforce max_daily_loss_pct
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const closedTodayRes = await supabase
+    .from("trades")
+    .select("realized_pnl")
+    .eq("account_id", account_id)
+    .eq("status", "closed")
+    .gte("closed_at", todayStart.toISOString());
+
+  const dailyPnl = (closedTodayRes.data ?? []).reduce(
+    (sum: number, t: { realized_pnl: number | string | null }) => sum + (Number(t.realized_pnl) || 0),
+    0
+  );
+
   // 4. Calculate validated trade preview
   const preview: TradePreview = createTradePreview(
     signal,
@@ -96,7 +112,7 @@ export async function processJob(
       balance: balance.available,
       marketPrice: ticker.lastPrice,
       openPositions: openPositionsCount,
-      dailyPnl: 0
+      dailyPnl
     }
   );
 
@@ -139,7 +155,8 @@ export async function processJob(
     price: preview.entryPrice,
     qty: preview.qty,
     status: "submitted",
-    reduce_only: false
+    reduce_only: false,
+    raw: { preview, exchange: job.exchange_kind }
   });
 
   // Update trade status to entry_open

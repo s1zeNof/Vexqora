@@ -482,6 +482,77 @@ p.lead { color: var(--muted); font-size: clamp(15px, 2vw, 18px); line-height: 1.
   flex-wrap: wrap;
 }
 
+/* AI Targets Section (Take Profit & Exits) */
+.ai-targets-section {
+  padding: 10px 12px;
+  background: #09061480;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ai-targets-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+.ai-targets-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+@media (max-width: 768px) {
+  .ai-targets-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.ai-target-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #171229;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.target-badge {
+  font: 600 10px var(--font-mono), monospace;
+  color: var(--aqua);
+  text-transform: uppercase;
+}
+.target-price {
+  font: 700 13px var(--font-mono), monospace;
+  color: var(--aqua);
+}
+.target-meta {
+  font: 500 11px var(--font-mono), monospace;
+  color: var(--muted);
+}
+.signal-quick-text {
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: #07050f;
+  border: 1px dashed var(--line);
+  padding: 8px 12px;
+}
+.quick-text-header {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono), monospace;
+  margin-bottom: 4px;
+}
+.signal-pre {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #c4bcdc;
+  white-space: pre-wrap;
+  user-select: all;
+}
+
 /* Channel Switcher Tabs */
 .channel-tabs {
   display: flex;

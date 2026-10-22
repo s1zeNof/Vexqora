@@ -21,6 +21,19 @@ export function SignalComposer() {
             <div><dt>Leverage</dt><dd>{state.preview.leverage}×</dd></div>
             <div><dt>Weighted R:R</dt><dd>1 : {state.preview.weightedRewardRisk.toFixed(2)}</dd></div>
           </dl>
+          {state.preview.signal.takeProfits && state.preview.signal.takeProfits.length > 0 ? (
+            <div style={{ marginTop: "12px", borderTop: "1px solid var(--line)", paddingTop: "8px" }}>
+              <span className="kicker" style={{ color: "var(--aqua)" }}>🎯 Take Profit Targets</span>
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${state.preview.signal.takeProfits.length}, 1fr)`, gap: "8px", marginTop: "6px" }}>
+                {state.preview.signal.takeProfits.map((tp, idx) => (
+                  <div key={idx} style={{ background: "#171229", padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--line)" }}>
+                    <div style={{ fontSize: "10px", color: "var(--muted)" }}>TP {idx + 1} ({tp.sharePct}%)</div>
+                    <strong className="mono positive" style={{ fontSize: "13px" }}>${tp.price}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="preview-actions">
             <form action={confirmSignal}><input type="hidden" name="signalId" value={state.signalId} /><button className="button primary">Confirm signal</button></form>
             <form action={cancelSignal}><input type="hidden" name="signalId" value={state.signalId} /><button className="button secondary">Cancel</button></form>

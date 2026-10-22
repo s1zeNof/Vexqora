@@ -227,12 +227,14 @@ export class BybitClient implements ExchangeClient {
       const expires = this.now() + 10_000;
       const signature = signBybitHmac(this.options.apiSecret, `GET/realtime${expires}`);
       socket.send(JSON.stringify({ op: "auth", args: [this.options.apiKey, expires, signature] }));
-      socket.send(JSON.stringify({ op: "subscribe", args: ["order.linear", "execution.linear", "position.linear"] }));
       heartbeat = setInterval(() => socket.send(JSON.stringify({ op: "ping" })), 20_000);
     });
     socket.addEventListener("message", (message) => {
       try {
-        const payload: unknown = JSON.parse(String(message.data));
+        const payload = JSON.parse(String(message.data)) as Record<string, unknown>;
+        if (payload.op === "auth" && payload.success === true) {
+          socket.send(JSON.stringify({ op: "subscribe", args: ["order", "execution", "position"] }));
+        }
         handler({ type: "bybit", payload });
       } catch {
         handler({ type: "bybit_parse_error", payload: String(message.data) });

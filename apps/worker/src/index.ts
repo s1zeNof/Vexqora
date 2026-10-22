@@ -5,6 +5,7 @@ import { logger } from "./logger";
 import { startPulseScanner } from "./pulse-scanner";
 import { reconcileOnStartup } from "./reconciler";
 import { processJob, type ExecutionJobData } from "./runner";
+import { startWsListener } from "./ws-listener";
 
 interface JobRow {
   id: string;
@@ -107,6 +108,9 @@ async function startWorker() {
   // Start 24/7 Vexqora Pulse Universe Scanner
   const stopPulse = startPulseScanner(supabase);
 
+  // Start Bybit Private WebSocket Listener Manager
+  const stopWsListener = startWsListener(supabase, config.masterKey, config.discordWebhookUrl);
+
   logger.info({ pollIntervalMs: config.pollIntervalMs }, "Worker queue consumer active. Waiting for execution jobs...");
 
   let isRunning = true;
@@ -115,6 +119,7 @@ async function startWorker() {
     logger.info("Shutdown signal received. Stopping worker loop...");
     isRunning = false;
     stopPulse();
+    stopWsListener();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

@@ -164,14 +164,14 @@ Before committing any changes or concluding a working session, run these command
 ```powershell
 npm run typecheck   # Typecheck all 5 workspaces
 npm run lint        # ESLint check
-npm test            # Run Vitest test suites (27 unit tests currently)
+npm test            # Run Vitest test suites (31 unit tests currently)
 npm run build       # Next.js Turbopack production build & worker build
 ```
 
 Expected baseline:
 - 0 TypeScript errors.
 - 0 ESLint warnings/errors.
-- 27 unit tests passing across `@crypto-bot/trading`, `@crypto-bot/exchange`, `@crypto-bot/shared`, `@crypto-bot/worker`.
+- 31 unit tests passing across `@crypto-bot/trading`, `@crypto-bot/exchange`, `@crypto-bot/shared`, `@crypto-bot/worker`.
 - Next.js production build completes cleanly.
 
 ---
@@ -191,16 +191,15 @@ Expected baseline:
 - [x] Worker queue consumption with `FOR UPDATE SKIP LOCKED`.
 - [x] Mode-agnostic executor (`submitEntry`, `protectFilledPosition`).
 - [x] Error boundaries and server action fault recovery.
+- [x] Worker private WebSocket listener (`order`, `execution`, `position`) with authentication and fill reconciliation.
+- [x] Dynamic SL/TP protection placement (`protectFilledPosition`) triggered on limit order fills via WebSocket.
+- [x] Real-time Active Positions Dashboard (`/dashboard/positions`) with live mark prices, unrealized PnL ($ and %), and interactive "Close 50%" / "Market Close" / "Close All Positions" server actions.
+- [x] Real aggregate daily loss calculation and strict pre-execution rejection in worker `runner.ts`.
 
-### Immediate Next Tasks (Stage 4 & Stage 5):
-1. **Private WebSocket Listener in Worker**:
-   - Subscribe to Bybit V5 private WebSocket topics: `order`, `execution`, `position`.
-   - Update `trades` and `orders` tables in real time when limit entries are filled.
-   - Automatically trigger exchange-hosted SL/TP (`protectFilledPosition`) once an entry fill event is received.
-2. **Real-time Active Positions Dashboard**:
-   - Upgrade `/dashboard/positions` to display live unrealized PnL, mark price, and quick "Close Position" button.
-3. **Daily Loss & Risk Enforcement in Worker**:
-   - Re-check daily PnL against `max_daily_loss_pct` inside `runner.ts` immediately before order execution.
-4. **External Integrations**:
+### Immediate Next Tasks (Stage 6):
+1. **External Integrations**:
    - Telegram bot webhook to receive signals directly from private channels and push execution confirmations.
    - Discord webhook order notifications.
+2. **Production Deployment**:
+   - Supabase production migrations & Vercel deployment setup with secure environment variables.
+

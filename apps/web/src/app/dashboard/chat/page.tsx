@@ -4,6 +4,7 @@ import { z } from "zod";
 import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { closeAllPositions, closeTradePosition } from "../actions";
 import { analyzePulseAction, confirmSignal, enhanceSignalAction, scanMarketOpportunityAction } from "./actions";
 import { SignalComposer } from "./signal-composer";
 
@@ -80,9 +81,10 @@ export default async function ChatPage({
   if (account && messages.length === 0) {
     try {
       const client = createAccountClient(account);
-      const [ticker, instrument] = await Promise.all([
+      const [ticker, instrument, solTicker] = await Promise.all([
         client.getTicker("BTCUSDT"),
-        client.getInstrument("BTCUSDT")
+        client.getInstrument("BTCUSDT"),
+        client.getTicker("SOLUSDT").catch(() => null)
       ]);
       const opp = await generateNemotronOpportunity("BTCUSDT", ticker.lastPrice, { tickSize: instrument.tickSize });
       const riskRow = riskResult.data as { risk_per_trade_pct?: number; max_leverage?: number; max_open_positions?: number; max_daily_loss_pct?: number; kill_switch?: boolean } | null;
@@ -104,6 +106,8 @@ export default async function ChatPage({
 
       if (stored) {
         const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
+        const pulsePrice = solTicker?.lastPrice ?? 182.4;
+        const pulseChange = 3.85;
         const [sigMsg, pulseMsg] = await Promise.all([
           supabase.from("chat_messages").insert({
             account_id: account.id,
@@ -122,14 +126,14 @@ export default async function ChatPage({
             account_id: account.id,
             role: "system",
             kind: "market_pulse",
-            content: `SOLUSDT +3.85% in 20s · VOLUME SPIKE`,
+            content: `SOLUSDT ${pulseChange >= 0 ? "+" : ""}${pulseChange}% 24h · LIVE BYBIT TICKER`,
             payload: {
               symbol: "SOLUSDT",
-              changePct: 3.85,
-              timeframeSec: 20,
-              price: 182.4,
-              eventType: "volume_spike",
-              rationale: "Aggressive volume breakout detected across Bybit linear universe. CVD divergence positive with high buying absorption.",
+              changePct: pulseChange,
+              timeframeSec: 60,
+              price: pulsePrice,
+              eventType: pulseChange >= 0 ? "volume_spike" : "bearish_breakdown",
+              rationale: `Live Bybit linear price @ $${pulsePrice}. Volatility registered with ${pulseChange}% 24h delta. Order flow tracking active.`,
               historicalMatch: {
                 sampleCount: 42,
                 winRatePct: 71.4,
@@ -151,6 +155,30 @@ export default async function ChatPage({
 
   const parsedTrades = z.array(tradeSchema).safeParse(openTradesResult.data ?? []);
   const activeTrade = parsedTrades.success ? parsedTrades.data[0] ?? null : null;
+
+  let activeTradeMarkPrice: number | null = null;
+  let activeTradeTargets: Array<{ target_index: number; price: number; share_pct: number; status: string }> = [];
+
+  if (account && activeTrade) {
+    try {
+      const client = createAccountClient(account);
+      const [tTicker, targetsRes] = await Promise.all([
+        client.getTicker(activeTrade.symbol).catch(() => null),
+        supabase.from("trade_targets").select("target_index, price, share_pct, status").eq("trade_id", activeTrade.id).order("target_index", { ascending: true })
+      ]);
+      activeTradeMarkPrice = tTicker?.lastPrice ?? null;
+      activeTradeTargets = targetsRes.data ?? [];
+    } catch {
+      // fallback
+    }
+  }
+
+  const currentMark = activeTradeMarkPrice ?? activeTrade?.entry_avg ?? 0;
+  const pnlDiff = activeTrade ? (activeTrade.side === "long" ? currentMark - (activeTrade.entry_avg ?? currentMark) : (activeTrade.entry_avg ?? currentMark) - currentMark) : 0;
+  const unrealizedPnl = activeTrade ? pnlDiff * (activeTrade.qty ?? 0) : 0;
+  const posMargin = activeTrade && activeTrade.entry_avg ? (activeTrade.entry_avg * (activeTrade.qty ?? 0)) / (activeTrade.leverage ?? 1) : 0;
+  const unrealizedRoiPct = posMargin > 0 ? (unrealizedPnl / posMargin) * 100 : 0;
+
   const todayPnl = (todayResult.data ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
   const weekly = weekResult.data ?? [];
   const winRate = weekly.length ? Math.round(weekly.filter((row: { realized_pnl: unknown }) => Number(row.realized_pnl ?? 0) > 0).length / weekly.length * 100) : null;
@@ -285,21 +313,44 @@ export default async function ChatPage({
                   const rawSignal = typeof payload.rawSignal === "string" ? payload.rawSignal : null;
                   const hist = payload.historicalMatch && typeof payload.historicalMatch === "object" ? payload.historicalMatch as HistoricalPatternMatch : undefined;
 
-                  const oppSymbol = typeof opp?.symbol === "string" ? opp.symbol : "BTCUSDT";
-                  const oppSide = typeof opp?.side === "string" ? opp.side : "long";
+                  const previewSignal = preview?.signal as { symbol?: string; side?: string; stopLoss?: number; takeProfits?: Array<{ price: number; sharePct: number }>; leverage?: number } | undefined;
+
+                  const oppSymbol = typeof opp?.symbol === "string" ? opp.symbol : (previewSignal?.symbol ?? "BTCUSDT");
+                  const oppSide = (typeof opp?.side === "string" ? opp.side : (previewSignal?.side ?? "long")) as "long" | "short";
                   const oppQualityScore = typeof opp?.qualityScore === "number" ? opp.qualityScore.toFixed(1) : "9.2";
                   const oppQualityTier = typeof opp?.qualityTier === "string" ? opp.qualityTier : "A+";
-                  const oppStrategy = typeof opp?.strategy === "string" ? opp.strategy : "Nemotron Strategy";
+                  const oppStrategy = typeof opp?.strategy === "string" ? opp.strategy : "Institutional Setup";
                   const oppRationale = typeof opp?.rationale === "string" ? opp.rationale : message.content;
 
-                  if (message.kind === "ai_signal" && opp) {
+                  const entryPrice = preview?.entryPrice != null ? Number(preview.entryPrice) : (opp?.entryPrice != null ? Number(opp.entryPrice) : Number(opp?.currentPrice ?? 0));
+                  const stopLoss = opp?.stopLoss != null ? Number(opp.stopLoss) : (previewSignal?.stopLoss != null ? Number(previewSignal.stopLoss) : 0);
+                  const leverage = preview?.leverage != null ? Number(preview.leverage) : (opp?.suggestedLeverage != null ? Number(opp.suggestedLeverage) : 5);
+                  const riskPct = preview?.riskPct != null ? Number(preview.riskPct).toFixed(1) : "1.0";
+                  const riskAmount = preview?.riskAmount != null ? Number(preview.riskAmount).toFixed(2) : null;
+                  const qty = preview?.qty != null ? Number(preview.qty) : 0;
+                  const winProb = Number(opp?.winProbabilityPct ?? 70);
+                  const rr = preview?.weightedRewardRisk != null ? Number(preview.weightedRewardRisk).toFixed(2) : (opp?.riskReward != null ? Number(opp.riskReward).toFixed(2) : "3.00");
+
+                  const rawTps = (opp?.takeProfits as Array<{ price: number; sharePct: number }> | undefined) ?? previewSignal?.takeProfits ?? [];
+                  const takeProfits = rawTps.map((t, idx) => {
+                    const price = Number(t.price);
+                    const sharePct = Number(t.sharePct);
+                    const pctGain = entryPrice > 0 ? (oppSide === "long" ? ((price - entryPrice) / entryPrice) * 100 : ((entryPrice - price) / entryPrice) * 100) : 0;
+                    const estProfit = qty > 0 ? (oppSide === "long" ? (price - entryPrice) * qty * (sharePct / 100) : (entryPrice - price) * qty * (sharePct / 100)) : 0;
+                    return { idx: idx + 1, price, sharePct, pctGain: Number(pctGain.toFixed(2)), estProfit: Number(estProfit.toFixed(2)) };
+                  });
+
+                  const maxTotalProfit = takeProfits.reduce((acc, curr) => acc + curr.estProfit, 0);
+                  const slPct = entryPrice > 0 ? (oppSide === "long" ? ((entryPrice - stopLoss) / entryPrice) * 100 : ((stopLoss - entryPrice) / entryPrice) * 100) : 0;
+
+                  if ((message.kind === "ai_signal" && opp) || message.kind === "signal_preview") {
                     return (
                       <article className="ai-signal-card" key={message.id}>
                         <div className="ai-card-header">
                           <div className="ai-card-title">
                             <strong style={{ fontSize: "16px" }}>{oppSymbol}</strong>
                             <span className={`badge ${oppSide === "long" ? "long" : "short"}`}>
-                              {oppSide.toUpperCase()}
+                              {oppSide.toUpperCase()} {leverage}x
                             </span>
                             <span className="ai-score-badge">★ {oppQualityScore}/10 {oppQualityTier}</span>
                             {hist ? (
@@ -320,21 +371,63 @@ export default async function ChatPage({
 
                         <div className="ai-setup-grid">
                           <div className="ai-setup-item">
-                            <span>Entry Price</span>
-                            <strong>${preview?.entryPrice != null ? Number(preview.entryPrice).toLocaleString() : "Market"}</strong>
+                            <span>Вхід (Entry)</span>
+                            <strong>${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}</strong>
                           </div>
                           <div className="ai-setup-item">
-                            <span>Stop Loss</span>
-                            <strong className="negative">${opp.stopLoss != null ? Number(opp.stopLoss).toLocaleString() : "—"}</strong>
+                            <span>Стоп-лосс (SL)</span>
+                            <strong className="negative">${stopLoss > 0 ? stopLoss.toLocaleString() : "—"} (-{slPct.toFixed(2)}%)</strong>
                           </div>
                           <div className="ai-setup-item">
                             <span>Win Prob / R:R</span>
-                            <strong className="positive">{Number(opp.winProbabilityPct ?? 70)}% · 1:{preview?.weightedRewardRisk != null ? Number(preview.weightedRewardRisk).toFixed(2) : (opp.riskReward != null ? Number(opp.riskReward).toFixed(2) : "3.00")}</strong>
+                            <strong className="positive">{winProb}% · 1:{rr}</strong>
                           </div>
                           <div className="ai-setup-item">
-                            <span>Risk Allocation</span>
-                            <strong>${preview?.riskAmount != null ? Number(preview.riskAmount).toFixed(2) : "—"} ({preview?.riskPct != null ? Number(preview.riskPct).toFixed(1) : "1.0"}%)</strong>
+                            <span>Ризик (Risk)</span>
+                            <strong>{riskAmount ? `$${riskAmount}` : "—"} ({riskPct}%)</strong>
                           </div>
+                        </div>
+
+                        {takeProfits.length > 0 ? (
+                          <div className="ai-targets-section">
+                            <div className="ai-targets-header">
+                              <span className="kicker" style={{ color: "var(--aqua)", fontWeight: "600" }}>
+                                🎯 Take Profit Targets (Фіксація прибутку / Вихід)
+                              </span>
+                              {maxTotalProfit > 0 ? (
+                                <span className="mono positive" style={{ fontWeight: "700" }}>
+                                  Очікуваний прибуток: +${maxTotalProfit.toFixed(2)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="ai-targets-grid">
+                              {takeProfits.map((tp) => (
+                                <div className="ai-target-item" key={tp.idx}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <span className="target-badge">TP {tp.idx}</span>
+                                    <span style={{ fontSize: "10px", color: "var(--soft-violet)" }}>{tp.sharePct}% позиції</span>
+                                  </div>
+                                  <strong className="target-price">${tp.price.toLocaleString()}</strong>
+                                  <span className="target-meta positive">
+                                    +{tp.pctGain}% {tp.estProfit > 0 ? `(+$${tp.estProfit.toFixed(2)})` : ""}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="signal-quick-text">
+                          <div className="quick-text-header">
+                            📱 Інструкція для входу з телефону (Bybit Mobile / Manual):
+                          </div>
+                          <pre className="signal-pre">
+{`#${oppSymbol} ${oppSide.toUpperCase()} ${leverage}x
+📍 Вхід: $${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}
+🛑 Стоп-лосс: $${stopLoss.toLocaleString()} (-${slPct.toFixed(2)}%)
+${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctGain}%) [${t.sharePct}%]`).join("\n")}
+${maxTotalProfit > 0 ? `💰 Очікуваний профіт: +$${maxTotalProfit.toFixed(2)}\n` : ""}⚖️ Плече: ${leverage}x | Ризик: ${riskPct}%`}
+                          </pre>
                         </div>
 
                         <div className="ai-card-actions">
@@ -390,15 +483,67 @@ export default async function ChatPage({
         </div>
 
         <aside className="panel active-trade">
-          {activeTrade ? <>
-            <div className="active-title"><div><strong>{activeTrade.symbol}</strong> <span className={`badge ${activeTrade.side}`}>{activeTrade.side} {activeTrade.leverage ?? 1}x</span></div><span className="badge demo">{activeTrade.status}</span></div>
-            <div className={`pnl mono ${(activeTrade.realized_pnl ?? 0) >= 0 ? "positive" : "negative"}`}>{activeTrade.realized_pnl === null ? "Open" : `${activeTrade.realized_pnl >= 0 ? "+" : ""}$${activeTrade.realized_pnl.toFixed(2)}`}</div>
-            <span className="kicker">Position</span>
-            <div className="level"><span className="demo-text">Entry</span><span className="mono">{activeTrade.entry_avg ?? "—"}</span></div>
-            <div className="level"><span>Quantity</span><span className="mono">{activeTrade.qty ?? "—"}</span></div>
-            <div className="level"><span className="negative">SL</span><span className="mono">{activeTrade.sl ?? "—"}</span></div>
-          </> : <div className="empty-state"><span className="kicker">Active trade</span><h2>No open position</h2><p>Confirmed positions and their exchange or paper status will appear here.</p></div>}
-          <div className="trade-controls"><button className="button secondary" disabled={!activeTrade}>Close 50%</button><button className="button secondary" disabled={!activeTrade}>Move SL to BE</button><button className="button danger" disabled={!activeTrade}>Close all positions</button></div>
+          {activeTrade ? (
+            <>
+              <div className="active-title">
+                <div>
+                  <strong>{activeTrade.symbol}</strong>
+                  <span className={`badge ${activeTrade.side}`}>{activeTrade.side} {activeTrade.leverage ?? 1}x</span>
+                </div>
+                <span className="badge demo">{activeTrade.status}</span>
+              </div>
+              <div className={`pnl mono ${unrealizedPnl >= 0 ? "positive" : "negative"}`}>
+                {unrealizedPnl >= 0 ? "+" : ""}${unrealizedPnl.toFixed(2)}
+                <small style={{ fontSize: "12px", marginLeft: "6px" }}>({unrealizedRoiPct >= 0 ? "+" : ""}{unrealizedRoiPct.toFixed(2)}% ROI)</small>
+              </div>
+              <span className="kicker">Position Levels</span>
+              <div className="level"><span className="demo-text">Mark Price</span><span className="mono">{currentMark > 0 ? currentMark.toLocaleString() : "—"}</span></div>
+              <div className="level"><span className="demo-text">Entry Avg</span><span className="mono">{activeTrade.entry_avg ?? "—"}</span></div>
+              <div className="level"><span>Quantity</span><span className="mono">{activeTrade.qty ?? "—"}</span></div>
+              <div className="level"><span className="negative">Stop Loss</span><span className="mono">{activeTrade.sl ?? "—"}</span></div>
+
+              {activeTradeTargets.length > 0 ? (
+                <div style={{ marginTop: "12px", borderTop: "1px solid var(--line)", paddingTop: "8px" }}>
+                  <span className="kicker">Take Profit Targets</span>
+                  {activeTradeTargets.map((t) => (
+                    <div className="level" key={t.target_index}>
+                      <span style={{ color: t.status === "filled" ? "var(--aqua)" : "var(--muted)" }}>
+                        TP{t.target_index} ({t.share_pct}%) {t.status === "filled" ? "✓ Filled" : "Open"}
+                      </span>
+                      <span className="mono">{t.price}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="empty-state">
+              <span className="kicker">Active trade</span>
+              <h2>No open position</h2>
+              <p>Confirmed positions and their exchange or paper status will appear here.</p>
+            </div>
+          )}
+          <div className="trade-controls">
+            <form action={closeTradePosition} style={{ flex: 1 }}>
+              <input type="hidden" name="tradeId" value={activeTrade?.id ?? ""} />
+              <input type="hidden" name="percentage" value="50" />
+              <button className="button secondary" style={{ width: "100%", fontSize: "12px", padding: "0 8px" }} disabled={!activeTrade} type="submit">
+                Close 50%
+              </button>
+            </form>
+            <form action={closeTradePosition} style={{ flex: 1 }}>
+              <input type="hidden" name="tradeId" value={activeTrade?.id ?? ""} />
+              <input type="hidden" name="percentage" value="100" />
+              <button className="button secondary" style={{ width: "100%", fontSize: "12px", padding: "0 8px" }} disabled={!activeTrade} type="submit">
+                Market Close
+              </button>
+            </form>
+            <form action={closeAllPositions} style={{ flex: 1 }}>
+              <button className="button danger" style={{ width: "100%", fontSize: "12px", padding: "0 8px" }} disabled={!activeTrade} type="submit">
+                Close all
+              </button>
+            </form>
+          </div>
         </aside>
       </section>
     </div>

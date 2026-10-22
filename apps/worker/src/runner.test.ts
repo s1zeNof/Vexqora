@@ -98,4 +98,61 @@ describe("processJob", () => {
       processJob(mockSupabase as unknown as SupabaseClient, job, masterKey)
     ).rejects.toThrow("Open positions limit");
   });
+
+  it("rejects execution if max daily loss limit is reached", async () => {
+    const mockSupabase = {
+      from: vi.fn((table: string) => {
+        if (table === "risk_settings") {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            single: vi.fn().mockResolvedValue({
+              data: { kill_switch: false, max_open_positions: 5, risk_per_trade_pct: 1, max_daily_loss_pct: 5 },
+              error: null
+            })
+          };
+        }
+        if (table === "trades") {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            gte: vi.fn().mockResolvedValue({
+              data: [{ realized_pnl: -60 }],
+              error: null
+            }),
+            then: (resolve: (val: unknown) => void) => {
+              resolve({ count: 0, error: null });
+            }
+          };
+        }
+        return {};
+      })
+    };
+
+    const job: ExecutionJobData = {
+      job_id: "job-3",
+      account_id: "acc-1",
+      signal_id: "sig-3",
+      attempt_count: 0,
+      signal_parsed: {
+        symbol: "BTCUSDT",
+        side: "long",
+        entry: { type: "market" },
+        stopLoss: 64000,
+        takeProfits: [{ price: 67000, sharePct: 100 }],
+        source: "chat"
+      },
+      signal_raw: "BTCUSDT LONG market",
+      exchange_kind: "paper",
+      exchange_env: "demo",
+      api_key_enc: null,
+      api_secret_enc: null,
+      paper_balance: 1000
+    };
+
+    await expect(
+      processJob(mockSupabase as unknown as SupabaseClient, job, masterKey)
+    ).rejects.toThrow("Maximum daily loss reached");
+  });
 });
+

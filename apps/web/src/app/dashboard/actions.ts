@@ -1,6 +1,7 @@
 "use server";
 
-import { createBybitClient, decryptSecret, encryptSecret } from "@crypto-bot/exchange";
+import { createBybitClient, createPaperExchangeClient, decryptSecret, encryptSecret } from "@crypto-bot/exchange";
+import { roundToStep } from "@crypto-bot/trading";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -137,4 +138,200 @@ export async function updateProfile(formData: FormData) {
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/profile?saved=1");
 }
+
+interface AccountInfo {
+  id: string;
+  user_id: string;
+  exchange: string;
+  environment: "live" | "demo";
+  api_key_enc: string | null;
+  api_secret_enc: string | null;
+  paper_balance: number | null;
+}
+
+interface TradeWithAccount {
+  id: string;
+  symbol: string;
+  side: "long" | "short";
+  qty: number;
+  entry_avg: number | null;
+  exchange_accounts: AccountInfo;
+}
+
+export async function closeTradePosition(formData: FormData) {
+  const tradeId = textField(formData, "tradeId");
+  const qtyPctStr = textField(formData, "qtyPct");
+  const qtyPct = qtyPctStr === "50" ? 50 : 100;
+
+  const { supabase, user } = await authenticatedContext();
+
+  const tradeRes = await supabase
+    .from("trades")
+    .select("id, symbol, side, qty, entry_avg, exchange_accounts!inner(id, user_id, exchange, environment, api_key_enc, api_secret_enc, paper_balance)")
+    .eq("id", tradeId)
+    .eq("status", "active")
+    .single();
+
+  if (tradeRes.error || !tradeRes.data) throw new Error("Active trade not found");
+
+  const trade = tradeRes.data as unknown as TradeWithAccount;
+  const account = trade.exchange_accounts;
+
+  if (account.user_id !== user.id) throw new Error("Unauthorized");
+
+  const client = account.exchange === "paper"
+    ? createPaperExchangeClient({ balance: account.paper_balance ?? 0 })
+    : (() => {
+        if (!account.api_key_enc || !account.api_secret_enc) throw new Error("Exchange credentials missing");
+        return createBybitClient({
+          apiKey: decryptSecret(account.api_key_enc, masterKey()),
+          apiSecret: decryptSecret(account.api_secret_enc, masterKey()),
+          environment: account.environment
+        });
+      })();
+
+  const [instrument, ticker] = await Promise.all([
+    client.getInstrument(trade.symbol),
+    client.getTicker(trade.symbol)
+  ]);
+
+  const totalQty = Number(trade.qty);
+  const closeQty = qtyPct === 50
+    ? roundToStep(totalQty * 0.5, instrument.qtyStep, "down")
+    : totalQty;
+
+  if (closeQty <= 0) throw new Error("Calculated close quantity is too small");
+
+  await client.closePosition(trade.symbol, closeQty);
+
+  if (qtyPct === 100 || closeQty >= totalQty) {
+    try {
+      const openOrders = await client.getOpenOrders(trade.symbol);
+      for (const o of openOrders) {
+        await client.cancelOrder(trade.symbol, o.orderId);
+      }
+    } catch {
+      // non-fatal if orders already cancelled
+    }
+
+    const pnl = (ticker.lastPrice - Number(trade.entry_avg)) * totalQty * (trade.side === "long" ? 1 : -1);
+
+    await supabase.from("trades").update({
+      status: "closed",
+      closed_at: new Date().toISOString(),
+      realized_pnl: pnl
+    }).eq("id", trade.id);
+
+    await supabase.from("trade_targets").update({ status: "cancelled" }).eq("trade_id", trade.id).eq("status", "open");
+
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "system",
+      kind: "order_event",
+      content: `Market closed position for ${trade.symbol} @ ${ticker.lastPrice}. Realized PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT.`,
+      payload: { tradeId: trade.id, symbol: trade.symbol, pnl }
+    });
+  } else {
+    const remainingQty = totalQty - closeQty;
+    await supabase.from("trades").update({
+      qty: remainingQty
+    }).eq("id", trade.id);
+
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "system",
+      kind: "order_event",
+      content: `Closed 50% (${closeQty}) of position for ${trade.symbol} @ ${ticker.lastPrice}. Remaining size: ${remainingQty}.`,
+      payload: { tradeId: trade.id, symbol: trade.symbol, closedQty: closeQty, remainingQty }
+    });
+  }
+
+  revalidatePath("/dashboard/positions");
+  revalidatePath("/dashboard/history");
+  revalidatePath("/dashboard/chat");
+  revalidatePath("/dashboard");
+}
+
+export async function closeAllPositions(formData: FormData) {
+  const accountId = textField(formData, "accountId");
+  const { supabase, user } = await authenticatedContext();
+
+  const accountQuery = accountId
+    ? supabase.from("exchange_accounts").select("id, exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("id", accountId).eq("user_id", user.id).single()
+    : supabase.from("exchange_accounts").select("id, exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("user_id", user.id).eq("is_active", true).single();
+
+  const accRes = await accountQuery;
+  if (accRes.error || !accRes.data) throw new Error("Active account not found");
+  const account = accRes.data as unknown as AccountInfo;
+
+  const tradesRes = await supabase
+    .from("trades")
+    .select("id, symbol, side, qty, entry_avg")
+    .eq("account_id", account.id)
+    .eq("status", "active");
+
+  const activeTrades = (tradesRes.data ?? []) as unknown as Array<{
+    id: string;
+    symbol: string;
+    side: "long" | "short";
+    qty: number;
+    entry_avg: number | null;
+  }>;
+
+  if (activeTrades.length === 0) return;
+
+  const client = account.exchange === "paper"
+    ? createPaperExchangeClient({ balance: account.paper_balance ?? 0 })
+    : (() => {
+        if (!account.api_key_enc || !account.api_secret_enc) throw new Error("Exchange credentials missing");
+        return createBybitClient({
+          apiKey: decryptSecret(account.api_key_enc, masterKey()),
+          apiSecret: decryptSecret(account.api_secret_enc, masterKey()),
+          environment: account.environment
+        });
+      })();
+
+  for (const trade of activeTrades) {
+    try {
+      const ticker = await client.getTicker(trade.symbol);
+      await client.closePosition(trade.symbol, Number(trade.qty));
+
+      try {
+        const openOrders = await client.getOpenOrders(trade.symbol);
+        for (const o of openOrders) {
+          await client.cancelOrder(trade.symbol, o.orderId);
+        }
+      } catch {
+        // ignore
+      }
+
+      const pnl = (ticker.lastPrice - Number(trade.entry_avg)) * Number(trade.qty) * (trade.side === "long" ? 1 : -1);
+
+      await supabase.from("trades").update({
+        status: "closed",
+        closed_at: new Date().toISOString(),
+        realized_pnl: pnl
+      }).eq("id", trade.id);
+
+      await supabase.from("trade_targets").update({ status: "cancelled" }).eq("trade_id", trade.id).eq("status", "open");
+
+      await supabase.from("chat_messages").insert({
+        account_id: account.id,
+        role: "system",
+        kind: "order_event",
+        content: `Closed position for ${trade.symbol} via Close All. Realized PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT.`,
+        payload: { tradeId: trade.id, symbol: trade.symbol, pnl }
+      });
+    } catch {
+      // Continue closing others
+    }
+  }
+
+  revalidatePath("/dashboard/positions");
+  revalidatePath("/dashboard/history");
+  revalidatePath("/dashboard/chat");
+  revalidatePath("/dashboard");
+}
+
+
 
