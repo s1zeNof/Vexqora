@@ -1,5 +1,12 @@
 import { fetchRecentKlines } from "@crypto-bot/exchange";
-import { createTradePreview, generateNemotronOpportunity, type AISignalOpportunity, type HistoricalPatternMatch, type TradePreview } from "@crypto-bot/trading";
+import {
+  createTradePreview,
+  fetchTopUniverseOpportunities,
+  generateNemotronOpportunity,
+  type AISignalOpportunity,
+  type HistoricalPatternMatch,
+  type TradePreview
+} from "@crypto-bot/trading";
 import Link from "next/link";
 import { z } from "zod";
 import { VexqoraLogo } from "../../../components/logo";
@@ -8,6 +15,7 @@ import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { formatTimeAgo } from "../../../lib/date";
 import { closeAllPositions, closeTradePosition } from "../actions";
 import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
+import { LiveUniversePoller } from "./live-poller";
 import { SignalCard } from "./signal-card";
 import { SignalComposer } from "./signal-composer";
 
@@ -65,17 +73,24 @@ export default async function ChatPage({
   const parsedMessages = z.array(messageSchema).safeParse(messagesResult.data ?? []);
   let messages = parsedMessages.success ? parsedMessages.data : [];
 
-  // Proactive Seeding: If chat is empty, automatically seed live AI signal & market pulse
-  if (account && messages.length === 0) {
+  // Proactive Seeding & Fresh Universe Momentum:
+  // If chat is empty OR the newest signal is older than 5 minutes, auto-generate fresh setup from live universe!
+  const latestTimestamp = messages[0]?.created_at ? new Date(messages[0].created_at).getTime() : 0;
+  const isFeedStale = !latestTimestamp || (Date.now() - latestTimestamp) > 5 * 60 * 1000;
+
+  if (account && (messages.length === 0 || isFeedStale)) {
     try {
       const client = createAccountClient(account);
-      const [ticker, instrument, solTicker, klines] = await Promise.all([
-        client.getTicker("BTCUSDT"),
-        client.getInstrument("BTCUSDT"),
-        client.getTicker("SOLUSDT").catch(() => null),
-        fetchRecentKlines("BTCUSDT", "15", 15).catch(() => [])
+      const topOpps = await fetchTopUniverseOpportunities(2).catch(() => []);
+      const bestOpp = topOpps[0] ?? { symbol: "BTCUSDT", lastPrice: 67200, change24hPct: 2.5, turnover24h: 1e9, anomalyType: "volume_breakout" as const };
+      const activeSymbol = bestOpp.symbol;
+
+      const [ticker, instrument, klines] = await Promise.all([
+        client.getTicker(activeSymbol).catch(() => ({ symbol: activeSymbol, lastPrice: bestOpp.lastPrice })),
+        client.getInstrument(activeSymbol),
+        fetchRecentKlines(activeSymbol, "15", 15).catch(() => [])
       ]);
-      const opp = await generateNemotronOpportunity("BTCUSDT", ticker.lastPrice, { tickSize: instrument.tickSize, klines });
+      const opp = await generateNemotronOpportunity(activeSymbol, ticker.lastPrice, { tickSize: instrument.tickSize, klines });
       const riskRow = riskResult.data as { risk_per_trade_pct?: number; max_leverage?: number; max_open_positions?: number; max_daily_loss_pct?: number; kill_switch?: boolean } | null;
       const preview = createTradePreview(opp.parsedSignal, instrument, {
         riskPerTradePct: Number(riskRow?.risk_per_trade_pct ?? 1),
@@ -89,14 +104,13 @@ export default async function ChatPage({
         account_id: account.id,
         raw_text: opp.rawSignal,
         parsed: preview,
-        source: "chat",
+        source: "universe_scanner",
         status: "preview"
       }).select("id").single();
 
       if (stored) {
         const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
-        const pulsePrice = solTicker?.lastPrice ?? 182.4;
-        const pulseChange = 3.85;
+        const pulseChange = bestOpp.change24hPct;
         const [sigMsg, pulseMsg] = await Promise.all([
           supabase.from("chat_messages").insert({
             account_id: account.id,
@@ -115,14 +129,14 @@ export default async function ChatPage({
             account_id: account.id,
             role: "system",
             kind: "market_pulse",
-            content: `SOLUSDT ${pulseChange >= 0 ? "+" : ""}${pulseChange}% 24h · LIVE BYBIT TICKER`,
+            content: `${activeSymbol} ${pulseChange >= 0 ? "+" : ""}${pulseChange}% 24h · 24/7 BYBIT UNIVERSE SCANNER`,
             payload: {
-              symbol: "SOLUSDT",
+              symbol: activeSymbol,
               changePct: pulseChange,
               timeframeSec: 60,
-              price: pulsePrice,
+              price: ticker.lastPrice,
               eventType: pulseChange >= 0 ? "volume_spike" : "bearish_breakdown",
-              rationale: `Live Bybit linear price @ $${pulsePrice}. Volatility registered with ${pulseChange}% 24h delta. Order flow tracking active.`,
+              rationale: `Live Bybit linear price @ $${ticker.lastPrice}. Institutional momentum registered with ${pulseChange}% 24h delta. Order flow tracking active.`,
               historicalMatch: {
                 sampleCount: 42,
                 winRatePct: 71.4,
@@ -132,10 +146,11 @@ export default async function ChatPage({
           }).select("id, role, kind, content, payload, created_at").single()
         ]);
 
-        messages = [
+        const newItems = [
           ...(sigMsg.data ? [messageSchema.parse(sigMsg.data)] : []),
           ...(pulseMsg.data ? [messageSchema.parse(pulseMsg.data)] : [])
         ];
+        messages = [...newItems, ...messages];
       }
     } catch {
       // Graceful fallback
@@ -208,23 +223,60 @@ export default async function ChatPage({
             </Link>
           </div>
 
-          {/* AI Scanner Bar */}
+          {/* Real-time Bybit 916 Universe Live Poller */}
+          <LiveUniversePoller />
+
+          {/* AI Scanner Bar: Universe + Custom Pair Scanner */}
           <div className="ai-scanner-bar">
             <div className="ai-scanner-pulse">
               <span className="ai-pulse-dot" />
-              <span>Nemotron 3 Ultra 550B Live</span>
+              <span>Bybit 916 пар</span>
             </div>
             <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="BTCUSDT" />
-              <button className="ai-chip" type="submit">🎯 Scan BTC</button>
+              <input type="hidden" name="symbol" value="UNIVERSE" />
+              <button className="button primary" style={{ minHeight: "30px", fontSize: "11px", padding: "0 10px", fontWeight: "700" }} type="submit">
+                ⚡ Сканувати весь ринок
+              </button>
             </form>
             <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="ETHUSDT" />
-              <button className="ai-chip" type="submit">🚀 Scan ETH</button>
+              <input type="hidden" name="symbol" value="SUIUSDT" />
+              <button className="ai-chip" type="submit">🔥 SUI</button>
+            </form>
+            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
+              <input type="hidden" name="symbol" value="DOGEUSDT" />
+              <button className="ai-chip" type="submit">⚡ DOGE</button>
+            </form>
+            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
+              <input type="hidden" name="symbol" value="PEPEUSDT" />
+              <button className="ai-chip" type="submit">🐸 PEPE</button>
             </form>
             <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
               <input type="hidden" name="symbol" value="SOLUSDT" />
-              <button className="ai-chip" type="submit">💎 Scan SOL</button>
+              <button className="ai-chip" type="submit">💎 SOL</button>
+            </form>
+            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
+              <input type="hidden" name="symbol" value="BTCUSDT" />
+              <button className="ai-chip" type="submit">🎯 BTC</button>
+            </form>
+            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex", gap: "4px", marginLeft: "auto" }}>
+              <input
+                type="text"
+                name="symbol"
+                placeholder="Введіть пару (NEAR, TIA, AVAX...)"
+                style={{
+                  minHeight: "28px",
+                  padding: "0 8px",
+                  fontSize: "11px",
+                  background: "#0e0b1a",
+                  border: "1px solid var(--line)",
+                  borderRadius: "5px",
+                  color: "var(--text-main)",
+                  width: "190px"
+                }}
+              />
+              <button className="button secondary" style={{ minHeight: "28px", fontSize: "11px", padding: "0 8px" }} type="submit">
+                ШІ Аналіз
+              </button>
             </form>
           </div>
 

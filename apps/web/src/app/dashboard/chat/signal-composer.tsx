@@ -46,7 +46,7 @@ export function SignalComposer() {
           id="signal"
           name="signal"
           rows={1}
-          placeholder='Ask AI to scan (e.g. "Scan SOL", "BTC") or paste a signal...'
+          placeholder='Сканувати будь-яку пару Bybit ("Scan SUI", "Scan NEAR", "Scan PEPE", "Scan All") або вставити готовий сигнал...'
           required
         />
         <button className="button secondary" type="button">Form</button>

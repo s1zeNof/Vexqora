@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { VexqoraPulseScanner } from "./pulse";
+import { fetchTopUniverseOpportunities, VexqoraPulseScanner } from "./pulse";
 
 describe("Vexqora Pulse Scanner", () => {
   it("detects rapid price spike anomalies across universe", () => {
@@ -38,5 +38,13 @@ describe("Vexqora Pulse Scanner", () => {
     ], t0 + 15000);
 
     expect(anomalies.length).toBe(0);
+  });
+
+  it("fetches top universe opportunities from ticker feed", async () => {
+    const opps = await fetchTopUniverseOpportunities(3);
+    expect(opps.length).toBeGreaterThan(0);
+    expect(opps[0]?.symbol).toBeDefined();
+    expect(opps[0]?.lastPrice).toBeGreaterThan(0);
+    expect(opps[0]?.turnover24h).toBeGreaterThan(0);
   });
 });

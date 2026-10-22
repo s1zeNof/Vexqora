@@ -4,6 +4,7 @@ import { fetchRecentKlines } from "@crypto-bot/exchange";
 import {
   createTradePreview,
   enhanceNemotronSignal,
+  fetchTopUniverseOpportunities,
   findHistoricalPatternMatch,
   generateNemotronOpportunity,
   parseSignalText,
@@ -38,10 +39,17 @@ const riskRow = z.object({
 
 export async function scanMarketOpportunityAction(formData: FormData): Promise<void> {
   try {
-    const rawSymbol = (textField(formData, "symbol") || "BTCUSDT").toUpperCase();
-    const symbolsToScan = (rawSymbol === "ALL" || rawSymbol === "UNIVERSE")
-      ? ["SOLUSDT", "SUIUSDT", "BTCUSDT", "ETHUSDT"]
-      : [rawSymbol];
+    const rawSymbol = (textField(formData, "symbol") || "UNIVERSE").toUpperCase().trim();
+    let symbolsToScan: string[] = [];
+
+    if (rawSymbol === "ALL" || rawSymbol === "UNIVERSE" || rawSymbol === "ВСЕ" || rawSymbol === "РИНОК") {
+      const topOpps = await fetchTopUniverseOpportunities(3);
+      symbolsToScan = topOpps.map(o => o.symbol);
+    } else {
+      let clean = rawSymbol.replace(/[^A-Z0-9]/g, "");
+      if (!clean.endsWith("USDT")) clean = `${clean}USDT`;
+      symbolsToScan = [clean];
+    }
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) redirect("/login");
@@ -349,8 +357,18 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
     const words = rawText.toUpperCase().split(/\s+/);
     const isScanRequest = rawText.toLowerCase().includes("scan") || (!rawText.includes("LONG") && !rawText.includes("SHORT"));
     if (isScanRequest) {
-      let targetSymbol = words.find(w => w.endsWith("USDT") || ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"].includes(w)) ?? "BTCUSDT";
-      if (!targetSymbol.endsWith("USDT")) targetSymbol = `${targetSymbol}USDT`;
+      const isUniverse = rawText.toUpperCase().includes("ALL") || rawText.toUpperCase().includes("UNIVERSE") || rawText.toUpperCase().includes("ВСЕ") || rawText.toUpperCase().includes("РИНОК");
+      let targetSymbol: string;
+      if (isUniverse) {
+        const topOpps = await fetchTopUniverseOpportunities(1);
+        targetSymbol = topOpps[0]?.symbol ?? "BTCUSDT";
+      } else {
+        const cleanWords = words
+          .map(w => w.replace(/[^A-Z0-9]/g, ""))
+          .filter(w => !["SCAN", "AI", "PAIR", "ANALYZE", "CHECK", "TOKEN", "COIN", "SIGNAL", "FIND", "SETUP"].includes(w) && w.length >= 2);
+        targetSymbol = cleanWords.find(w => w.endsWith("USDT")) ?? cleanWords[0] ?? "BTCUSDT";
+        if (!targetSymbol.endsWith("USDT")) targetSymbol = `${targetSymbol}USDT`;
+      }
 
       const [ticker, instrument, klines] = await Promise.all([
         client.getTicker(targetSymbol),
