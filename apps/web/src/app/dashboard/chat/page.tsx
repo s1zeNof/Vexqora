@@ -5,25 +5,11 @@ import { z } from "zod";
 import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { formatTimeAgo } from "../../../lib/date";
 import { closeAllPositions, closeTradePosition } from "../actions";
 import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
 import { SignalCard } from "./signal-card";
 import { SignalComposer } from "./signal-composer";
-
-function formatTimeAgo(dateInput?: string | number | null): string {
-  if (!dateInput) return "just now";
-  const timestamp = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
-  if (!Number.isFinite(timestamp)) return "just now";
-  const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (diffSec < 5) return "just now";
-  if (diffSec < 60) return `${diffSec} sec ago`;
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} min ago`;
-  const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour} h ago`;
-  const diffDays = Math.floor(diffHour / 24);
-  return `${diffDays} d ago`;
-}
 
 const messageSchema = z.object({
   id: z.string(),
@@ -327,7 +313,6 @@ export default async function ChatPage({
                         signalId={signalId}
                         rawSignal={rawSignal}
                         hist={hist}
-                        formatTimeAgo={formatTimeAgo}
                       />
                     );
                   }

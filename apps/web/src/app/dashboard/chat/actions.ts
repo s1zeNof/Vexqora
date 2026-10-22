@@ -246,7 +246,7 @@ export async function analyzePulseAction(formData: FormData): Promise<void> {
 
 export async function enhanceSignalAction(formData: FormData): Promise<void> {
   try {
-    const rawSignal = textField(formData, "rawSignal");
+    const rawSignal = textField(formData, "rawSignal") || textField(formData, "rawText");
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) redirect("/login");

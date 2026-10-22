@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import type { AISignalOpportunity, HistoricalPatternMatch, NemotronVisionAnalysis } from "@crypto-bot/trading";
 import type { TradePreview } from "@crypto-bot/trading";
+import { formatTimeAgo } from "../../../lib/date";
 import { confirmSignal, enhanceSignalAction } from "./actions";
 
 interface SignalCardProps {
@@ -13,7 +14,6 @@ interface SignalCardProps {
   signalId?: string | null | undefined;
   rawSignal?: string | null | undefined;
   hist?: HistoricalPatternMatch | undefined;
-  formatTimeAgo: (dateInput?: string | number | null) => string;
 }
 
 export function SignalCard({
@@ -23,8 +23,7 @@ export function SignalCard({
   preview,
   signalId,
   rawSignal,
-  hist,
-  formatTimeAgo
+  hist
 }: SignalCardProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"smc" | "targets" | "mobile" | "vision">("smc");
@@ -48,45 +47,70 @@ export function SignalCard({
   const previewSignal = preview?.signal;
   const symbol = opp?.symbol ?? previewSignal?.symbol ?? "BTCUSDT";
   const side = opp?.side ?? previewSignal?.side ?? "long";
-  const qualityScore = opp?.qualityScore ? opp.qualityScore.toFixed(1) : "9.3";
+  const qualityScore = opp?.qualityScore != null && Number.isFinite(Number(opp.qualityScore))
+    ? Number(opp.qualityScore).toFixed(1)
+    : "9.3";
   const qualityTier = opp?.qualityTier ?? "A+";
   const strategy = opp?.strategy ?? "Institutional Smart Money Setup";
   const rationale = opp?.rationale ?? "Structural liquidity sweep and volume confirmation.";
 
-  const entryPrice = preview?.entryPrice != null
+  const entryPrice = preview?.entryPrice != null && Number.isFinite(Number(preview.entryPrice))
     ? Number(preview.entryPrice)
-    : (opp?.entryPrice != null ? Number(opp.entryPrice) : Number(opp?.currentPrice ?? 0));
-  const stopLoss = opp?.stopLoss != null
+    : (opp?.entryPrice != null && Number.isFinite(Number(opp.entryPrice))
+        ? Number(opp.entryPrice)
+        : Number(opp?.currentPrice ?? 0));
+  const stopLoss = opp?.stopLoss != null && Number.isFinite(Number(opp.stopLoss))
     ? Number(opp.stopLoss)
-    : (previewSignal?.stopLoss != null ? Number(previewSignal.stopLoss) : 0);
-  const leverage = preview?.leverage != null
+    : (previewSignal?.stopLoss != null && Number.isFinite(Number(previewSignal.stopLoss))
+        ? Number(previewSignal.stopLoss)
+        : 0);
+  const leverage = preview?.leverage != null && Number.isFinite(Number(preview.leverage))
     ? Number(preview.leverage)
-    : (opp?.suggestedLeverage != null ? Number(opp.suggestedLeverage) : 5);
-  const riskPct = preview?.riskPct != null ? Number(preview.riskPct).toFixed(1) : "1.0";
-  const riskAmount = preview?.riskAmount != null ? Number(preview.riskAmount).toFixed(2) : null;
-  const qty = preview?.qty != null ? Number(preview.qty) : 0;
-  const winProb = Number(opp?.winProbabilityPct ?? 73);
-  const rr = preview?.weightedRewardRisk != null
+    : (opp?.suggestedLeverage != null && Number.isFinite(Number(opp.suggestedLeverage))
+        ? Number(opp.suggestedLeverage)
+        : 5);
+  const riskPct = preview?.riskPct != null && Number.isFinite(Number(preview.riskPct))
+    ? Number(preview.riskPct).toFixed(1)
+    : "1.0";
+  const riskAmount = preview?.riskAmount != null && Number.isFinite(Number(preview.riskAmount))
+    ? Number(preview.riskAmount).toFixed(2)
+    : null;
+  const qty = preview?.qty != null && Number.isFinite(Number(preview.qty))
+    ? Number(preview.qty)
+    : 0;
+  const winProb = Number.isFinite(Number(opp?.winProbabilityPct))
+    ? Number(opp?.winProbabilityPct)
+    : 73;
+  const rr = preview?.weightedRewardRisk != null && Number.isFinite(Number(preview.weightedRewardRisk))
     ? Number(preview.weightedRewardRisk).toFixed(2)
-    : (opp?.riskReward != null ? Number(opp.riskReward).toFixed(2) : "2.40");
+    : (opp?.riskReward != null && Number.isFinite(Number(opp.riskReward))
+        ? Number(opp.riskReward).toFixed(2)
+        : "2.40");
 
   const rawTps = opp?.takeProfits ?? previewSignal?.takeProfits ?? [];
   const takeProfits = rawTps.map((t, idx) => {
-    const price = Number(t.price);
-    const sharePct = Number(t.sharePct);
+    const price = Number(t?.price ?? 0);
+    const sharePct = Number(t?.sharePct ?? 0);
     const pctGain = entryPrice > 0
       ? (side === "long" ? ((price - entryPrice) / entryPrice) * 100 : ((entryPrice - price) / entryPrice) * 100)
       : 0;
     const estProfit = qty > 0
       ? (side === "long" ? (price - entryPrice) * qty * (sharePct / 100) : (entryPrice - price) * qty * (sharePct / 100))
       : 0;
-    return { idx: idx + 1, price, sharePct, pctGain: Number(pctGain.toFixed(2)), estProfit: Number(estProfit.toFixed(2)) };
+    return {
+      idx: idx + 1,
+      price,
+      sharePct,
+      pctGain: Number.isFinite(pctGain) ? Number(pctGain.toFixed(2)) : 0,
+      estProfit: Number.isFinite(estProfit) ? Number(estProfit.toFixed(2)) : 0
+    };
   });
 
-  const maxTotalProfit = takeProfits.reduce((acc, curr) => acc + curr.estProfit, 0);
-  const slPct = entryPrice > 0
+  const maxTotalProfit = takeProfits.reduce((acc, curr) => acc + (Number.isFinite(curr.estProfit) ? curr.estProfit : 0), 0);
+  const rawSlPct = entryPrice > 0
     ? (side === "long" ? ((entryPrice - stopLoss) / entryPrice) * 100 : ((stopLoss - entryPrice) / entryPrice) * 100)
     : 0;
+  const slPct = Number.isFinite(rawSlPct) ? rawSlPct : 0;
 
   const tp1 = takeProfits[0];
 
@@ -451,6 +475,7 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctG
                   <form action={enhanceSignalAction}>
                     <input type="hidden" name="signalId" value={signalId} />
                     <input type="hidden" name="symbol" value={symbol} />
+                    <input type="hidden" name="rawSignal" value={rawSignal} />
                     <input type="hidden" name="rawText" value={rawSignal} />
                     <button
                       type="submit"
