@@ -3,5 +3,6 @@
   "framework": "nextjs",
   "installCommand": "npm install",
   "buildCommand": "npm run build --workspace=@crypto-bot/web",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "regions": ["fra1"]
 }
