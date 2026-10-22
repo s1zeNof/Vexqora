@@ -96,11 +96,12 @@ export class PaperExchangeClient implements ExchangeClient {
 
       const isBtc = norm.includes("BTC");
       const isEth = norm.includes("ETH");
+      const isSubDollar = norm.includes("IOST") || norm.includes("PEPE") || norm.includes("SHIB") || norm.includes("BONK") || norm.includes("DOGE") || norm.includes("NOT") || norm.includes("FLOKI") || norm.includes("GALA") || norm.includes("HOT");
       return {
         symbol: norm,
-        tickSize: isBtc ? 0.1 : (isEth ? 0.01 : 0.001),
-        qtyStep: isBtc ? 0.001 : (isEth ? 0.01 : 0.1),
-        minQty: isBtc ? 0.001 : (isEth ? 0.01 : 0.1),
+        tickSize: isBtc ? 0.1 : (isEth ? 0.01 : (isSubDollar ? 0.000001 : 0.0001)),
+        qtyStep: isBtc ? 0.001 : (isEth ? 0.01 : 1),
+        minQty: isBtc ? 0.001 : (isEth ? 0.01 : 1),
         minNotional: 5,
         maxLeverage: isBtc || isEth ? 100 : 50
       };

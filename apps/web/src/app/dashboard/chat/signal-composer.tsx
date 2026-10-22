@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { formatCryptoPrice } from "../../../lib/format";
 import { cancelSignal, confirmSignal, previewSignal, type PreviewState } from "./actions";
 
 const initialState: PreviewState = {};
@@ -14,7 +15,7 @@ export function SignalComposer() {
         <article className="preview-card">
           <div className="preview-heading"><div><span className={`badge ${state.preview.signal.side}`}>{state.preview.signal.side}</span><h2>{state.preview.signal.symbol} preview</h2></div><span className="kicker">Ready to confirm</span></div>
           <dl>
-            <div><dt>Entry</dt><dd>{state.preview.entryPrice}</dd></div>
+            <div><dt>Entry</dt><dd>${formatCryptoPrice(state.preview.entryPrice)}</dd></div>
             <div><dt>Quantity</dt><dd>{state.preview.qty}</dd></div>
             <div><dt>Notional</dt><dd>${state.preview.notional.toFixed(2)}</dd></div>
             <div><dt>Risk</dt><dd>${state.preview.riskAmount.toFixed(2)} · {state.preview.riskPct.toFixed(2)}%</dd></div>
@@ -28,7 +29,7 @@ export function SignalComposer() {
                 {state.preview.signal.takeProfits.map((tp, idx) => (
                   <div key={idx} style={{ background: "#171229", padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--line)" }}>
                     <div style={{ fontSize: "10px", color: "var(--muted)" }}>TP {idx + 1} ({tp.sharePct}%)</div>
-                    <strong className="mono positive" style={{ fontSize: "13px" }}>${tp.price}</strong>
+                    <strong className="mono positive" style={{ fontSize: "13px" }}>${formatCryptoPrice(tp.price)}</strong>
                   </div>
                 ))}
               </div>

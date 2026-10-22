@@ -1,4 +1,4 @@
-import type { Kline, Signal } from "@crypto-bot/shared";
+import { formatCryptoPrice, type Kline, type Signal } from "@crypto-bot/shared";
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
@@ -151,6 +151,20 @@ export function calculateSMCContext(
   };
 }
 
+export function getSensibleTickSize(price: number, declaredTickSize?: number): number {
+  if (declaredTickSize && declaredTickSize > 0 && declaredTickSize < price * 0.05) {
+    return declaredTickSize;
+  }
+  if (price < 0.0001) return 0.00000001;
+  if (price < 0.001) return 0.0000001;
+  if (price < 0.01) return 0.000001;
+  if (price < 0.1) return 0.00001;
+  if (price < 1) return 0.0001;
+  if (price < 10) return 0.001;
+  if (price < 500) return 0.01;
+  return 0.1;
+}
+
 export function generateOpportunityFromTicker(
   symbol: string,
   lastPrice: number,
@@ -163,7 +177,7 @@ export function generateOpportunityFromTicker(
   }
 ): AISignalOpportunity {
   const normSymbol = symbol.toUpperCase();
-  const tickSize = options?.tickSize ?? (lastPrice > 500 ? 0.1 : lastPrice > 1 ? 0.01 : 0.0001);
+  const tickSize = getSensibleTickSize(lastPrice, options?.tickSize);
 
   // 1. Calculate real SMC context
   const smc = calculateSMCContext(options?.klines ?? [], lastPrice);
@@ -236,16 +250,16 @@ risk ${risk}%`;
     : (smc.sweptLiquidity ? "Liquidity Grab + Bearish Breakdown" : "Bearish Order Block & Trend Continuation");
 
   const rationale = side === "long"
-    ? `Price swept sell-side liquidity at $${smc.swingLow.toLocaleString()} with strong institutional absorption above 20 EMA. A bullish Change of Character (CHOCH) confirms buyer dominance. Stop loss is strictly anchored below structural invalidation ($${stopLoss.toLocaleString()}) targeting untraded buy-side imbalance at $${tp1.toLocaleString()} and $${tp2.toLocaleString()}.`
-    : `Price rejected overhead premium resistance at $${smc.swingHigh.toLocaleString()} with aggressive delta selling below 20 EMA. Structure confirms a bearish Break of Structure (BOS). Stop loss is positioned above the displacement origin ($${stopLoss.toLocaleString()}) targeting sell-side liquidity pools at $${tp1.toLocaleString()} and $${tp2.toLocaleString()}.`;
+    ? `Price swept sell-side liquidity at $${formatCryptoPrice(smc.swingLow)} with strong institutional absorption above 20 EMA. A bullish Change of Character (CHOCH) confirms buyer dominance. Stop loss is strictly anchored below structural invalidation ($${formatCryptoPrice(stopLoss)}) targeting untraded buy-side imbalance at $${formatCryptoPrice(tp1)} and $${formatCryptoPrice(tp2)}.`
+    : `Price rejected overhead premium resistance at $${formatCryptoPrice(smc.swingHigh)} with aggressive delta selling below 20 EMA. Structure confirms a bearish Break of Structure (BOS). Stop loss is positioned above the displacement origin ($${formatCryptoPrice(stopLoss)}) targeting sell-side liquidity pools at $${formatCryptoPrice(tp1)} and $${formatCryptoPrice(tp2)}.`;
 
   const smcAnalysis: SMCAnalysis = {
     timeframe1D: side === "long" ? "Bullish Accumulation above Macro Support" : "Bearish Distribution below Daily Resistance",
-    timeframe4H: side === "long" ? `4H Equilibrium retested; Buy-Side Liquidity targeted at $${tp2.toLocaleString()}` : `4H Imbalance rejection; Sell-Side Liquidity targeted at $${tp2.toLocaleString()}`,
+    timeframe4H: side === "long" ? `4H Equilibrium retested; Buy-Side Liquidity targeted at $${formatCryptoPrice(tp2)}` : `4H Imbalance rejection; Sell-Side Liquidity targeted at $${formatCryptoPrice(tp2)}`,
     timeframe15M: side === "long" ? `15m Bullish CHOCH verified; Entry on displacement candle reclaim` : `15m Bearish BOS verified; Entry on breakdown continuation`,
     invalidationPrice: stopLoss,
-    fvgZone: smc.fvgMid ? `$${roundToStep(smc.fvgMid, tickSize).toLocaleString()}` : undefined,
-    orderBlockZone: side === "long" ? `$${stopLoss.toLocaleString()} - $${lastPrice.toLocaleString()}` : `$${lastPrice.toLocaleString()} - $${stopLoss.toLocaleString()}`
+    fvgZone: smc.fvgMid ? `$${formatCryptoPrice(roundToStep(smc.fvgMid, tickSize))}` : undefined,
+    orderBlockZone: side === "long" ? `$${formatCryptoPrice(stopLoss)} - $${formatCryptoPrice(lastPrice)}` : `$${formatCryptoPrice(lastPrice)} - $${formatCryptoPrice(stopLoss)}`
   };
 
   const qualityScore = rr >= 2.5 ? 9.5 : rr >= 2.0 ? 9.2 : 8.8;

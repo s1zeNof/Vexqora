@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import type { AISignalOpportunity, HistoricalPatternMatch, NemotronVisionAnalysis } from "@crypto-bot/trading";
-import type { TradePreview } from "@crypto-bot/trading";
+import type { AISignalOpportunity, HistoricalPatternMatch, NemotronVisionAnalysis, TradePreview } from "@crypto-bot/trading";
 import { formatTimeAgo } from "../../../lib/date";
+import { formatCryptoPrice } from "../../../lib/format";
 import { confirmSignal, enhanceSignalAction } from "./actions";
 
 interface SignalCardProps {
@@ -115,9 +115,9 @@ export function SignalCard({
   const tp1 = takeProfits[0];
 
   const mobileText = `#${symbol} ${side.toUpperCase()} ${leverage}x
-📍 Вхід: $${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}
-🛑 Стоп-лосс: $${stopLoss.toLocaleString()} (-${slPct.toFixed(2)}%)
-${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctGain}%) [${t.sharePct}%]`).join("\n")}
+📍 Вхід: ${entryPrice > 0 ? `$${formatCryptoPrice(entryPrice)}` : "Market"}
+🛑 Стоп-лосс: $${formatCryptoPrice(stopLoss)} (-${slPct.toFixed(2)}%)
+${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pctGain}%) [${t.sharePct}%]`).join("\n")}
 ⚡ Плече: ${leverage}x · Ризик: ${riskPct}%`;
 
   const copyMobileText = async () => {
@@ -183,16 +183,16 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctG
         <div className="compact-signal-metrics">
           <div className="metric-pill">
             <span className="pill-label">Вхід</span>
-            <strong className="mono">${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}</strong>
+            <strong className="mono">{entryPrice > 0 ? `$${formatCryptoPrice(entryPrice)}` : "Market"}</strong>
           </div>
           <div className="metric-pill">
             <span className="pill-label">SL</span>
-            <strong className="mono negative">${stopLoss > 0 ? stopLoss.toLocaleString() : "—"}</strong>
+            <strong className="mono negative">${stopLoss > 0 ? formatCryptoPrice(stopLoss) : "—"}</strong>
           </div>
           {tp1 ? (
             <div className="metric-pill">
               <span className="pill-label">TP 1</span>
-              <strong className="mono positive">${tp1.price.toLocaleString()}</strong>
+              <strong className="mono positive">${formatCryptoPrice(tp1.price)}</strong>
             </div>
           ) : null}
           <div className="metric-pill">
@@ -307,7 +307,7 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctG
                     </div>
                     <div className="smc-card">
                       <span className="smc-tag">4H Structure</span>
-                      <strong>{opp?.smcAnalysis?.timeframe4H ?? `4H Liquidity targeted at $${tp1?.price.toLocaleString() ?? "Target"}`}</strong>
+                      <strong>{opp?.smcAnalysis?.timeframe4H ?? `4H Liquidity targeted at $${tp1?.price ? formatCryptoPrice(tp1.price) : "Target"}`}</strong>
                     </div>
                     <div className="smc-card">
                       <span className="smc-tag">15m Trigger</span>
@@ -315,7 +315,7 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctG
                     </div>
                     <div className="smc-card">
                       <span className="smc-tag negative">Invalidation (SL)</span>
-                      <strong className="negative">${stopLoss.toLocaleString()} (-{slPct.toFixed(2)}%)</strong>
+                      <strong className="negative">${formatCryptoPrice(stopLoss)} (-{slPct.toFixed(2)}%)</strong>
                     </div>
                   </div>
 
@@ -338,11 +338,11 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctG
                   <div className="ai-setup-grid" style={{ marginBottom: "16px" }}>
                     <div className="ai-setup-item">
                       <span>Вхід (Entry)</span>
-                      <strong>${entryPrice > 0 ? entryPrice.toLocaleString() : "Market"}</strong>
+                      <strong>{entryPrice > 0 ? `$${formatCryptoPrice(entryPrice)}` : "Market"}</strong>
                     </div>
                     <div className="ai-setup-item">
                       <span>Стоп-лосс (SL)</span>
-                      <strong className="negative">${stopLoss > 0 ? stopLoss.toLocaleString() : "—"} (-{slPct.toFixed(2)}%)</strong>
+                      <strong className="negative">{stopLoss > 0 ? `$${formatCryptoPrice(stopLoss)}` : "—"} (-{slPct.toFixed(2)}%)</strong>
                     </div>
                     <div className="ai-setup-item">
                       <span>Win Prob / R:R</span>
@@ -373,7 +373,7 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${t.price.toLocaleString()} (+${t.pctG
                             <span className="target-badge">TP {tp.idx}</span>
                             <span style={{ fontSize: "11px", color: "var(--soft-violet)" }}>{tp.sharePct}% позиції</span>
                           </div>
-                          <strong className="target-price" style={{ fontSize: "16px", margin: "4px 0" }}>${tp.price.toLocaleString()}</strong>
+                          <strong className="target-price" style={{ fontSize: "16px", margin: "4px 0" }}>${formatCryptoPrice(tp.price)}</strong>
                           <span className="target-meta positive">
                             +{tp.pctGain}% {tp.estProfit > 0 ? `(+$${tp.estProfit.toFixed(2)})` : ""}
                           </span>

@@ -13,6 +13,7 @@ import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { formatTimeAgo } from "../../../lib/date";
+import { formatCryptoPrice } from "../../../lib/format";
 import { closeAllPositions, closeTradePosition } from "../actions";
 import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
 import { LiveUniversePoller } from "./live-poller";
@@ -413,10 +414,10 @@ export default async function ChatPage({
                 <small style={{ fontSize: "12px", marginLeft: "6px" }}>({unrealizedRoiPct >= 0 ? "+" : ""}{unrealizedRoiPct.toFixed(2)}% ROI)</small>
               </div>
               <span className="kicker">Position Levels</span>
-              <div className="level"><span className="demo-text">Mark Price</span><span className="mono">{currentMark > 0 ? currentMark.toLocaleString() : "—"}</span></div>
-              <div className="level"><span className="demo-text">Entry Avg</span><span className="mono">{activeTrade.entry_avg ?? "—"}</span></div>
+              <div className="level"><span className="demo-text">Mark Price</span><span className="mono">{currentMark > 0 ? formatCryptoPrice(currentMark) : "—"}</span></div>
+              <div className="level"><span className="demo-text">Entry Avg</span><span className="mono">{activeTrade.entry_avg ? formatCryptoPrice(Number(activeTrade.entry_avg)) : "—"}</span></div>
               <div className="level"><span>Quantity</span><span className="mono">{activeTrade.qty ?? "—"}</span></div>
-              <div className="level"><span className="negative">Stop Loss</span><span className="mono">{activeTrade.sl ?? "—"}</span></div>
+              <div className="level"><span className="negative">Stop Loss</span><span className="mono">{activeTrade.sl ? formatCryptoPrice(Number(activeTrade.sl)) : "—"}</span></div>
 
               {activeTradeTargets.length > 0 ? (
                 <div style={{ marginTop: "12px", borderTop: "1px solid var(--line)", paddingTop: "8px" }}>
@@ -426,7 +427,7 @@ export default async function ChatPage({
                       <span style={{ color: t.status === "filled" ? "var(--aqua)" : "var(--muted)" }}>
                         TP{t.target_index} ({t.share_pct}%) {t.status === "filled" ? "✓ Filled" : "Open"}
                       </span>
-                      <span className="mono">{t.price}</span>
+                      <span className="mono">{t.price ? formatCryptoPrice(Number(t.price)) : "—"}</span>
                     </div>
                   ))}
                 </div>

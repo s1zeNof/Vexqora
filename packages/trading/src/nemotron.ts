@@ -1,6 +1,6 @@
-import type { Kline } from "@crypto-bot/shared";
+import { formatCryptoPrice, type Kline } from "@crypto-bot/shared";
 import type { AISignalOpportunity, EnhancedSignalResult, SMCAnalysis } from "./ai-copilot";
-import { generateOpportunityFromTicker } from "./ai-copilot";
+import { generateOpportunityFromTicker, getSensibleTickSize } from "./ai-copilot";
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
@@ -269,7 +269,7 @@ export async function generateNemotronOpportunity(
   }
 ): Promise<AISignalOpportunity> {
   const normSymbol = symbol.toUpperCase();
-  const tickSize = options?.tickSize ?? (currentPrice > 500 ? 0.1 : currentPrice > 1 ? 0.01 : 0.0001);
+  const tickSize = getSensibleTickSize(currentPrice, options?.tickSize);
   const hist = options?.historicalContext ?? findHistoricalPatternMatch(normSymbol, "liquidity_sweep", 2.5, options?.klines);
 
   const klines = options?.klines ?? [];
@@ -362,10 +362,10 @@ risk ${risk}%`;
 
         const smcAnalysis: SMCAnalysis = {
           timeframe1D: parsedJSON.smc1D || (side === "long" ? "Bullish Institutional Accumulation" : "Bearish Distribution"),
-          timeframe4H: parsedJSON.smc4H || `4H Liquidity pool target at $${tp2.toLocaleString()}`,
+          timeframe4H: parsedJSON.smc4H || `4H Liquidity pool target at $${formatCryptoPrice(tp2)}`,
           timeframe15M: parsedJSON.smc15M || `15m ${side === "long" ? "Bullish CHOCH Reclaim" : "Bearish BOS Continuation"}`,
           invalidationPrice: sl,
-          orderBlockZone: `$${Math.min(sl, currentPrice).toLocaleString()} - $${Math.max(sl, currentPrice).toLocaleString()}`
+          orderBlockZone: `$${formatCryptoPrice(Math.min(sl, currentPrice))} - $${formatCryptoPrice(Math.max(sl, currentPrice))}`
         };
 
         return {

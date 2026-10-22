@@ -1,4 +1,5 @@
 import type { TradeRow } from "@crypto-bot/shared";
+import { formatCryptoPrice } from "../../../lib/format";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
 export default async function HistoryPage() {
@@ -37,7 +38,7 @@ export default async function HistoryPage() {
                   <td><strong>{trade.symbol}</strong></td>
                   <td><span className={`badge ${trade.side}`}>{trade.side}</span></td>
                   <td className="mono">{trade.qty}</td>
-                  <td className="mono">{trade.entry_avg}</td>
+                  <td className="mono">{trade.entry_avg ? formatCryptoPrice(Number(trade.entry_avg)) : "—"}</td>
                   <td><span className="badge demo">{trade.status}</span></td>
                   <td className={`mono ${Number(trade.realized_pnl) >= 0 ? "positive" : "negative"}`}>
                     {Number(trade.realized_pnl) >= 0 ? `+$${Number(trade.realized_pnl).toFixed(2)}` : `-$${Math.abs(Number(trade.realized_pnl)).toFixed(2)}`}

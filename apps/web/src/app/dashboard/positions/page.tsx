@@ -1,4 +1,5 @@
 import type { TradeRow } from "@crypto-bot/shared";
+import { formatCryptoPrice } from "../../../lib/format";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { VexqoraLogo } from "../../../components/logo";
 import { closeAllPositions, closeTradePosition } from "../actions";
@@ -98,9 +99,9 @@ export default async function PositionsPage() {
                     <td><strong>{trade.symbol}</strong></td>
                     <td><span className={`badge ${trade.side}`}>{trade.side} {trade.leverage}x</span></td>
                     <td className="mono">{trade.qty}</td>
-                    <td className="mono">{trade.entry_avg}</td>
-                    <td className="mono">{markPrice !== null ? markPrice.toLocaleString("en-US", { minimumFractionDigits: 2 }) : "—"}</td>
-                    <td className="mono negative">{trade.sl ?? "—"}</td>
+                    <td className="mono">{trade.entry_avg ? formatCryptoPrice(Number(trade.entry_avg)) : "—"}</td>
+                    <td className="mono">{markPrice !== null ? formatCryptoPrice(markPrice) : "—"}</td>
+                    <td className="mono negative">{trade.sl ? formatCryptoPrice(Number(trade.sl)) : "—"}</td>
                     <td className="mono warning">{trade.trailing_stop ? "configured" : "—"}</td>
                     <td className={`mono ${pnlDisplay === "—" ? "" : isProfit ? "positive" : "negative"}`}>
                       {pnlDisplay}
