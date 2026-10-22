@@ -44,7 +44,7 @@ const tradeSchema = z.object({
 export default async function ChatPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string; queued?: string; tab?: string }>;
+  searchParams: Promise<{ error?: string; queued?: string; executed?: string; tab?: string }>;
 }) {
   const supabase = await createSupabaseServerClient();
   const query = (await searchParams) ?? {};
@@ -203,6 +203,7 @@ export default async function ChatPage({
         <article className="panel metric"><div className="metric-data"><span className="kicker">Win rate · 7D</span><strong className="mono">{winRate === null ? "—" : `${winRate}%`}</strong></div></article>
       </section>
       {query.error ? <p className="notice error">{query.error}</p> : null}
+      {query.executed ? <p className="notice success">⚡ Ордер успішно виконано! Позицію відкрито, рівні SL та TP розміщено на біржі.</p> : null}
       {query.queued ? <p className="notice success">Signal confirmed! Sent to execution queue for Paper / Bybit.</p> : null}
       <section className="trade-workspace">
         <div className="panel chat-panel">

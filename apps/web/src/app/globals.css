@@ -1139,3 +1139,147 @@ p.lead { color: var(--muted); font-size: clamp(15px, 2vw, 18px); line-height: 1.
   border-radius: 8px;
   padding: 14px;
 }
+
+/* Trader Profile & Analytics Hub */
+.profile-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 1100px;
+}
+
+.profile-hero {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(23, 18, 41, 0.95), rgba(14, 11, 26, 0.95));
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-hero::after {
+  content: "";
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(124, 77, 255, 0.18), transparent 70%);
+  pointer-events: none;
+}
+
+.profile-user-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.profile-avatar {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--violet), var(--violet-2));
+  color: #fff;
+  font: 700 24px var(--font-sans), sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 24px rgba(124, 77, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.profile-meta-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-deposit-box {
+  background: rgba(14, 11, 26, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.profile-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.profile-stat-card {
+  background: linear-gradient(180deg, rgba(23, 18, 41, 0.8), rgba(14, 11, 26, 0.8));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color .15s ease, transform .15s ease;
+}
+
+.profile-stat-card:hover {
+  border-color: rgba(124, 77, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.stat-label-wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stat-subtext {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.profile-split-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 20px;
+}
+
+.bias-bar-wrap {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--plum);
+  margin: 10px 0;
+}
+
+.bias-bar-long {
+  background: var(--aqua);
+  transition: width .3s ease;
+}
+
+.bias-bar-short {
+  background: var(--pink);
+  transition: width .3s ease;
+}

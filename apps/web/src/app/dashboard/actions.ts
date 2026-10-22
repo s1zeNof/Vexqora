@@ -129,6 +129,17 @@ export async function topUpPaperBalance(formData: FormData) {
   redirect("/dashboard/accounts?toppedUp=1");
 }
 
+export async function addPaperDepositAction(formData: FormData) {
+  const accountId = textField(formData, "accountId");
+  const amount = Number(textField(formData, "amount")) || 10000;
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) throw new Error("Deposit amount must be between 0 and 100000 USDT");
+  const { supabase } = await authenticatedContext();
+  const { error } = await supabase.rpc("top_up_paper_balance", { target_account_id: accountId, amount });
+  if (error) redirect(`/dashboard/profile?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/profile?depositAdded=1");
+}
+
 export async function updateProfile(formData: FormData) {
   const displayName = textField(formData, "displayName").trim();
   if (!displayName || displayName.length > 80) throw new Error("Display name must be between 1 and 80 characters");
@@ -222,6 +233,11 @@ export async function closeTradePosition(formData: FormData) {
       realized_pnl: pnl
     }).eq("id", trade.id);
 
+    if (account.exchange === "paper") {
+      const newBalance = Math.max(0, Number(account.paper_balance ?? 10000) + pnl);
+      await supabase.from("exchange_accounts").update({ paper_balance: newBalance }).eq("id", account.id);
+    }
+
     await supabase.from("trade_targets").update({ status: "cancelled" }).eq("trade_id", trade.id).eq("status", "open");
 
     await supabase.from("chat_messages").insert({
@@ -312,6 +328,11 @@ export async function closeAllPositions(formData: FormData) {
         closed_at: new Date().toISOString(),
         realized_pnl: pnl
       }).eq("id", trade.id);
+
+      if (account.exchange === "paper") {
+        const newBalance = Math.max(0, Number(account.paper_balance ?? 10000) + pnl);
+        await supabase.from("exchange_accounts").update({ paper_balance: newBalance }).eq("id", account.id);
+      }
 
       await supabase.from("trade_targets").update({ status: "cancelled" }).eq("trade_id", trade.id).eq("status", "open");
 

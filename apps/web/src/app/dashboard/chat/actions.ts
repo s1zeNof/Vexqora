@@ -1,6 +1,7 @@
 "use server";
 
-import { fetchRecentKlines } from "@crypto-bot/exchange";
+import { createBybitClient, createPaperExchangeClient, decryptSecret, fetchRecentKlines } from "@crypto-bot/exchange";
+import { formatCryptoPrice, type Signal } from "@crypto-bot/shared";
 import {
   createTradePreview,
   enhanceNemotronSignal,
@@ -8,6 +9,8 @@ import {
   findHistoricalPatternMatch,
   generateNemotronOpportunity,
   parseSignalText,
+  protectFilledPosition,
+  submitEntry,
   type TradePreview
 } from "@crypto-bot/trading";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
@@ -486,10 +489,239 @@ export async function confirmSignal(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { error } = await supabase.rpc("confirm_signal", { target_signal_id: signalId });
-  if (error) redirect(`/dashboard/chat?error=${encodeURIComponent(error.message)}`);
-  revalidatePath("/dashboard/chat");
-  redirect("/dashboard/chat?queued=1");
+
+  // 1. Confirm signal status in DB & register job
+  const { error: rpcError } = await supabase.rpc("confirm_signal", { target_signal_id: signalId });
+  if (rpcError) redirect(`/dashboard/chat?error=${encodeURIComponent(rpcError.message)}`);
+
+  // 2. Fetch the signal details
+  const { data: signalRow, error: signalErr } = await supabase
+    .from("signals")
+    .select("id, account_id, raw_text, parsed")
+    .eq("id", signalId)
+    .single();
+
+  if (signalErr || !signalRow) {
+    revalidatePath("/dashboard/chat");
+    redirect("/dashboard/chat?queued=1");
+  }
+
+  const signal = z.object({
+    id: z.string().uuid(),
+    account_id: z.string().uuid(),
+    raw_text: z.string().nullable().optional(),
+    parsed: z.unknown().optional()
+  }).parse(signalRow);
+
+  // 3. Fetch account
+  const { data: rawAccount, error: accErr } = await supabase
+    .from("exchange_accounts")
+    .select("id, user_id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance")
+    .eq("id", signal.account_id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (accErr || !rawAccount) {
+    revalidatePath("/dashboard/chat");
+    redirect("/dashboard/chat?queued=1");
+  }
+
+  const account = accountConnectionSchema.parse(rawAccount);
+
+  // 4. Fetch risk settings
+  const { data: rawSettings } = await supabase
+    .from("risk_settings")
+    .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")
+    .eq("account_id", account.id)
+    .maybeSingle();
+
+  const settings = rawSettings ? riskRow.parse(rawSettings) : {
+    risk_per_trade_pct: 1,
+    max_leverage: 5,
+    max_open_positions: 3,
+    max_daily_loss_pct: 5,
+    allowed_symbols: null,
+    kill_switch: false
+  };
+
+  if (settings.kill_switch) {
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "system",
+      kind: "error",
+      content: "Execution blocked: Emergency Kill Switch is ACTIVE for this account",
+      payload: { signalId }
+    });
+    redirect("/dashboard/chat?error=Execution+blocked:+Emergency+Kill+Switch+is+ACTIVE");
+  }
+
+  // Check open positions count
+  const { count: openPositions } = await supabase
+    .from("trades")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", account.id)
+    .in("status", ["entry_open", "active"]);
+
+  if ((openPositions ?? 0) >= settings.max_open_positions) {
+    const errorMsg = `Open positions limit (${settings.max_open_positions}) reached`;
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "system",
+      kind: "error",
+      content: `❌ ${errorMsg}`,
+      payload: { signalId }
+    });
+    redirect(`/dashboard/chat?error=${encodeURIComponent(errorMsg)}`);
+  }
+
+  try {
+    // 5. Create exchange client
+    const client = account.exchange === "paper"
+      ? createPaperExchangeClient({ balance: account.paper_balance ?? 0 })
+      : (() => {
+          if (!account.api_key_enc || !account.api_secret_enc) {
+            throw new Error("Exchange API credentials missing");
+          }
+          const masterKey = process.env.ENCRYPTION_MASTER_KEY;
+          if (!masterKey) throw new Error("ENCRYPTION_MASTER_KEY is not configured");
+          return createBybitClient({
+            apiKey: decryptSecret(account.api_key_enc, masterKey),
+            apiSecret: decryptSecret(account.api_secret_enc, masterKey),
+            environment: account.environment
+          });
+        })();
+
+    // 6. Build or extract preview
+    let preview: TradePreview;
+    const rawParsed = signal.parsed;
+    if (rawParsed && typeof rawParsed === "object" && "signal" in rawParsed && "entryPrice" in rawParsed && "qty" in rawParsed) {
+      preview = rawParsed as TradePreview;
+    } else {
+      let parsedSignal: Signal;
+      if (rawParsed && typeof rawParsed === "object" && "symbol" in rawParsed && "side" in rawParsed) {
+        parsedSignal = rawParsed as Signal;
+      } else {
+        parsedSignal = parseSignalText(signal.raw_text ?? "", "chat");
+      }
+      const [balance, instrument, ticker] = await Promise.all([
+        client.getBalance(),
+        client.getInstrument(parsedSignal.symbol),
+        client.getTicker(parsedSignal.symbol)
+      ]);
+      const dayStart = new Date();
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const { data: pnlRows } = await supabase.from("trades")
+        .select("realized_pnl")
+        .eq("account_id", account.id)
+        .gte("closed_at", dayStart.toISOString());
+      const dailyPnl = (pnlRows ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
+
+      preview = createTradePreview(parsedSignal, instrument, {
+        riskPerTradePct: settings.risk_per_trade_pct,
+        maxLeverage: settings.max_leverage,
+        maxOpenPositions: settings.max_open_positions,
+        maxDailyLossPct: settings.max_daily_loss_pct,
+        ...(settings.allowed_symbols ? { allowedSymbols: settings.allowed_symbols } : {}),
+        killSwitch: settings.kill_switch
+      }, {
+        balance: balance.equity,
+        marketPrice: ticker.lastPrice,
+        openPositions: openPositions ?? 0,
+        dailyPnl
+      });
+    }
+
+    // 7. Persist trade
+    const tradeRes = await supabase.from("trades").insert({
+      account_id: account.id,
+      signal_id: signalId,
+      symbol: preview.signal.symbol,
+      side: preview.signal.side,
+      status: "active",
+      entry_avg: preview.entryPrice,
+      qty: preview.qty,
+      leverage: preview.leverage,
+      sl: preview.signal.stopLoss,
+      trailing_stop: preview.signal.trailingStop ?? null,
+      opened_at: new Date().toISOString()
+    }).select("id").single();
+
+    if (tradeRes.error || !tradeRes.data) {
+      throw new Error(`Failed to persist trade: ${tradeRes.error?.message}`);
+    }
+    const tradeId = String(tradeRes.data.id);
+
+    // 8. Submit entry order
+    const entryResult = await submitEntry(client, preview, tradeId);
+
+    // Persist entry order
+    await supabase.from("orders").insert({
+      trade_id: tradeId,
+      exchange_order_id: entryResult.entryOrder.orderId,
+      order_link_id: entryResult.entryOrder.orderLinkId ?? `entry-${tradeId}`,
+      type: preview.signal.entry.type === "market" ? "market" : "limit",
+      side: preview.signal.side === "long" ? "buy" : "sell",
+      price: preview.entryPrice,
+      qty: preview.qty,
+      status: "filled",
+      reduce_only: false,
+      raw: { preview: JSON.parse(JSON.stringify(preview)) as Record<string, unknown>, exchange: account.exchange }
+    });
+
+    // 9. Protect filled position with exchange SL and TP
+    const protection = await protectFilledPosition(client, preview, tradeId);
+    for (const [idx, tpOrder] of protection.takeProfitOrders.entries()) {
+      const target = preview.signal.takeProfits[idx];
+      if (target) {
+        await supabase.from("trade_targets").insert({
+          trade_id: tradeId,
+          idx: idx + 1,
+          price: target.price,
+          share_pct: target.sharePct,
+          status: "open",
+          order_id: tpOrder.orderId
+        });
+      }
+    }
+
+    // 10. Mark execution job completed if possible
+    try {
+      await supabase.from("execution_jobs").update({
+        status: "completed",
+        locked_at: null,
+        last_error: null
+      }).eq("signal_id", signalId);
+    } catch {
+      // non-fatal if RLS restricts job update
+    }
+
+    // 11. Add chat message confirmation
+    await supabase.from("chat_messages").insert({
+      account_id: account.id,
+      role: "system",
+      kind: "order_event",
+      content: `⚡ Позицію успішно відкрито: ${preview.signal.symbol} ${preview.signal.side.toUpperCase()} ${preview.qty} по $${formatCryptoPrice(preview.entryPrice)} (${preview.leverage}x). Встановлено SL ($${formatCryptoPrice(preview.signal.stopLoss)}) та ${protection.takeProfitOrders.length} рівні Take Profit.`,
+      payload: { tradeId, preview: JSON.parse(JSON.stringify(preview)) as Record<string, unknown> }
+    });
+
+    revalidatePath("/dashboard/chat");
+    revalidatePath("/dashboard/positions");
+    revalidatePath("/dashboard/history");
+    revalidatePath("/dashboard/profile");
+    revalidatePath("/dashboard");
+    redirect("/dashboard/chat?executed=1");
+  } catch (execError) {
+    if (isRedirectError(execError)) throw execError;
+    const msg = execError instanceof Error ? execError.message : "Execution failed";
+    await supabase.from("chat_messages").insert({
+      account_id: signal.account_id,
+      role: "system",
+      kind: "error",
+      content: `❌ Помилка відкриття ордера: ${msg}`,
+      payload: { signalId, error: msg }
+    });
+    redirect(`/dashboard/chat?error=${encodeURIComponent(msg)}`);
+  }
 }
 
 export async function cancelSignal(formData: FormData) {
