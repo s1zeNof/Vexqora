@@ -1,5 +1,6 @@
 "use server";
 
+import { fetchRecentKlines } from "@crypto-bot/exchange";
 import {
   createTradePreview,
   enhanceNemotronSignal,
@@ -66,18 +67,20 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
     };
 
     const client = createAccountClient(account);
-    const [balance, instrument, ticker] = await Promise.all([
+    const [balance, instrument, ticker, klines] = await Promise.all([
       client.getBalance(),
       client.getInstrument(symbol),
-      client.getTicker(symbol)
+      client.getTicker(symbol),
+      fetchRecentKlines(symbol, "15", 15).catch(() => [])
     ]);
 
-    const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5);
+    const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5, klines);
     const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
       tickSize: instrument.tickSize,
       leverage: Number(settings.max_leverage) > 5 ? 5 : Number(settings.max_leverage),
       riskPct: Number(settings.risk_per_trade_pct),
-      historicalContext: hist
+      historicalContext: hist,
+      klines
     });
 
     const { count: openPositions } = await supabase.from("trades")
@@ -158,9 +161,10 @@ export async function analyzePulseAction(formData: FormData): Promise<void> {
     const account = accountConnectionSchema.parse(rawAccount);
 
     const client = createAccountClient(account);
-    const [ticker, instrument] = await Promise.all([
+    const [ticker, instrument, klines] = await Promise.all([
       client.getTicker(symbol),
-      client.getInstrument(symbol)
+      client.getInstrument(symbol),
+      fetchRecentKlines(symbol, "15", 15).catch(() => [])
     ]);
 
     const { data: rawSettings } = await supabase.from("risk_settings")
@@ -177,12 +181,13 @@ export async function analyzePulseAction(formData: FormData): Promise<void> {
       kill_switch: false
     };
 
-    const hist = findHistoricalPatternMatch(symbol, rawAnomalyType, changePct);
+    const hist = findHistoricalPatternMatch(symbol, rawAnomalyType, changePct, klines);
     const opp = await generateNemotronOpportunity(symbol, ticker.lastPrice, {
       tickSize: instrument.tickSize,
       leverage: Math.min(Number(settings.max_leverage || 5), 5),
       riskPct: Number(settings.risk_per_trade_pct || 1),
-      historicalContext: hist
+      historicalContext: hist,
+      klines
     });
 
     const balance = await client.getBalance();
@@ -340,15 +345,17 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
       let targetSymbol = words.find(w => w.endsWith("USDT") || ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP"].includes(w)) ?? "BTCUSDT";
       if (!targetSymbol.endsWith("USDT")) targetSymbol = `${targetSymbol}USDT`;
 
-      const [ticker, instrument] = await Promise.all([
+      const [ticker, instrument, klines] = await Promise.all([
         client.getTicker(targetSymbol),
-        client.getInstrument(targetSymbol)
+        client.getInstrument(targetSymbol),
+        fetchRecentKlines(targetSymbol, "15", 15).catch(() => [])
       ]);
 
-      const hist = findHistoricalPatternMatch(targetSymbol, "liquidity_sweep", 2.5);
+      const hist = findHistoricalPatternMatch(targetSymbol, "liquidity_sweep", 2.5, klines);
       const opp = await generateNemotronOpportunity(targetSymbol, ticker.lastPrice, {
         tickSize: instrument.tickSize,
-        historicalContext: hist
+        historicalContext: hist,
+        klines
       });
 
       const { data: rawSettings } = await supabase.from("risk_settings")

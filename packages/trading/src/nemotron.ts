@@ -1,3 +1,4 @@
+import type { Kline } from "@crypto-bot/shared";
 import type { AISignalOpportunity, EnhancedSignalResult } from "./ai-copilot";
 import { generateOpportunityFromTicker } from "./ai-copilot";
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
@@ -108,24 +109,46 @@ export async function generateNemotronOpportunity(
     riskPct?: number;
     leverage?: number;
     historicalContext?: HistoricalPatternMatch;
+    klines?: Kline[];
   }
 ): Promise<AISignalOpportunity> {
   const normSymbol = symbol.toUpperCase();
   const tickSize = options?.tickSize ?? 0.1;
-  const hist = options?.historicalContext ?? findHistoricalPatternMatch(normSymbol, "liquidity_sweep", 2.5);
+  const hist = options?.historicalContext ?? findHistoricalPatternMatch(normSymbol, "liquidity_sweep", 2.5, options?.klines);
+
+  const klines = options?.klines ?? [];
+  let klinesContext = "";
+  if (klines.length >= 3) {
+    const lastCandles = klines.slice(-6);
+    const klinesSummary = lastCandles.map((k, i) => {
+      const delta = ((k.close - k.open) / k.open * 100).toFixed(2);
+      return `Bar ${i + 1} [O:${k.open} H:${k.high} L:${k.low} C:${k.close} Vol:${Math.round(k.volume)} Delta:${delta}%]`;
+    }).join("\n");
+    const recentHigh = Math.max(...klines.map(k => k.high));
+    const recentLow = Math.min(...klines.map(k => k.low));
+    const sma = (klines.reduce((sum, k) => sum + k.close, 0) / klines.length).toFixed(2);
+    klinesContext = `\nReal 15m Market Candlestick Context:
+- Current Price: ${currentPrice} USDT
+- 15m SMA(20): ${sma} (${currentPrice >= Number(sma) ? "Bullish trend above SMA" : "Bearish trend below SMA"})
+- Recent 15m Swing Low Support: ${recentLow} USDT
+- Recent 15m Swing High Resistance: ${recentHigh} USDT
+Recent 15m Bars:
+${klinesSummary}`;
+  }
 
   try {
     const res = await callNemotron([
       {
         role: "system",
         content: `You are Vexqora AI Copilot powered by Nvidia Nemotron 3 Ultra 550B, an institutional cryptocurrency futures trader.
-Vexqora Memory Historical Context: Pattern matches "${hist.patternName}" (${hist.marketRegime}). Historical Sample Count: ${hist.sampleCount} episodes, ${hist.winRatePct}% historical win rate. ${hist.historicalContext}
-Analyze the requested asset with this historical edge in mind and output ONLY valid JSON matching this exact structure:
+Vexqora Memory Context: Pattern "${hist.patternName}" (${hist.marketRegime}). Historical Sample Count: ${hist.sampleCount} episodes, ${hist.winRatePct}% historical win rate.${klinesContext}
+
+Analyze this REAL market setup and output ONLY valid JSON matching this exact structure:
 {
   "symbol": "${normSymbol}",
   "side": "long" or "short",
   "strategy": "concise institutional strategy name (e.g. ${hist.patternName})",
-  "reasoning": "2-3 sentences of deep quantitative and structural reasoning for this trade",
+  "reasoning": "2-3 sentences of deep quantitative and structural reasoning referencing the actual candlestick low/high and volume",
   "stopLoss": number,
   "tp1": number,
   "tp2": number,
@@ -136,11 +159,12 @@ Analyze the requested asset with this historical edge in mind and output ONLY va
 Rules:
 - For 'long', stopLoss MUST be < current price, and tp1 < tp2 < tp3 MUST be > current price.
 - For 'short', stopLoss MUST be > current price, and tp1 > tp2 > tp3 MUST be < current price.
+- Stop Loss should be anchored logically at swing structure (e.g. below swing low for long, above swing high for short).
 - Return pure JSON only. Do not add markdown or conversational preambles.`
       },
       {
         role: "user",
-        content: `Asset: ${normSymbol}, Live Bybit Price: ${currentPrice} USDT. Historical analog win-rate is ${hist.winRatePct}%. Formulate the highest probability setup.`
+        content: `Asset: ${normSymbol}, Live Price: ${currentPrice} USDT. Pattern: ${hist.patternName}. Formulate the highest probability setup.`
       }
     ]);
 

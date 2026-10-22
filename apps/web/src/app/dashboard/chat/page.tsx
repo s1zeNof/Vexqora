@@ -1,3 +1,4 @@
+import { fetchRecentKlines } from "@crypto-bot/exchange";
 import { createTradePreview, generateNemotronOpportunity, type HistoricalPatternMatch } from "@crypto-bot/trading";
 import Link from "next/link";
 import { z } from "zod";
@@ -81,12 +82,13 @@ export default async function ChatPage({
   if (account && messages.length === 0) {
     try {
       const client = createAccountClient(account);
-      const [ticker, instrument, solTicker] = await Promise.all([
+      const [ticker, instrument, solTicker, klines] = await Promise.all([
         client.getTicker("BTCUSDT"),
         client.getInstrument("BTCUSDT"),
-        client.getTicker("SOLUSDT").catch(() => null)
+        client.getTicker("SOLUSDT").catch(() => null),
+        fetchRecentKlines("BTCUSDT", "15", 15).catch(() => [])
       ]);
-      const opp = await generateNemotronOpportunity("BTCUSDT", ticker.lastPrice, { tickSize: instrument.tickSize });
+      const opp = await generateNemotronOpportunity("BTCUSDT", ticker.lastPrice, { tickSize: instrument.tickSize, klines });
       const riskRow = riskResult.data as { risk_per_trade_pct?: number; max_leverage?: number; max_open_positions?: number; max_daily_loss_pct?: number; kill_switch?: boolean } | null;
       const preview = createTradePreview(opp.parsedSignal, instrument, {
         riskPerTradePct: Number(riskRow?.risk_per_trade_pct ?? 1),

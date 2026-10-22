@@ -10,6 +10,7 @@ export interface InstrumentInfo {
   maxLeverage: number;
 }
 export interface Ticker { symbol: string; lastPrice: number }
+export interface Kline { time: number; open: number; high: number; low: number; close: number; volume: number }
 export interface OrderRequest {
   symbol: string;
   side: "buy" | "sell";
