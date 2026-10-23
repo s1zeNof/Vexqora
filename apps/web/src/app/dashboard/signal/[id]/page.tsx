@@ -1,13 +1,11 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { fetchRecentKlines } from "@crypto-bot/exchange";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
-import { formatPrice, formatCryptoPrice } from "../../../../lib/format";
+import { formatPrice } from "../../../../lib/format";
 import { formatTimeAgo } from "../../../../lib/date";
-import { SignalChart } from "./signal-chart";
-import { SignalPositionsTable } from "./signal-positions-table";
+import { SignalLiveStage } from "./signal-live-stage";
 import { SignalExecutionPanel } from "./signal-execution-panel";
 import { executeSignalAction, deleteSignalAction } from "./actions";
 
@@ -274,232 +272,37 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%", maxWidth: "1232px", margin: "0 auto", paddingBottom: "40px" }}>
-      {/* Top Breadcrumb & Status Pill */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-        <div className="lb" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Link href="/dashboard/signals" style={{ color: "var(--muted)", textDecoration: "none" }}>
-            ← Всі сигнали
-          </Link>
-          <span>/</span>
-          <span style={{ color: "#FFFFFF", fontWeight: 600 }}>{formattedSymbol}</span>
-        </div>
-
-        {/* 48-Hour Lifecycle Badge */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          {isArchived ? (
-            <span className="tg gy" style={{ color: "#FF5A6E", border: "1px solid #FF5A6E33" }}>
-              📁 В архіві · Не актуально ({Math.round(ageHours)}г тому)
-            </span>
-          ) : (
-            <span className="tg lg">
-              🟢 Актуальний сигнал (ще {remainingHours}г)
-            </span>
-          )}
-
-          {activePosition ? (
-            <span className="tg lg" style={{ background: "#42F5B922", color: "#42F5B9" }}>
-              ⚡ В трейді: {isPaperTrading ? "Paper" : "Live"} ({activePosition.pnlUsdt >= 0 ? "+" : ""}{activePosition.pnlUsdt.toFixed(2)} USDT / {activePosition.pnlPct >= 0 ? "+" : ""}{activePosition.pnlPct.toFixed(2)}%)
-            </span>
-          ) : null}
-
-          {isArchived && targetSignalId ? (
-            <form action={handleDeleteFromArchive}>
-              <button
-                type="submit"
-                className="bt sm"
-                style={{ padding: "4px 8px", fontSize: "11px", color: "#FF5A6E" }}
-                title="Видалити цей сигнал з архіву"
-              >
-                🗑️ Видалити з архіву
-              </button>
-            </form>
-          ) : null}
-        </div>
-      </div>
-
-      {/* Archive Notice Banner if > 48h */}
-      {isArchived ? (
-        <div
-          className="notice"
-          style={{
-            background: "#161114",
-            borderColor: "#FF5A6E33",
-            color: "#D4C5CA",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 16px"
-          }}
-        >
-          <div>
-            <b style={{ color: "#FFFFFF" }}>Архівний сигнал:</b> З моменту створення минуло понад 48 годин.
-            Сигнал збережено в архіві для аналітики та історії угод. Ви можете переглянути рівні або відкрити новий ордер за актуальною ринковою ціною.
-          </div>
-        </div>
-      ) : null}
-
-      {/* Trade Entry Fact Box (Де ми входили по Live / Paper) */}
-      {activePosition || recentHistoricalTrade ? (
-        <div
-          className="cd"
-          style={{
-            padding: "16px 20px",
-            background: "#141414",
-            border: activePosition ? "1px solid #42F5B9" : "1px solid #262626",
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <span style={{ fontSize: "16px" }}>📍</span>
-              <b style={{ font: "700 15px Inter, sans-serif", color: "#FFFFFF" }}>
-                {activePosition ? "Активна позиція за цим сигналом" : "Історія виконання угоди"}
-              </b>
-              <span className={`tg ${activePosition ? "lg" : "gy"}`}>
-                {tradingModeLabel}
-              </span>
-            </div>
-
-            <span className="lb" style={{ fontSize: "12px" }}>
-              {activePosition?.opened_at ? `Вхід: ${formatTimeAgo(activePosition.opened_at)}` : (recentHistoricalTrade?.opened_at ? formatTimeAgo(recentHistoricalTrade.opened_at) : "Нещодавно")}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-              gap: "8px",
-              background: "#1A1A1A",
-              padding: "10px 14px",
-              borderRadius: "6px"
-            }}
-          >
-            <div>
-              <div className="lb" style={{ fontSize: "11px" }}>Ціна входу</div>
-              <div className="v" style={{ fontSize: "14px", margin: "2px 0 0" }}>
-                ${formatCryptoPrice(activePosition?.entryPrice ?? recentHistoricalTrade?.entryPrice ?? entry)}
-              </div>
-            </div>
-            <div>
-              <div className="lb" style={{ fontSize: "11px" }}>Позиція & Плече</div>
-              <div className="v" style={{ fontSize: "14px", margin: "2px 0 0" }}>
-                {(activePosition?.side ?? recentHistoricalTrade?.side ?? side).toUpperCase()} {(activePosition?.leverage ?? recentHistoricalTrade?.leverage ?? 5)}x
-              </div>
-            </div>
-            <div>
-              <div className="lb" style={{ fontSize: "11px" }}>Поточна ціна</div>
-              <div className="v" style={{ fontSize: "14px", margin: "2px 0 0" }}>
-                ${formatCryptoPrice(currentPrice)}
-              </div>
-            </div>
-            <div>
-              <div className="lb" style={{ fontSize: "11px" }}>Результат PnL</div>
-              <div
-                className="v"
-                style={{
-                  fontSize: "14px",
-                  margin: "2px 0 0",
-                  color: (activePosition?.pnlUsdt ?? recentHistoricalTrade?.pnlUsdt ?? 0) >= 0 ? "#42F5B9" : "#FF5A6E"
-                }}
-              >
-                {(activePosition?.pnlUsdt ?? recentHistoricalTrade?.pnlUsdt ?? 0) >= 0 ? "+" : ""}
-                {(activePosition?.pnlUsdt ?? recentHistoricalTrade?.pnlUsdt ?? 0).toFixed(2)} USDT (
-                {(activePosition?.pnlPct ?? recentHistoricalTrade?.pnlPct ?? 0) >= 0 ? "+" : ""}
-                {(activePosition?.pnlPct ?? recentHistoricalTrade?.pnlPct ?? 0).toFixed(2)}%)
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Symbol Header & 24h Stats in OKX Ticker Bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap", margin: "4px 0 8px" }}>
-        <b style={{ font: "700 26px Inter, sans-serif", color: "#FFFFFF" }}>{formattedSymbol}</b>
-        <span className="tg gy">Perp</span>
-        <span className="tg gy">Bybit</span>
-        <span className="v" style={{ margin: 0, fontSize: "28px", color: isLong ? "#42F5B9" : "#FF5A6E" }}>
-          {formatPrice(currentPrice)}
-        </span>
-        <span style={{ font: "600 14px Inter, sans-serif", color: isLong ? "#42F5B9" : "#FF5A6E" }}>
-          {price24hPcnt}
-        </span>
-
-        <div style={{ marginLeft: "auto", display: "flex", gap: "24px", flexWrap: "wrap" }}>
-          <div>
-            <div className="lb">24h high</div>
-            <div className="v" style={{ margin: "2px 0 0" }}>{high24h}</div>
-          </div>
-          <div>
-            <div className="lb">24h low</div>
-            <div className="v" style={{ margin: "2px 0 0" }}>{low24h}</div>
-          </div>
-          <div>
-            <div className="lb">24h volume</div>
-            <div className="v" style={{ margin: "2px 0 0" }}>{volume24h}</div>
-          </div>
-          <div>
-            <div className="lb">Funding</div>
-            <div className="v" style={{ margin: "2px 0 0" }}>{fundingRate}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Layout: 840px Left Stage + 360px Right Terminal */}
-      <div className="signal-layout">
-        {/* Left Column (840px): Chart + Positions Table + AI Context */}
-        <div className="signal-stage">
-          <SignalChart
-            symbol={formattedSymbol}
-            initialKlines={klines}
-            entry={entry}
-            stopLoss={stopLoss}
-            tp1={tp1}
-            tp2={tp2}
-            tp3={tp3}
-            currentPrice={currentPrice}
-            position={activePosition ? {
-              side: activePosition.side,
-              leverage: activePosition.leverage,
-              entryPrice: activePosition.entryPrice,
-              pnlUsdt: activePosition.pnlUsdt,
-              pnlPct: activePosition.pnlPct,
-              isPaper: isPaperTrading
-            } : null}
-          />
-
-          <SignalPositionsTable
-            symbol={formattedSymbol}
-            trades={tradesList}
-            historyTrades={historyTrades}
-          />
-
-          {/* AI Smart Money & Nemotron Setup Card */}
-          <div className="cd" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <b style={{ font: "700 15px Inter, sans-serif", color: "#FFFFFF" }}>Аналіз сетапу від Nemotron AI</b>
-                <span className="tg gy" style={{ color: "#F5C451" }}>
-                  ★ {qualityScore}/10 {qualityTier}
-                </span>
-              </div>
-              <span className="lb" style={{ fontSize: "12px" }}>
-                Vexqora Memory: 73.0% Win Rate (37 збігів)
-              </span>
-            </div>
-
-            <div style={{ font: "600 14px Inter, sans-serif", color: "#FFFFFF" }}>
-              {strategy}
-            </div>
-
-            <div style={{ font: "400 13px Inter, sans-serif", color: "#9A9A9A", lineHeight: 1.5 }}>
-              {rationale}
-            </div>
-          </div>
-        </div>
-
+      <SignalLiveStage
+        symbol={formattedSymbol}
+        side={side}
+        initialPrice={currentPrice}
+        initialHigh24h={high24h}
+        initialLow24h={low24h}
+        initialPriceChangePct={price24hPcnt}
+        initialVolume24h={volume24h}
+        initialFundingRate={fundingRate}
+        entry={entry}
+        stopLoss={stopLoss}
+        tp1={tp1}
+        tp2={tp2}
+        tp3={tp3}
+        klines={klines}
+        activePosition={activePosition}
+        recentHistoricalTrade={recentHistoricalTrade}
+        tradesList={tradesList}
+        historyTrades={historyTrades}
+        isPaperTrading={isPaperTrading}
+        tradingModeLabel={tradingModeLabel}
+        isArchived={isArchived}
+        ageHours={ageHours}
+        remainingHours={remainingHours}
+        targetSignalId={targetSignalId}
+        qualityScore={qualityScore}
+        qualityTier={qualityTier}
+        strategy={strategy}
+        rationale={rationale}
+        onDeleteFromArchive={handleDeleteFromArchive}
+      >
         {/* Right Column (360px): Signal Specs + OKX Execution Panel */}
         <div className="signal-panel">
           {/* Signal Specs Card */}
@@ -561,7 +364,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
             onExecute={handleExecuteAction}
           />
         </div>
-      </div>
+      </SignalLiveStage>
     </div>
   );
 }

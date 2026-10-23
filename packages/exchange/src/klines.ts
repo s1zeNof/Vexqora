@@ -57,7 +57,7 @@ export async function fetchRecentKlines(
 
   // 2. Fallback to Binance Futures
   try {
-    const binanceInterval = interval === "60" ? "1h" : (interval === "D" ? "1d" : `${interval}m`);
+    const binanceInterval = interval === "60" ? "1h" : (interval === "240" ? "4h" : (interval === "D" ? "1d" : `${interval}m`));
     const res = await customFetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${norm}&interval=${binanceInterval}&limit=${limit}`, {
       headers: { "User-Agent": "Mozilla/5.0" }
     });
@@ -80,7 +80,7 @@ export async function fetchRecentKlines(
 
   // 3. Fallback to Binance Spot
   try {
-    const binanceInterval = interval === "60" ? "1h" : (interval === "D" ? "1d" : `${interval}m`);
+    const binanceInterval = interval === "60" ? "1h" : (interval === "240" ? "4h" : (interval === "D" ? "1d" : `${interval}m`));
     const res = await customFetch(`https://api.binance.com/api/v3/klines?symbol=${norm}&interval=${binanceInterval}&limit=${limit}`, {
       headers: { "User-Agent": "Mozilla/5.0" }
     });

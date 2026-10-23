@@ -24,14 +24,25 @@ interface SignalPositionsTableProps {
   symbol: string;
   trades: SignalTradeItem[];
   historyTrades: SignalTradeItem[];
+  livePrice?: number;
 }
 
-export function SignalPositionsTable({ symbol, trades, historyTrades }: SignalPositionsTableProps) {
+export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice }: SignalPositionsTableProps) {
   const [tab, setTab] = useState<"position" | "orders" | "history">("position");
 
   const activePosition = trades.find((t) => t.status === "active" || t.status === "entry_open");
   const positionCount = activePosition ? 1 : 0;
   const orderCount = activePosition?.tp1 || activePosition?.sl ? 2 : 0;
+
+  const currentMarkPrice = livePrice && livePrice > 0 && activePosition ? livePrice : (activePosition?.markPrice ?? 0);
+  const direction = activePosition?.side === "long" ? 1 : -1;
+  const priceDiff = activePosition ? (currentMarkPrice - activePosition.entryPrice) * direction : 0;
+  const currentPnlUsdt = activePosition && activePosition.qty > 0 && livePrice
+    ? priceDiff * activePosition.qty
+    : (activePosition?.pnlUsdt ?? 0);
+  const currentPnlPct = activePosition && activePosition.entryPrice > 0 && livePrice
+    ? (priceDiff / activePosition.entryPrice) * 100 * activePosition.leverage
+    : (activePosition?.pnlPct ?? 0);
 
   return (
     <div className="cd" style={{ padding: "8px 16px" }}>
@@ -105,9 +116,9 @@ export function SignalPositionsTable({ symbol, trades, historyTrades }: SignalPo
                 </span>
                 <span>{activePosition.qty}</span>
                 <span>${formatCryptoPrice(activePosition.entryPrice)}</span>
-                <span>${formatCryptoPrice(activePosition.markPrice)}</span>
-                <span style={{ color: activePosition.pnlUsdt >= 0 ? "#42F5B9" : "#FF5A6E", fontWeight: 700 }}>
-                  {activePosition.pnlUsdt >= 0 ? "+" : ""}{activePosition.pnlUsdt.toFixed(2)} USDT ({activePosition.pnlPct >= 0 ? "+" : ""}{activePosition.pnlPct.toFixed(2)}%)
+                <span>${formatCryptoPrice(currentMarkPrice)}</span>
+                <span style={{ color: currentPnlUsdt >= 0 ? "#42F5B9" : "#FF5A6E", fontWeight: 700 }}>
+                  {currentPnlUsdt >= 0 ? "+" : ""}{currentPnlUsdt.toFixed(2)} USDT ({currentPnlPct >= 0 ? "+" : ""}{currentPnlPct.toFixed(2)}%)
                 </span>
                 <span style={{ color: "#9A9A9A", fontSize: "13px" }}>
                   <span style={{ color: "#FF5A6E" }}>{activePosition.sl ? `$${formatCryptoPrice(activePosition.sl)}` : "—"}</span> /{" "}
