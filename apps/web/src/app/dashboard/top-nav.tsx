@@ -67,12 +67,12 @@ export function TopNav({
   const isSignals = pathname.startsWith("/dashboard/signals") || pathname.startsWith("/dashboard/signal") || pathname === "/dashboard/chat";
   const isPositions = pathname === "/dashboard/positions";
   const isHistory = pathname === "/dashboard/history";
+  const isProfile = pathname === "/dashboard/profile";
   const isSettings =
     pathname.startsWith("/dashboard/settings") ||
     pathname === "/dashboard/accounts" ||
     pathname === "/dashboard/risk" ||
-    pathname === "/dashboard/integrations" ||
-    pathname === "/dashboard/profile";
+    pathname === "/dashboard/integrations";
 
   const isLive = account?.environment === "live";
   const avatarLetter = (displayName || userEmail || "U")[0]?.toUpperCase() ?? "U";
@@ -120,6 +120,9 @@ export function TopNav({
           </Link>
           <Link href="/dashboard/history" className={`nav-link ${isHistory ? "active" : ""}`}>
             History
+          </Link>
+          <Link href="/dashboard/profile" className={`nav-link ${isProfile ? "active" : ""}`}>
+            Profile
           </Link>
 
           {/* Settings Dropdown */}
@@ -229,29 +232,6 @@ export function TopNav({
                   </div>
                 </Link>
 
-                <Link
-                  href="/dashboard/profile"
-                  onClick={() => setSettingsOpen(false)}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "2px",
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    background: pathname === "/dashboard/profile" ? "#1A1A1A" : "transparent"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", font: "600 13px Inter", color: "#FFFFFF" }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#42F5B9" strokeWidth="1.5">
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                    Profile
-                  </div>
-                  <div style={{ font: "400 12px Inter", color: "#9A9A9A" }}>
-                    Preferences and security
-                  </div>
-                </Link>
               </div>
             )}
           </div>
@@ -510,6 +490,9 @@ export function TopNav({
         </Link>
         <Link href="/dashboard/positions" style={{ color: isPositions ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
           Positions
+        </Link>
+        <Link href="/dashboard/profile" style={{ color: isProfile ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
+          Profile
         </Link>
         <Link href="/dashboard/accounts" style={{ color: isSettings ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
           Settings

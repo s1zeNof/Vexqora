@@ -55,6 +55,9 @@ export interface TradeRow {
   realized_pnl: number | null;
   opened_at: string | null;
   closed_at: string | null;
+  exit_reason: "take_profit" | "stop_loss" | "trailing_stop" | "manual" | "close_all" | "exchange" | null;
+  exit_price: number | null;
+  exit_details: Record<string, unknown> | null;
 }
 
 export interface TradeTargetRow {

@@ -3,6 +3,15 @@ import type { TradeRow } from "@crypto-bot/shared";
 import { formatCryptoPrice } from "../../../lib/format";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 
+const exitLabels: Record<string, string> = {
+  take_profit: "Take Profit",
+  stop_loss: "Stop Loss",
+  trailing_stop: "Trailing Stop",
+  manual: "Manual close",
+  close_all: "Close all",
+  exchange: "Exchange fill"
+};
+
 export default async function HistoryPage() {
   const supabase = await createSupabaseServerClient();
   const { data: active } = await supabase.from("exchange_accounts").select("id").eq("is_active", true).limit(1).maybeSingle();
@@ -28,7 +37,8 @@ export default async function HistoryPage() {
               <th>Side</th>
               <th>Qty</th>
               <th>Avg Entry</th>
-              <th>Status</th>
+              <th>Exit</th>
+              <th>Exit Price</th>
               <th>Realized PnL</th>
             </tr>
           </thead>
@@ -57,7 +67,12 @@ export default async function HistoryPage() {
                     <td>{trade.qty}</td>
                     <td>{trade.entry_avg ? formatCryptoPrice(Number(trade.entry_avg)) : "—"}</td>
                     <td>
-                      <span className="tg gy">{trade.status}</span>
+                      <span className={`tg ${trade.exit_reason === "stop_loss" ? "sh" : trade.exit_reason === "take_profit" ? "lg" : "gy"}`}>
+                        {trade.exit_reason ? exitLabels[trade.exit_reason] ?? trade.exit_reason : trade.status}
+                      </span>
+                    </td>
+                    <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {trade.exit_price ? `$${formatCryptoPrice(Number(trade.exit_price))}` : "—"}
                     </td>
                     <td style={{ color: pnl >= 0 ? "#42F5B9" : "#FF5A6E" }}>
                       {pnl >= 0 ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`}
@@ -67,7 +82,7 @@ export default async function HistoryPage() {
               })
             ) : (
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: "48px 16px", color: "#9A9A9A" }}>
+                <td colSpan={8} style={{ textAlign: "center", padding: "48px 16px", color: "#9A9A9A" }}>
                   <p style={{ fontSize: "15px", fontWeight: 600, color: "#FFFFFF" }}>No past trades recorded</p>
                   <p className="lb" style={{ marginTop: "4px" }}>
                     Completed trades and closed positions will be archived here.

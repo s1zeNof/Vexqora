@@ -18,6 +18,9 @@ export interface SignalTradeItem {
   tp1: number | null;
   status: string;
   opened_at?: string | undefined;
+  closed_at?: string | undefined;
+  exitReason?: string | null;
+  exitPrice?: number | null;
   controlMode?: "auto" | "manual";
   trailingStop?: Record<string, unknown> | null;
 }
@@ -191,6 +194,13 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
                   <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                     <span className={`tg ${t.side === "long" ? "lg" : "sh"}`}>{t.side.toUpperCase()}</span>
                     <span>Вхід: ${formatPrice(t.entryPrice)}</span>
+                    <span className="tg gy">
+                      {t.exitReason === "take_profit" ? "Take Profit" :
+                        t.exitReason === "stop_loss" ? "Stop Loss" :
+                          t.exitReason === "trailing_stop" ? "Trailing Stop" :
+                            t.exitReason === "manual" ? "Manual" : "Closed"}
+                      {t.exitPrice ? ` @ $${formatCryptoPrice(t.exitPrice)}` : ""}
+                    </span>
                   </div>
                   <span style={{ color: t.pnlUsdt >= 0 ? "#42F5B9" : "#FF5A6E", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                     {t.pnlUsdt >= 0 ? "+" : ""}{t.pnlUsdt.toFixed(2)} USDT ({t.pnlPct >= 0 ? "+" : ""}{t.pnlPct.toFixed(2)}%)

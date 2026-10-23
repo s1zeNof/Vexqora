@@ -139,36 +139,31 @@ export async function processPaperTradeTick(
   if (result.actions.length === 1 && result.actions[0]?.type === "TRAILING_PEAK_UPDATED") {
     await supabase.from("trades").update({
       trailing_stop: result.updatedTrade.trailing_stop
-    }).eq("id", trade.id);
+    }).eq("id", trade.id).eq("qty", Number(trade.qty ?? 0));
     return result;
   }
 
-  // 5. Persist updates
-  // Update trade row
-  await supabase.from("trades").update({
-    qty: result.updatedTrade.qty,
-    realized_pnl: result.updatedTrade.realized_pnl,
-    status: result.updatedTrade.status,
-    trailing_stop: result.updatedTrade.trailing_stop,
-    ...(result.updatedTrade.closed_at ? { closed_at: result.updatedTrade.closed_at } : {})
-  }).eq("id", trade.id);
+  // 5. Atomically persist the trade, targets and balance. The expected values
+  // prevent the browser tick and background worker from settling the same event twice.
+  const exit = result.updatedTrade.exit;
+  const applyResult = await supabase.rpc("apply_paper_trade_result", {
+    target_trade_id: trade.id,
+    expected_qty: Number(trade.qty ?? 0),
+    expected_realized_pnl: Number(trade.realized_pnl ?? 0),
+    new_qty: result.updatedTrade.qty,
+    new_realized_pnl: result.updatedTrade.realized_pnl,
+    new_status: result.updatedTrade.status,
+    new_trailing_stop: result.updatedTrade.trailing_stop,
+    result_closed_at: result.updatedTrade.closed_at ?? null,
+    realized_pnl_delta: result.totalRealizedPnlDelta,
+    target_updates: result.updatedTargets,
+    result_exit_reason: exit?.reason ?? null,
+    result_exit_price: exit?.price ?? null,
+    result_exit_details: exit?.details ?? null
+  });
 
-  // Update target rows
-  for (const ut of result.updatedTargets) {
-    await supabase.from("trade_targets").update({
-      status: ut.status,
-      ...(ut.filled_at ? { filled_at: ut.filled_at } : {})
-    }).eq("id", ut.id);
-  }
-
-  // Update virtual paper balance if PnL was realized
-  if (result.totalRealizedPnlDelta !== 0) {
-    const currentBal = Number(account.paper_balance ?? 10000);
-    const newBal = Math.max(0, currentBal + result.totalRealizedPnlDelta);
-    await supabase.from("exchange_accounts").update({
-      paper_balance: newBal
-    }).eq("id", account.id);
-  }
+  if (applyResult.error) throw new Error(`Could not settle paper trade: ${applyResult.error.message}`);
+  if (applyResult.data !== true) return null;
 
   // Record orders & notifications for each action
   for (const action of result.actions) {

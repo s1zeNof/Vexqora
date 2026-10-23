@@ -321,6 +321,7 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
                 <th>Розмір</th>
                 <th>Ціна входу</th>
                 <th>Фінальний PnL</th>
+                <th>Причина виходу</th>
                 <th>Час відкриття</th>
                 <th>Час закриття</th>
                 <th>Статус</th>
@@ -361,6 +362,16 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
                       >
                         {isProfit ? "+" : ""}${pnl.toFixed(2)} USDT
                       </td>
+                      <td>
+                        <span className={`tg ${trade.exit_reason === "stop_loss" ? "sh" : trade.exit_reason === "take_profit" ? "lg" : "gy"}`}>
+                          {trade.exit_reason === "take_profit" ? "Take Profit" :
+                            trade.exit_reason === "stop_loss" ? "Stop Loss" :
+                              trade.exit_reason === "trailing_stop" ? "Trailing Stop" :
+                                trade.exit_reason === "manual" ? "Manual" :
+                                  trade.exit_reason === "close_all" ? "Close All" : "Closed"}
+                          {trade.exit_price ? ` @ $${formatCryptoPrice(Number(trade.exit_price))}` : ""}
+                        </span>
+                      </td>
                       <td style={{ fontSize: "12px", color: "#9A9A9A" }}>
                         {trade.opened_at ? formatTimeAgo(trade.opened_at) : "—"}
                       </td>
@@ -385,7 +396,7 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
                 })
               ) : (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: "center", padding: "48px 16px", color: "#9A9A9A" }}>
+                  <td colSpan={10} style={{ textAlign: "center", padding: "48px 16px", color: "#9A9A9A" }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
                       <span style={{ fontSize: "32px" }}>📁</span>
                       <p style={{ fontSize: "15px", fontWeight: 600, color: "#FFFFFF" }}>В архіві немає закритих угод</p>

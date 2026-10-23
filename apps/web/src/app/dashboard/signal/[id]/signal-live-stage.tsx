@@ -363,6 +363,18 @@ export function SignalLiveStage({
                 {displayPnlUsdt.toFixed(2)} USDT ({displayPnlPct >= 0 ? "+" : ""}{displayPnlPct.toFixed(2)}%)
               </div>
             </div>
+            {!activePosition && recentHistoricalTrade ? (
+              <div>
+                <div className="lb" style={{ fontSize: "11px" }}>Причина закриття</div>
+                <div className="v" style={{ fontSize: "14px", margin: "2px 0 0", color: "#FFFFFF" }}>
+                  {recentHistoricalTrade.exitReason === "take_profit" ? "Take Profit" :
+                    recentHistoricalTrade.exitReason === "stop_loss" ? "Stop Loss" :
+                      recentHistoricalTrade.exitReason === "trailing_stop" ? "Trailing Stop" :
+                        recentHistoricalTrade.exitReason === "manual" ? "Manual close" : "Closed"}
+                  {recentHistoricalTrade.exitPrice ? ` @ $${formatCryptoPrice(recentHistoricalTrade.exitPrice)}` : ""}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {/* Mode Explainer Banner for Active Position */}

@@ -60,6 +60,8 @@ Completed:
 - Control Mode Switcher (`[🤖 Автопілот]` vs `[👤 Ручний контроль]`) with pause of automated closures and instant manual exit buttons (`50%`, `Close`).
 - 24/7 Node.js Background Paper Worker (`apps/worker/src/paper-worker.ts`) monitoring and executing active paper trades even when browser is closed.
 - Positions Dashboard (`/dashboard/positions`) with active vs archive tabs and control mode badges.
+- Atomic Paper settlement prevents browser/worker double execution and records exit reason, price and details.
+- User-controlled Paper balance additions/removals with audited, non-negative balance enforcement.
 
 Not completed:
 
@@ -166,7 +168,7 @@ Current expected baseline:
 
 - Typecheck passes.
 - ESLint passes.
-- 19 unit tests pass.
+- 46 unit tests pass.
 - Next.js production build passes.
 
 For UI changes, compare the rendered result with the supplied PNG references at desktop and mobile widths.

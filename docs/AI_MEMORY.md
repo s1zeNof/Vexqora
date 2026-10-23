@@ -1,7 +1,7 @@
 # Vexqora Trade — Master AI Memory & Handoff Guide
 
 > **Target Audience**: AI Agents (Antigravity, Claude, ChatGPT, Cursor, Copilot) & Engineers continuing development on a new environment (e.g. laptop).
-> **Last Updated**: 2026-10-23 (Post Paper Matching Engine & Autopilot Switcher)
+> **Last Updated**: 2026-10-23 (Atomic Paper Settlement & Exit Provenance)
 > **Repository**: `https://github.com/s1zeNof/Vexqora`
 > **Active Production URL**: `https://vexqora.vercel.app/`
 
@@ -30,7 +30,7 @@ Vexqora-trade/
 │   ├── exchange/      # Bybit V5 REST/WS client (bybit.ts), Paper client (paper.ts), AES-256-GCM (crypto.ts)
 │   └── trading/       # Deterministic Parser, Risk Math, Mode-agnostic Executor, Pulse, Memory, Nemotron
 ├── supabase/
-│   └── migrations/    # 5 PostgreSQL migration files with schema, RLS, triggers & RPCs
+│   └── migrations/    # PostgreSQL migrations with schema, RLS, triggers & RPCs
 ├── docs/              # Project memory, architecture specifications, and runbooks
 ├── AGENTS.md          # Global AI agent instructions & non-negotiable guidelines
 └── README.md          # Project overview & local setup
@@ -144,6 +144,10 @@ The database resides in Supabase. Migrations are located in `supabase/migrations
    - Adds trigger `handle_new_user_paper_account` to automatically create a Vexqora Paper account with 10,000 USDT for every newly registered user.
 5. `202610210004_pulse_and_memory.sql`:
    - Realtime publication enhancements for `chat_messages` and indexes for fast ticker lookups.
+6. `202610230001_paper_balance_and_trade_exit.sql`:
+   - Adds audited positive/negative Paper balance adjustments while preventing negative balances.
+   - Atomically settles trade, target and balance changes to prevent browser/worker double execution.
+   - Stores `exit_reason`, `exit_price` and `exit_details` for TP, SL, trailing and manual exits.
 
 ---
 
@@ -185,14 +189,14 @@ Before committing any changes or concluding a working session, run these command
 ```powershell
 npm run typecheck   # Typecheck all 5 workspaces
 npm run lint        # ESLint check
-npm test            # Run Vitest test suites (31 unit tests currently)
+npm test            # Run Vitest test suites (46 unit tests currently)
 npm run build       # Next.js Turbopack production build & worker build
 ```
 
 Expected baseline:
 - 0 TypeScript errors.
 - 0 ESLint warnings/errors.
-- 31 unit tests passing across `@crypto-bot/trading`, `@crypto-bot/exchange`, `@crypto-bot/shared`, `@crypto-bot/worker`.
+- 46 unit tests passing across `@crypto-bot/trading`, `@crypto-bot/exchange`, `@crypto-bot/shared`, `@crypto-bot/worker`.
 - Next.js production build completes cleanly.
 
 ---
@@ -230,6 +234,8 @@ Expected baseline:
 - [x] Control Mode Switcher (`[🤖 Автопілот]` vs `[👤 Ручний контроль]`) with pause of automated closures and instant manual exit buttons (`50%`, `Close`).
 - [x] 24/7 Node.js Background Paper Worker (`apps/worker/src/paper-worker.ts`) monitoring and executing active paper trades even when browser is closed.
 - [x] Positions Page (`/dashboard/positions`) enhancements with dual tabs (Active vs Archive) and mode badges (`👤 Ручний`, `🤖 Автопілот`, `⚡ Трейлінг`).
+- [x] Atomic Paper trade settlement with idempotent PnL/balance updates and persisted exit provenance.
+- [x] Custom Paper balance add/remove controls and a dedicated Profile navigation entry.
 
 ### Immediate Next Tasks (Stage 6):
 1. **External Integrations**:

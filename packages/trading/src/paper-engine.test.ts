@@ -211,4 +211,36 @@ describe("Paper Matching Engine (Pure Emulator)", () => {
       expect(result.actions[0].updatedTrailingStop.lowestPrice).toBe(2440);
     }
   });
+
+  it("preserves partial TP sizing for fractional crypto quantity when qty step is unavailable", () => {
+    const fractionalTrade: PaperTradeSnapshot = {
+      ...baseLongTrade,
+      symbol: "BTCUSDT",
+      entry_avg: 100_000,
+      qty: 0.01,
+      sl: 98_000,
+      trailing_stop: { controlMode: "auto", initialQty: 0.01 },
+      realized_pnl: 0
+    };
+    const targets: PaperTargetSnapshot[] = [
+      { id: "btc-tp-1", idx: 1, price: 101_000, share_pct: 40, status: "open" },
+      { id: "btc-tp-2", idx: 2, price: 102_000, share_pct: 60, status: "open" }
+    ];
+
+    const result = evaluatePaperTrade(fractionalTrade, targets, 101_100);
+
+    expect(result.updatedTrade.status).toBe("active");
+    expect(result.updatedTrade.qty).toBeCloseTo(0.006);
+    expect(result.totalRealizedPnlDelta).toBeCloseTo(4);
+  });
+
+  it("records the exact automatic exit reason and execution zone", () => {
+    const result = evaluatePaperTrade(baseLongTrade, baseTargets, 0.0375, 1);
+
+    expect(result.updatedTrade.exit).toEqual({
+      reason: "stop_loss",
+      price: 0.0375,
+      details: { configuredStopLoss: 0.038, closedQty: 1000 }
+    });
+  });
 });

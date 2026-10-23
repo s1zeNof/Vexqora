@@ -186,7 +186,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
     const { data: rawTrades } = await supabase
       .from("trades")
-      .select("id, symbol, side, status, entry_avg, qty, leverage, sl, trailing_stop, realized_pnl, opened_at, signal_id")
+      .select("id, symbol, side, status, entry_avg, qty, leverage, sl, trailing_stop, realized_pnl, opened_at, closed_at, exit_reason, exit_price, signal_id")
       .eq("account_id", account.id)
       .or(symbolOrFilter)
       .order("opened_at", { ascending: false, nullsFirst: false })
@@ -226,6 +226,9 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
           tp1: tp1,
           status: String(t.status),
           opened_at: t.opened_at ? String(t.opened_at) : undefined,
+          closed_at: t.closed_at ? String(t.closed_at) : undefined,
+          exitReason: t.exit_reason ? String(t.exit_reason) : null,
+          exitPrice: t.exit_price ? Number(t.exit_price) : null,
           controlMode,
           trailingStop: ts
         };

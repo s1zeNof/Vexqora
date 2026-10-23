@@ -1,5 +1,5 @@
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
-import { activateAccount, connectBybitAccount, ensurePaperAccount, requestDemoFunds, topUpPaperBalance } from "../actions";
+import { activateAccount, connectBybitAccount, ensurePaperAccount, removePaperBalance, requestDemoFunds, topUpPaperBalance } from "../actions";
 import { SettingsNav } from "../settings-nav";
 
 interface AccountSummary {
@@ -15,7 +15,7 @@ interface AccountSummary {
 export default async function AccountsPage({
   searchParams
 }: {
-  searchParams: Promise<{ error?: string; connected?: string; paper?: string; toppedUp?: string }>;
+  searchParams: Promise<{ error?: string; connected?: string; paper?: string; toppedUp?: string; withdrawn?: string }>;
 }) {
   const supabase = await createSupabaseServerClient();
   const query = (await searchParams) ?? {};
@@ -41,6 +41,7 @@ export default async function AccountsPage({
         {query?.connected && <p className="notice success">Bybit account verified and connected successfully.</p>}
         {query?.paper && <p className="notice success">Vexqora Paper is ready with 10,000 virtual USDT.</p>}
         {query?.toppedUp && <p className="notice success">Paper balance updated.</p>}
+        {query?.withdrawn && <p className="notice success">Virtual funds removed from the Paper balance.</p>}
 
         {/* Accounts Table */}
         <div className="cd" style={{ overflow: "hidden" }}>
@@ -103,13 +104,18 @@ export default async function AccountsPage({
                           )}
 
                           {isPaper ? (
-                            <form action={topUpPaperBalance} style={{ display: "flex", gap: "4px" }}>
-                              <input type="hidden" name="accountId" value={account.id} />
-                              <input type="hidden" name="amount" value="10000" />
-                              <button type="submit" className="bt sm">
-                                +10k USDT
-                              </button>
-                            </form>
+                            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                              <form action={topUpPaperBalance} style={{ display: "flex", gap: "4px" }}>
+                                <input type="hidden" name="accountId" value={account.id} />
+                                <input name="amount" type="number" min="0.01" max="100000" step="0.01" defaultValue="10000" aria-label="Amount to add" style={{ width: "105px" }} />
+                                <button type="submit" className="bt sm">Add</button>
+                              </form>
+                              <form action={removePaperBalance} style={{ display: "flex", gap: "4px" }}>
+                                <input type="hidden" name="accountId" value={account.id} />
+                                <input name="amount" type="number" min="0.01" max={Number(account.paper_balance ?? 0)} step="0.01" placeholder="Amount" aria-label="Amount to remove" style={{ width: "105px" }} required />
+                                <button type="submit" className="bt sm dn">Remove</button>
+                              </form>
+                            </div>
                           ) : account.environment === "demo" ? (
                             <form action={requestDemoFunds} style={{ display: "flex", gap: "4px" }}>
                               <input type="hidden" name="accountId" value={account.id} />

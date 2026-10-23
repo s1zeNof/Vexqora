@@ -9,8 +9,7 @@ export function SettingsNav() {
   const links = [
     { href: "/dashboard/accounts", label: "Accounts", desc: "Workspaces & Bybit API" },
     { href: "/dashboard/risk", label: "Risk limits", desc: "Sizing, caps & kill switch" },
-    { href: "/dashboard/integrations", label: "Integrations", desc: "Telegram & Discord" },
-    { href: "/dashboard/profile", label: "Profile", desc: "Preferences & security" }
+    { href: "/dashboard/integrations", label: "Integrations", desc: "Telegram & Discord" }
   ];
 
   return (

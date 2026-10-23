@@ -123,10 +123,23 @@ export async function topUpPaperBalance(formData: FormData) {
   const amount = Number(textField(formData, "amount"));
   if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) throw new Error("Paper amount must be between 0 and 100000 USDT");
   const { supabase } = await authenticatedContext();
-  const { error } = await supabase.rpc("top_up_paper_balance", { target_account_id: accountId, amount });
+  const { error } = await supabase.rpc("adjust_paper_balance", { target_account_id: accountId, amount });
   if (error) redirect(`/dashboard/accounts?error=${encodeURIComponent(error.message)}`);
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/accounts?toppedUp=1");
+}
+
+export async function removePaperBalance(formData: FormData) {
+  const accountId = textField(formData, "accountId");
+  const amount = Number(textField(formData, "amount"));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) {
+    throw new Error("Withdrawal amount must be between 0 and 100000 USDT");
+  }
+  const { supabase } = await authenticatedContext();
+  const { error } = await supabase.rpc("adjust_paper_balance", { target_account_id: accountId, amount: -amount });
+  if (error) redirect(`/dashboard/accounts?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/accounts?withdrawn=1");
 }
 
 export async function addPaperDepositAction(formData: FormData) {
@@ -134,10 +147,23 @@ export async function addPaperDepositAction(formData: FormData) {
   const amount = Number(textField(formData, "amount")) || 10000;
   if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) throw new Error("Deposit amount must be between 0 and 100000 USDT");
   const { supabase } = await authenticatedContext();
-  const { error } = await supabase.rpc("top_up_paper_balance", { target_account_id: accountId, amount });
+  const { error } = await supabase.rpc("adjust_paper_balance", { target_account_id: accountId, amount });
   if (error) redirect(`/dashboard/profile?error=${encodeURIComponent(error.message)}`);
   revalidatePath("/dashboard", "layout");
   redirect("/dashboard/profile?depositAdded=1");
+}
+
+export async function removePaperDepositAction(formData: FormData) {
+  const accountId = textField(formData, "accountId");
+  const amount = Number(textField(formData, "amount"));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) {
+    throw new Error("Withdrawal amount must be between 0 and 100000 USDT");
+  }
+  const { supabase } = await authenticatedContext();
+  const { error } = await supabase.rpc("adjust_paper_balance", { target_account_id: accountId, amount: -amount });
+  if (error) redirect(`/dashboard/profile?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/dashboard", "layout");
+  redirect("/dashboard/profile?fundsRemoved=1");
 }
 
 export async function updateProfile(formData: FormData) {
@@ -166,6 +192,7 @@ interface TradeWithAccount {
   side: "long" | "short";
   qty: number;
   entry_avg: number | null;
+  realized_pnl: number | null;
   exchange_accounts: AccountInfo;
 }
 
@@ -178,7 +205,7 @@ export async function closeTradePosition(formData: FormData) {
 
   const tradeRes = await supabase
     .from("trades")
-    .select("id, symbol, side, qty, entry_avg, exchange_accounts!inner(id, user_id, exchange, environment, api_key_enc, api_secret_enc, paper_balance)")
+    .select("id, symbol, side, qty, entry_avg, realized_pnl, exchange_accounts!inner(id, user_id, exchange, environment, api_key_enc, api_secret_enc, paper_balance)")
     .eq("id", tradeId)
     .eq("status", "active")
     .single();
@@ -226,11 +253,15 @@ export async function closeTradePosition(formData: FormData) {
     }
 
     const pnl = (ticker.lastPrice - Number(trade.entry_avg)) * totalQty * (trade.side === "long" ? 1 : -1);
+    const totalRealizedPnl = Number(trade.realized_pnl ?? 0) + pnl;
 
     await supabase.from("trades").update({
       status: "closed",
       closed_at: new Date().toISOString(),
-      realized_pnl: pnl
+      realized_pnl: totalRealizedPnl,
+      exit_reason: "manual",
+      exit_price: ticker.lastPrice,
+      exit_details: { qtyPct, closedQty: totalQty }
     }).eq("id", trade.id);
 
     if (account.exchange === "paper") {
@@ -244,21 +275,29 @@ export async function closeTradePosition(formData: FormData) {
       account_id: account.id,
       role: "system",
       kind: "order_event",
-      content: `Market closed position for ${trade.symbol} @ ${ticker.lastPrice}. Realized PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT.`,
-      payload: { tradeId: trade.id, symbol: trade.symbol, pnl }
+      content: `Market closed position for ${trade.symbol} @ ${ticker.lastPrice}. Exit PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT. Total realized PnL: ${totalRealizedPnl >= 0 ? "+" : ""}${totalRealizedPnl.toFixed(2)} USDT.`,
+      payload: { tradeId: trade.id, symbol: trade.symbol, pnl, totalRealizedPnl, exitReason: "manual", exitPrice: ticker.lastPrice }
     });
   } else {
     const remainingQty = totalQty - closeQty;
+    const partialPnl = (ticker.lastPrice - Number(trade.entry_avg)) * closeQty * (trade.side === "long" ? 1 : -1);
+    const totalRealizedPnl = Number(trade.realized_pnl ?? 0) + partialPnl;
     await supabase.from("trades").update({
-      qty: remainingQty
+      qty: remainingQty,
+      realized_pnl: totalRealizedPnl
     }).eq("id", trade.id);
+
+    if (account.exchange === "paper") {
+      const newBalance = Math.max(0, Number(account.paper_balance ?? 10000) + partialPnl);
+      await supabase.from("exchange_accounts").update({ paper_balance: newBalance }).eq("id", account.id);
+    }
 
     await supabase.from("chat_messages").insert({
       account_id: account.id,
       role: "system",
       kind: "order_event",
-      content: `Closed 50% (${closeQty}) of position for ${trade.symbol} @ ${ticker.lastPrice}. Remaining size: ${remainingQty}.`,
-      payload: { tradeId: trade.id, symbol: trade.symbol, closedQty: closeQty, remainingQty }
+      content: `Closed 50% (${closeQty}) of position for ${trade.symbol} @ ${ticker.lastPrice}. Realized PnL: ${partialPnl >= 0 ? "+" : ""}${partialPnl.toFixed(2)} USDT. Remaining size: ${remainingQty}.`,
+      payload: { tradeId: trade.id, symbol: trade.symbol, closedQty: closeQty, remainingQty, pnl: partialPnl, totalRealizedPnl }
     });
   }
 
@@ -282,7 +321,7 @@ export async function closeAllPositions(formData: FormData) {
 
   const tradesRes = await supabase
     .from("trades")
-    .select("id, symbol, side, qty, entry_avg")
+    .select("id, symbol, side, qty, entry_avg, realized_pnl")
     .eq("account_id", account.id)
     .eq("status", "active");
 
@@ -292,6 +331,7 @@ export async function closeAllPositions(formData: FormData) {
     side: "long" | "short";
     qty: number;
     entry_avg: number | null;
+    realized_pnl: number | null;
   }>;
 
   if (activeTrades.length === 0) return;
@@ -322,11 +362,15 @@ export async function closeAllPositions(formData: FormData) {
       }
 
       const pnl = (ticker.lastPrice - Number(trade.entry_avg)) * Number(trade.qty) * (trade.side === "long" ? 1 : -1);
+      const totalRealizedPnl = Number(trade.realized_pnl ?? 0) + pnl;
 
       await supabase.from("trades").update({
         status: "closed",
         closed_at: new Date().toISOString(),
-        realized_pnl: pnl
+        realized_pnl: totalRealizedPnl,
+        exit_reason: "close_all",
+        exit_price: ticker.lastPrice,
+        exit_details: { closedQty: Number(trade.qty) }
       }).eq("id", trade.id);
 
       if (account.exchange === "paper") {
@@ -340,8 +384,8 @@ export async function closeAllPositions(formData: FormData) {
         account_id: account.id,
         role: "system",
         kind: "order_event",
-        content: `Closed position for ${trade.symbol} via Close All. Realized PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT.`,
-        payload: { tradeId: trade.id, symbol: trade.symbol, pnl }
+        content: `Closed position for ${trade.symbol} via Close All. Exit PnL: ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USDT. Total realized PnL: ${totalRealizedPnl >= 0 ? "+" : ""}${totalRealizedPnl.toFixed(2)} USDT.`,
+        payload: { tradeId: trade.id, symbol: trade.symbol, pnl, totalRealizedPnl, exitReason: "close_all", exitPrice: ticker.lastPrice }
       });
     } catch {
       // Continue closing others

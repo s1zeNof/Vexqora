@@ -141,30 +141,30 @@ export function startPaperWorker(
           "Paper Matching Engine executed actions"
         );
 
-        // Update trade row
-        await supabase.from("trades").update({
-          qty: result.updatedTrade.qty,
-          realized_pnl: result.updatedTrade.realized_pnl,
-          status: result.updatedTrade.status,
-          trailing_stop: result.updatedTrade.trailing_stop,
-          ...(result.updatedTrade.closed_at ? { closed_at: result.updatedTrade.closed_at } : {})
-        }).eq("id", trade.id);
+        const exit = result.updatedTrade.exit;
+        const applyResult = await supabase.rpc("apply_paper_trade_result", {
+          target_trade_id: trade.id,
+          expected_qty: Number(trade.qty ?? 0),
+          expected_realized_pnl: Number(trade.realized_pnl ?? 0),
+          new_qty: result.updatedTrade.qty,
+          new_realized_pnl: result.updatedTrade.realized_pnl,
+          new_status: result.updatedTrade.status,
+          new_trailing_stop: result.updatedTrade.trailing_stop,
+          result_closed_at: result.updatedTrade.closed_at ?? null,
+          realized_pnl_delta: result.totalRealizedPnlDelta,
+          target_updates: result.updatedTargets,
+          result_exit_reason: exit?.reason ?? null,
+          result_exit_price: exit?.price ?? null,
+          result_exit_details: exit?.details ?? null
+        });
 
-        // Update targets
-        for (const ut of result.updatedTargets) {
-          await supabase.from("trade_targets").update({
-            status: ut.status,
-            ...(ut.filled_at ? { filled_at: ut.filled_at } : {})
-          }).eq("id", ut.id);
+        if (applyResult.error) {
+          logger.error({ tradeId: trade.id, error: applyResult.error.message }, "Could not atomically settle paper trade");
+          continue;
         }
-
-        // Credit virtual paper balance
-        if (result.totalRealizedPnlDelta !== 0 && trade.exchange_accounts) {
-          const currentBal = Number(trade.exchange_accounts.paper_balance ?? 10000);
-          const newBal = Math.max(0, currentBal + result.totalRealizedPnlDelta);
-          await supabase.from("exchange_accounts").update({
-            paper_balance: newBal
-          }).eq("id", trade.account_id);
+        if (applyResult.data !== true) {
+          logger.info({ tradeId: trade.id }, "Paper event was already settled by another executor");
+          continue;
         }
 
         // Record orders & notifications

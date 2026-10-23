@@ -82,6 +82,11 @@ export interface PaperEvaluationResult {
     status: "active" | "closed";
     trailing_stop: PaperTrailingStopState | null;
     closed_at?: string;
+    exit?: {
+      reason: "take_profit" | "stop_loss" | "trailing_stop";
+      price: number;
+      details: Record<string, unknown>;
+    };
   };
   updatedTargets: Array<{
     id: string;
@@ -103,7 +108,7 @@ export function evaluatePaperTrade(
   trade: PaperTradeSnapshot,
   targets: PaperTargetSnapshot[],
   currentPrice: number,
-  qtyStep = 1
+  qtyStep = 0
 ): PaperEvaluationResult {
   // If trade is not active or has 0 qty, return no-op
   if (trade.status !== "active" && trade.status !== "entry_open") {
@@ -192,7 +197,12 @@ export function evaluatePaperTrade(
           realized_pnl: trade.realized_pnl + pnl,
           status: "closed",
           trailing_stop: trailingState,
-          closed_at: nowIso
+          closed_at: nowIso,
+          exit: {
+            reason: "stop_loss",
+            price: exitPrice,
+            details: { configuredStopLoss: trade.sl, closedQty: remainingQty }
+          }
         },
         updatedTargets,
         totalRealizedPnlDelta: pnl
@@ -212,7 +222,7 @@ export function evaluatePaperTrade(
     if (isTpHit && remainingQty > 0) {
       const isLastTarget = i === openTargets.length - 1;
       const rawTargetQty = initialQty * (target.share_pct / 100);
-      const steppedQty = qtyStep > 0 ? roundToStep(rawTargetQty, qtyStep, "down") : Math.floor(rawTargetQty);
+      const steppedQty = qtyStep > 0 ? roundToStep(rawTargetQty, qtyStep, "down") : rawTargetQty;
       const closeQty = isLastTarget || steppedQty >= remainingQty || steppedQty <= 0
         ? remainingQty
         : steppedQty;
@@ -260,7 +270,12 @@ export function evaluatePaperTrade(
             realized_pnl: trade.realized_pnl + realizedPnlDelta,
             status: "closed",
             trailing_stop: trailingState,
-            closed_at: nowIso
+            closed_at: nowIso,
+            exit: {
+              reason: "take_profit",
+              price: target.price,
+              details: { targetIdx: target.idx, targetPrice: target.price, closedQty: closeQty }
+            }
           },
           updatedTargets,
           totalRealizedPnlDelta: realizedPnlDelta
@@ -315,7 +330,12 @@ export function evaluatePaperTrade(
             realized_pnl: trade.realized_pnl + realizedPnlDelta,
             status: "closed",
             trailing_stop: trailingState,
-            closed_at: nowIso
+            closed_at: nowIso,
+            exit: {
+              reason: "trailing_stop",
+              price: currentPrice,
+              details: { triggerPrice, peakPrice: currentPeak, trailPct, closedQty: remainingQty }
+            }
           },
           updatedTargets,
           totalRealizedPnlDelta: realizedPnlDelta
@@ -356,7 +376,12 @@ export function evaluatePaperTrade(
             realized_pnl: trade.realized_pnl + realizedPnlDelta,
             status: "closed",
             trailing_stop: trailingState,
-            closed_at: nowIso
+            closed_at: nowIso,
+            exit: {
+              reason: "trailing_stop",
+              price: currentPrice,
+              details: { triggerPrice, troughPrice: currentTrough, trailPct, closedQty: remainingQty }
+            }
           },
           updatedTargets,
           totalRealizedPnlDelta: realizedPnlDelta

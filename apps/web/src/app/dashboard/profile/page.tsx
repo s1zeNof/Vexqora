@@ -3,8 +3,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { signOut } from "../../login/actions";
-import { addPaperDepositAction, updateProfile } from "../actions";
-import { SettingsNav } from "../settings-nav";
+import { addPaperDepositAction, removePaperDepositAction, updateProfile } from "../actions";
 
 const profileAccountSchema = z.object({
   id: z.string().uuid(),
@@ -17,7 +16,7 @@ const profileAccountSchema = z.object({
 export default async function ProfilePage({
   searchParams
 }: {
-  searchParams: Promise<{ saved?: string; depositAdded?: string; error?: string }>;
+  searchParams: Promise<{ saved?: string; depositAdded?: string; fundsRemoved?: string; error?: string }>;
 }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -71,10 +70,7 @@ export default async function ProfilePage({
     : null;
 
   return (
-    <div className="settings-layout">
-      <SettingsNav />
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0, width: "100%" }}>
         <div>
           <h1 style={{ margin: 0, font: "700 24px Inter, sans-serif" }}>Profile</h1>
           <p className="lb" style={{ marginTop: "4px" }}>
@@ -83,7 +79,8 @@ export default async function ProfilePage({
         </div>
 
         {query.saved && <p className="notice success">Profile updated successfully.</p>}
-        {query.depositAdded && <p className="notice success">+10,000 USDT added to virtual balance.</p>}
+        {query.depositAdded && <p className="notice success">Virtual funds added to the Paper balance.</p>}
+        {query.fundsRemoved && <p className="notice success">Virtual funds removed from the Paper balance.</p>}
         {query.error && <p className="notice error">{query.error}</p>}
 
         {/* Identity & Balance Card */}
@@ -125,13 +122,18 @@ export default async function ProfilePage({
                 : "Bybit Connected"}
             </div>
             {activeAccount?.exchange === "paper" && (
-              <form action={addPaperDepositAction} style={{ marginTop: "6px" }}>
-                <input type="hidden" name="accountId" value={activeAccount.id} />
-                <input type="hidden" name="amount" value="10000" />
-                <button type="submit" className="bt pr sm">
-                  +10,000 USDT Virtual
-                </button>
-              </form>
+              <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap", marginTop: "8px" }}>
+                <form action={addPaperDepositAction} style={{ display: "flex", gap: "4px" }}>
+                  <input type="hidden" name="accountId" value={activeAccount.id} />
+                  <input name="amount" type="number" min="0.01" max="100000" step="0.01" defaultValue="10000" aria-label="Amount to add" style={{ width: "110px" }} />
+                  <button type="submit" className="bt pr sm">Add</button>
+                </form>
+                <form action={removePaperDepositAction} style={{ display: "flex", gap: "4px" }}>
+                  <input type="hidden" name="accountId" value={activeAccount.id} />
+                  <input name="amount" type="number" min="0.01" max={currentEquity ?? 0} step="0.01" placeholder="Amount" aria-label="Amount to remove" style={{ width: "110px" }} required />
+                  <button type="submit" className="bt dn sm">Remove</button>
+                </form>
+              </div>
             )}
           </div>
         </div>
@@ -201,7 +203,6 @@ export default async function ProfilePage({
             </div>
           </form>
         </div>
-      </div>
     </div>
   );
 }
