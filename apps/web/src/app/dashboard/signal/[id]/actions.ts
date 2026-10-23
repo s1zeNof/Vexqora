@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
+import { sanitizeSymbol } from "@crypto-bot/shared";
 import { parseSignalText, createTradePreview, submitEntry, protectFilledPosition } from "@crypto-bot/trading";
 
 export async function executeSignalAction(
@@ -56,7 +57,7 @@ export async function executeSignalAction(
   }
 
   const canonicalSignal = canonicalRawText ? parseSignalText(canonicalRawText, "api") : null;
-  const executionSymbol = canonicalSignal?.symbol ?? symbol;
+  const executionSymbol = sanitizeSymbol(canonicalSignal?.symbol ?? symbol);
   const executionSide = canonicalSignal?.side ?? side;
   const client = createAccountClient(account);
   const [ticker, instrument, balance] = await Promise.all([

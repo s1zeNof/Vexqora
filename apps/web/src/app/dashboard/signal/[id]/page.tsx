@@ -5,6 +5,7 @@ import { accountConnectionSchema, createAccountClient } from "../../../../lib/ac
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
 import { formatTimeAgo } from "../../../../lib/date";
+import { sanitizeSymbol } from "@crypto-bot/shared";
 import { SignalLiveStage } from "./signal-live-stage";
 import { SignalExecutionPanel } from "./signal-execution-panel";
 import type { SignalTradeItem } from "./signal-positions-table";
@@ -70,11 +71,10 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
       signalRecord = parsedSig.data;
       const parsedData = (signalRecord.parsed as { signal?: { symbol?: string } } | null)?.signal;
       const rawMatches = signalRecord.raw_text ? /([A-Z0-9]+USDT)/.exec(signalRecord.raw_text) : null;
-      formattedSymbol = parsedData?.symbol ?? rawMatches?.[1] ?? "BTCUSDT";
+      formattedSymbol = sanitizeSymbol(parsedData?.symbol ?? rawMatches?.[1] ?? "BTCUSDT");
     }
   } else {
-    const cleanSym = rawId.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    formattedSymbol = cleanSym.endsWith("USDT") ? cleanSym : `${cleanSym}USDT`;
+    formattedSymbol = sanitizeSymbol(rawId);
 
     if (account) {
       const { data } = await supabase

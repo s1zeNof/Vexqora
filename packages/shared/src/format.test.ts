@@ -1,5 +1,5 @@
-﻿import { describe, expect, it } from "vitest";
-import { formatCryptoPrice } from "./format";
+import { describe, expect, it } from "vitest";
+import { formatCryptoPrice, sanitizeSymbol } from "./format";
 
 describe("formatCryptoPrice", () => {
   it("handles empty or invalid values safely", () => {
@@ -23,5 +23,23 @@ describe("formatCryptoPrice", () => {
     expect(formatCryptoPrice(0.1425)).toBe("0.1425");
     expect(formatCryptoPrice(0.0008397)).toBe("0.0008397");
     expect(formatCryptoPrice(0.00001045)).toBe("0.00001045");
+  });
+});
+
+describe("sanitizeSymbol", () => {
+  it("sanitizes pulse slugs with timestamps cleanly", () => {
+    expect(sanitizeSymbol("pulse-IRYSUSDT-2987959")).toBe("IRYSUSDT");
+    expect(sanitizeSymbol("PULSEIRYSUSDT2987959USDT")).toBe("IRYSUSDT");
+    expect(sanitizeSymbol("pulse-BIRBUSDT-2987959")).toBe("BIRBUSDT");
+    expect(sanitizeSymbol("PULSEBIRBUSDT2987959USDT")).toBe("BIRBUSDT");
+    expect(sanitizeSymbol("pulse:ETHUSDT:long:12345")).toBe("ETHUSDT");
+  });
+
+  it("handles standard tickers and short symbols", () => {
+    expect(sanitizeSymbol("BTCUSDT")).toBe("BTCUSDT");
+    expect(sanitizeSymbol("btcusdt")).toBe("BTCUSDT");
+    expect(sanitizeSymbol("BTC")).toBe("BTCUSDT");
+    expect(sanitizeSymbol("IRYS")).toBe("IRYSUSDT");
+    expect(sanitizeSymbol("")).toBe("BTCUSDT");
   });
 });

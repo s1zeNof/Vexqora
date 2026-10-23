@@ -1,3 +1,4 @@
+import { sanitizeSymbol } from "@crypto-bot/shared";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
@@ -13,7 +14,7 @@ interface TickerPayload {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const symbol = searchParams.get("symbol")?.toUpperCase() ?? "BTCUSDT";
+  const symbol = sanitizeSymbol(searchParams.get("symbol") ?? "BTCUSDT");
 
   let lastPrice = 0;
   let high24h = "—";

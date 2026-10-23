@@ -48,7 +48,8 @@ export function SignalChart({
   livePrice,
   position
 }: SignalChartProps) {
-  const [chartMode, setChartMode] = useState<"tradingview" | "terminal">("terminal");
+  const [chartMode, setChartMode] = useState<"tradingview" | "terminal">("tradingview");
+  const [showLevels, setShowLevels] = useState(false);
   const [timeframe, setTimeframe] = useState<TimeframeOption>("15m");
   const [klines, setKlines] = useState<Kline[]>(initialKlines);
   const [isLoadingKlines, setIsLoadingKlines] = useState(false);
@@ -379,6 +380,16 @@ export function SignalChart({
                 </button>
               )}
 
+              <button
+                type="button"
+                onClick={() => setShowLevels((v) => !v)}
+                className={`bt sm ${showLevels ? "pr" : ""}`}
+                title="Показати або приховати рівні TP/SL на графіку"
+                style={{ padding: "2px 8px", fontSize: "11px", height: "24px", color: showLevels ? "#42F5B9" : "#A0A0A0" }}
+              >
+                {showLevels ? "Рівні: Увімк" : "Рівні: Вимк"}
+              </button>
+
               {isLoadingKlines && (
                 <span style={{ fontSize: "11px", color: "#42F5B9", marginLeft: "6px" }}>
                   Оновлення свічок...
@@ -454,8 +465,8 @@ export function SignalChart({
               );
             })}
 
-            {/* Target Level Lines: Stop Loss (Red) */}
-            {stopLoss > 0 && stopLoss >= minPrice && stopLoss <= maxPrice && (
+            {/* Target Level Lines (Toggleable via showLevels button) */}
+            {showLevels && stopLoss > 0 && stopLoss >= minPrice && stopLoss <= maxPrice && (
               <g>
                 <line
                   x1={0}
@@ -490,7 +501,7 @@ export function SignalChart({
             )}
 
             {/* Entry Price Line (White) */}
-            {entry > 0 && entry >= minPrice && entry <= maxPrice && (
+            {showLevels && entry > 0 && entry >= minPrice && entry <= maxPrice && (
               <g>
                 <line
                   x1={0}
@@ -525,7 +536,7 @@ export function SignalChart({
             )}
 
             {/* Take Profit 1 Line (Green) */}
-            {tp1 > 0 && tp1 >= minPrice && tp1 <= maxPrice && (
+            {showLevels && tp1 > 0 && tp1 >= minPrice && tp1 <= maxPrice && (
               <g>
                 <line
                   x1={0}
@@ -560,7 +571,7 @@ export function SignalChart({
             )}
 
             {/* Take Profit 2 Line */}
-            {tp2 > 0 && tp2 >= minPrice && tp2 <= maxPrice && (
+            {showLevels && tp2 > 0 && tp2 >= minPrice && tp2 <= maxPrice && (
               <g>
                 <line
                   x1={0}
@@ -584,7 +595,7 @@ export function SignalChart({
             )}
 
             {/* Take Profit 3 Line */}
-            {tp3 > 0 && tp3 >= minPrice && tp3 <= maxPrice && (
+            {showLevels && tp3 > 0 && tp3 >= minPrice && tp3 <= maxPrice && (
               <g>
                 <line
                   x1={0}

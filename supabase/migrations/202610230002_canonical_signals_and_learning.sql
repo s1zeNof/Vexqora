@@ -72,3 +72,7 @@ create policy "learning events through signal" on public.signal_learning_events
       where s.id = signal_id and public.owns_account(s.account_id)
     )
   );
+
+drop policy if exists "signal outcomes update through account" on public.signal_outcomes;
+create policy "signal outcomes update through account" on public.signal_outcomes
+  for update using (public.owns_account(account_id)) with check (public.owns_account(account_id));

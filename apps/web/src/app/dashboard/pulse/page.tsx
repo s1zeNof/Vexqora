@@ -100,63 +100,80 @@ export default async function PulsePage() {
       }
     };
     const originKey = `pulse:${opp.symbol}:${side}:${bucket}`;
+    const originTag = `[origin:${originKey}]`;
+    const fullRawText = `${rawText} ${originTag}`;
 
     let storedId: string | null = null;
     let storedCreatedAt: string | null = null;
     let storedParsed: unknown = null;
 
-    const { data: existing } = await supabase
-      .from("signals")
-      .select("id, parsed, created_at")
-      .eq("account_id", account.id)
-      .eq("origin_key", originKey)
-      .maybeSingle();
+    try {
+      const { data: existing } = await supabase
+        .from("signals")
+        .select("id, parsed, created_at")
+        .eq("account_id", account.id)
+        .ilike("raw_text", `%${originTag}%`)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    const existingData = existing as { id?: string; parsed?: unknown; created_at?: string } | null;
-    if (existingData?.id && existingData.created_at) {
-      storedId = existingData.id;
-      storedCreatedAt = existingData.created_at;
-      storedParsed = existingData.parsed;
-    } else {
-      const inserted = await supabase.from("signals").insert({
-        account_id: account.id,
-        raw_text: rawText,
-        parsed: payload,
-        source: "api",
-        status: "preview",
-        origin_key: originKey,
-        expires_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
-      }).select("id, parsed, created_at").maybeSingle();
+      const existingData = existing as { id?: string; parsed?: unknown; created_at?: string } | null;
+      if (existingData?.id && existingData.created_at) {
+        storedId = existingData.id;
+        storedCreatedAt = existingData.created_at;
+        storedParsed = existingData.parsed;
+      }
+    } catch {
+      // ignore
+    }
 
-      const insertedData = inserted.data as { id?: string; created_at?: string; parsed?: unknown } | null;
-      if (insertedData?.id && insertedData.created_at) {
-        storedId = insertedData.id;
-        storedCreatedAt = insertedData.created_at;
-        storedParsed = insertedData.parsed;
+    if (!storedId) {
+      try {
+        const inserted = await supabase.from("signals").insert({
+          account_id: account.id,
+          raw_text: fullRawText,
+          parsed: payload,
+          source: "api",
+          status: "preview"
+        }).select("id, parsed, created_at").maybeSingle();
+
+        const insertedData = inserted.data as { id?: string; created_at?: string; parsed?: unknown } | null;
+        if (insertedData?.id && insertedData.created_at) {
+          storedId = insertedData.id;
+          storedCreatedAt = insertedData.created_at;
+          storedParsed = insertedData.parsed;
+        }
+      } catch {
+        // ignore
       }
     }
 
-    if (!storedId || !storedCreatedAt) {
-      return toCard(`pulse-${opp.symbol}-${bucket}`, new Date().toISOString(), payload);
+    const cardId = storedId ?? opp.symbol;
+    const cardCreatedAt = storedCreatedAt ?? new Date().toISOString();
+    const canonical = (storedParsed as CanonicalPulsePayload | null) ?? payload;
+
+    if (storedId) {
+      try {
+        await supabase.from("signal_outcomes").upsert({
+          signal_id: storedId,
+          account_id: account.id,
+          symbol: canonical.signal.symbol,
+          side: canonical.signal.side,
+          entry_price: canonical.entryPrice,
+          stop_loss: canonical.signal.stopLoss,
+          tp1: canonical.signal.takeProfits[0]?.price,
+          tp2: canonical.signal.takeProfits[1]?.price ?? null,
+          tp3: canonical.signal.takeProfits[2]?.price ?? null,
+          strategy: canonical.opportunity.anomalyType,
+          features: canonical.opportunity,
+          expires_at: new Date(new Date(cardCreatedAt).getTime() + 48 * 60 * 60 * 1000).toISOString()
+        }, { onConflict: "signal_id", ignoreDuplicates: true });
+      } catch {
+        // Safe: signal_outcomes might not be created in production Supabase yet
+      }
     }
 
-    const canonical = (storedParsed as CanonicalPulsePayload | null) ?? payload;
-    await supabase.from("signal_outcomes").upsert({
-      signal_id: storedId,
-      account_id: account.id,
-      symbol: canonical.signal.symbol,
-      side: canonical.signal.side,
-      entry_price: canonical.entryPrice,
-      stop_loss: canonical.signal.stopLoss,
-      tp1: canonical.signal.takeProfits[0]?.price,
-      tp2: canonical.signal.takeProfits[1]?.price ?? null,
-      tp3: canonical.signal.takeProfits[2]?.price ?? null,
-      strategy: canonical.opportunity.anomalyType,
-      features: canonical.opportunity,
-      expires_at: new Date(new Date(storedCreatedAt).getTime() + 48 * 60 * 60 * 1000).toISOString()
-    }, { onConflict: "signal_id", ignoreDuplicates: true });
-
-    return toCard(storedId, storedCreatedAt, canonical);
+    return toCard(cardId, cardCreatedAt, canonical);
   }));
 
   return <PulseFeedClient initialSignals={signals} />;
