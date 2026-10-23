@@ -7,6 +7,7 @@ import { formatPrice } from "../../../../lib/format";
 import { formatTimeAgo } from "../../../../lib/date";
 import { SignalLiveStage } from "./signal-live-stage";
 import { SignalExecutionPanel } from "./signal-execution-panel";
+import type { SignalTradeItem } from "./signal-positions-table";
 import { executeSignalAction, deleteSignalAction } from "./actions";
 
 interface SignalPageProps {
@@ -175,24 +176,8 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   const qualityTier = parsedPreview?.opportunity?.qualityTier ?? "A+";
 
   // 6. Fetch active trade and trade history from DB (Де ми входили по Live/Paper)
-  interface TradeListItem {
-    id: string;
-    symbol: string;
-    side: "long" | "short";
-    leverage: number;
-    entryPrice: number;
-    markPrice: number;
-    qty: number;
-    pnlUsdt: number;
-    pnlPct: number;
-    sl: number | null;
-    tp1: number | null;
-    status: string;
-    opened_at?: string | undefined;
-  }
-
-  const tradesList: TradeListItem[] = [];
-  const historyTrades: TradeListItem[] = [];
+  const tradesList: SignalTradeItem[] = [];
+  const historyTrades: SignalTradeItem[] = [];
 
   if (account) {
     const symbolOrFilter = signalRecord
@@ -201,7 +186,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
     const { data: rawTrades } = await supabase
       .from("trades")
-      .select("id, symbol, side, status, entry_avg, qty, leverage, sl, realized_pnl, opened_at, signal_id")
+      .select("id, symbol, side, status, entry_avg, qty, leverage, sl, trailing_stop, realized_pnl, opened_at, signal_id")
       .eq("account_id", account.id)
       .or(symbolOrFilter)
       .order("opened_at", { ascending: false, nullsFirst: false })
@@ -224,7 +209,10 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
           ? (entryPrice > 0 ? (priceDiff / entryPrice) * 100 * leverage : 0)
           : (entryPrice > 0 && qty > 0 ? (pnlUsdt / ((entryPrice * qty) / leverage)) * 100 : 0);
 
-        const item: TradeListItem = {
+        const ts = (t.trailing_stop as { controlMode?: "auto" | "manual" } | null) ?? null;
+        const controlMode = ts?.controlMode ?? "auto";
+
+        const item: SignalTradeItem = {
           id: String(t.id),
           symbol: String(t.symbol),
           side,
@@ -237,7 +225,9 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
           sl: t.sl ? Number(t.sl) : null,
           tp1: tp1,
           status: String(t.status),
-          opened_at: t.opened_at ? String(t.opened_at) : undefined
+          opened_at: t.opened_at ? String(t.opened_at) : undefined,
+          controlMode,
+          trailingStop: ts
         };
 
         if (t.status === "active" || t.status === "entry_open") {

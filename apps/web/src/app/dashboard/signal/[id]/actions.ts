@@ -184,3 +184,49 @@ export async function deleteSignalAction(signalId: string): Promise<void> {
   revalidatePath("/dashboard/signals");
   revalidatePath("/dashboard/chat");
 }
+
+export async function toggleTradeControlMode(
+  tradeId: string,
+  mode: "auto" | "manual",
+  currentPath?: string
+): Promise<{ success: boolean; mode: "auto" | "manual" }> {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: trade, error: tradeErr } = await supabase
+    .from("trades")
+    .select("id, account_id, symbol, trailing_stop, exchange_accounts!inner(user_id)")
+    .eq("id", tradeId)
+    .maybeSingle();
+
+  if (tradeErr || !trade) {
+    throw new Error("Trade not found or unauthorized");
+  }
+
+  const currentTs = (trade.trailing_stop as Record<string, unknown> | null) ?? {};
+  const updatedTs = { ...currentTs, controlMode: mode };
+
+  await supabase.from("trades").update({
+    trailing_stop: updatedTs
+  }).eq("id", tradeId);
+
+  await supabase.from("chat_messages").insert({
+    account_id: trade.account_id,
+    role: "system",
+    kind: "user_action",
+    content: mode === "manual"
+      ? `👤 Перемкнуто на «Ручний контроль» для ${trade.symbol}. Автоматичне спрацювання TP/SL/Trailing призупинено.`
+      : `🤖 Перемкнуто на «Автопілот» для ${trade.symbol}. Автоматичне виконання TP, SL та Trailing Stop відновлено.`,
+    payload: { tradeId, mode }
+  });
+
+  if (currentPath) {
+    revalidatePath(currentPath);
+  }
+  revalidatePath(`/dashboard/signal/${trade.symbol}`);
+  revalidatePath("/dashboard/positions");
+  revalidatePath("/dashboard/signals");
+
+  return { success: true, mode };
+}

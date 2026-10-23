@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Kline } from "@crypto-bot/shared";
 import { formatPrice, formatCryptoPrice } from "../../../../lib/format";
@@ -7,6 +9,7 @@ import { formatTimeAgo } from "../../../../lib/date";
 import { useLiveTicker } from "../../../../hooks/use-live-ticker";
 import { SignalChart } from "./signal-chart";
 import { SignalPositionsTable, type SignalTradeItem } from "./signal-positions-table";
+import { toggleTradeControlMode } from "./actions";
 
 interface SignalLiveStageProps {
   symbol: string;
@@ -73,6 +76,16 @@ export function SignalLiveStage({
   onDeleteFromArchive,
   children
 }: SignalLiveStageProps) {
+  const router = useRouter();
+  const [controlMode, setControlMode] = useState<"auto" | "manual">(activePosition?.controlMode ?? "auto");
+  const [isUpdatingMode, setIsUpdatingMode] = useState(false);
+
+  useEffect(() => {
+    if (activePosition?.controlMode) {
+      setControlMode(activePosition.controlMode);
+    }
+  }, [activePosition?.controlMode]);
+
   // Real-time live ticker with WebSocket & 1.5s Ajax fallback
   const ticker = useLiveTicker({
     symbol,
@@ -86,6 +99,56 @@ export function SignalLiveStage({
 
   const currentPrice = ticker.price > 0 ? ticker.price : initialPrice;
   const isLong = side === "long";
+
+  // Automated Paper matching execution on live price ticks (Autopilot mode)
+  const lastTickTimeRef = useRef<number>(0);
+  useEffect(() => {
+    if (!isPaperTrading || !activePosition || controlMode !== "auto" || !currentPrice || currentPrice <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastTickTimeRef.current < 1500) {
+      return;
+    }
+    lastTickTimeRef.current = now;
+
+    let isMounted = true;
+    fetch("/api/trading/paper-tick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tradeId: activePosition.id,
+        currentPrice
+      })
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { actionsCount?: number; success?: boolean } | null) => {
+        if (isMounted && data && (data.actionsCount ?? 0) > 0) {
+          router.refresh();
+        }
+      })
+      .catch(() => {
+        // network fallback
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isPaperTrading, activePosition, controlMode, currentPrice, router]);
+
+  const handleModeChange = async (newMode: "auto" | "manual") => {
+    if (!activePosition || isUpdatingMode || newMode === controlMode) return;
+    setIsUpdatingMode(true);
+    setControlMode(newMode);
+    try {
+      await toggleTradeControlMode(activePosition.id, newMode, window.location.pathname);
+    } catch {
+      setControlMode(controlMode);
+    } finally {
+      setIsUpdatingMode(false);
+    }
+  };
 
   // Real-time dynamic PnL computation
   const direction = activePosition?.side === "long" ? 1 : -1;
@@ -198,9 +261,63 @@ export function SignalLiveStage({
               </span>
             </div>
 
-            <span className="lb" style={{ fontSize: "12px" }}>
-              {activePosition?.opened_at ? `Вхід: ${formatTimeAgo(activePosition.opened_at)}` : (recentHistoricalTrade?.opened_at ? formatTimeAgo(recentHistoricalTrade.opened_at) : "Нещодавно")}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              {activePosition ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#1A1A1A", padding: "2px 4px", borderRadius: "4px", border: "1px solid #262626" }}>
+                  <button
+                    type="button"
+                    onClick={() => { void handleModeChange("auto"); }}
+                    disabled={isUpdatingMode}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      padding: "4px 8px",
+                      borderRadius: "3px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      border: controlMode === "auto" ? "1px solid #7C4DFF" : "1px solid transparent",
+                      background: controlMode === "auto" ? "#231A3B" : "transparent",
+                      color: controlMode === "auto" ? "#B24BFF" : "#8A8A8A",
+                      transition: "all 0.15s"
+                    }}
+                    title="ШІ автоматично виконує TP1-3, Trailing Stop та Stop Loss"
+                  >
+                    <span>🤖</span>
+                    <span>Автопілот</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { void handleModeChange("manual"); }}
+                    disabled={isUpdatingMode}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      padding: "4px 8px",
+                      borderRadius: "3px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      border: controlMode === "manual" ? "1px solid #FFC24B" : "1px solid transparent",
+                      background: controlMode === "manual" ? "#332412" : "transparent",
+                      color: controlMode === "manual" ? "#FFC24B" : "#8A8A8A",
+                      transition: "all 0.15s"
+                    }}
+                    title="Призупинити автозакриття: ви контролюєте вихід з угоди вручну"
+                  >
+                    <span>👤</span>
+                    <span>Ручний контроль</span>
+                  </button>
+                </div>
+              ) : null}
+
+              <span className="lb" style={{ fontSize: "12px" }}>
+                {activePosition?.opened_at ? `Вхід: ${formatTimeAgo(activePosition.opened_at)}` : (recentHistoricalTrade?.opened_at ? formatTimeAgo(recentHistoricalTrade.opened_at) : "Нещодавно")}
+              </span>
+            </div>
           </div>
 
           <div
@@ -247,6 +364,61 @@ export function SignalLiveStage({
               </div>
             </div>
           </div>
+
+          {/* Mode Explainer Banner for Active Position */}
+          {activePosition ? (
+            controlMode === "manual" ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 12px",
+                  background: "#221910",
+                  border: "1px solid #FFC24B44",
+                  borderRadius: "4px",
+                  color: "#FFE2A6",
+                  fontSize: "12px",
+                  gap: "8px"
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>👤</span>
+                  <span>
+                    <b>Ручний контроль:</b> Автоматичне закриття по TP/SL/Trailing призупинено. Ви маєте повний контроль над виходом (кнопки «50%» або «Close» в таблиці нижче).
+                  </span>
+                </div>
+                <span style={{ fontSize: "11px", color: "#FFC24B", whiteSpace: "nowrap" }}>
+                  ⏸️ Автозакриття на паузі
+                </span>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "8px 12px",
+                  background: "#111A15",
+                  border: "1px solid #42F5B933",
+                  borderRadius: "4px",
+                  color: "#C2FBE8",
+                  fontSize: "12px",
+                  gap: "8px"
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span>🤖</span>
+                  <span>
+                    <b>Автопілот ШІ:</b> Частковий Take Profit (TP1 40%, TP2 30%, TP3 30%) + Динамічний Trailing Stop (1% відкат від локального піку після TP1).
+                  </span>
+                </div>
+                <span style={{ fontSize: "11px", color: "#42F5B9", whiteSpace: "nowrap" }}>
+                  ⚡ Працює автономно
+                </span>
+              </div>
+            )
+          ) : null}
         </div>
       ) : null}
 

@@ -245,7 +245,21 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
                       <td style={{ fontVariantNumeric: "tabular-nums" }}>{trade.entry_avg ? `$${formatCryptoPrice(Number(trade.entry_avg))}` : "—"}</td>
                       <td style={{ fontVariantNumeric: "tabular-nums" }}>{markPrice !== null ? `$${formatCryptoPrice(markPrice)}` : "—"}</td>
                       <td style={{ color: "#FF5A6E", fontVariantNumeric: "tabular-nums" }}>{trade.sl ? `$${formatCryptoPrice(Number(trade.sl))}` : "—"}</td>
-                      <td style={{ color: "#F5C451" }}>{trade.trailing_stop ? "Active" : "—"}</td>
+                      <td>
+                        {(() => {
+                          const trailingObj = trade.trailing_stop as { controlMode?: "auto" | "manual"; activated?: boolean } | null;
+                          if (trailingObj?.controlMode === "manual") {
+                            return <span className="tg gy" style={{ color: "#FFC24B", border: "1px solid #FFC24B44", fontSize: "11px" }}>👤 Ручний</span>;
+                          }
+                          if (trailingObj?.activated) {
+                            return <span className="tg lg" style={{ fontSize: "11px" }}>⚡ Трейлінг</span>;
+                          }
+                          if (trade.trailing_stop) {
+                            return <span className="tg gy" style={{ color: "#B24BFF", border: "1px solid #7C4DFF44", fontSize: "11px" }}>🤖 Автопілот</span>;
+                          }
+                          return <span style={{ color: "#9A9A9A" }}>—</span>;
+                        })()}
+                      </td>
                       <td style={{ color: pnlDisplay === "—" ? "#9A9A9A" : isProfit ? "#42F5B9" : "#FF5A6E", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                         {pnlDisplay}
                       </td>

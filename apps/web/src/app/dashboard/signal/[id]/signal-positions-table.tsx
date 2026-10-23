@@ -18,6 +18,8 @@ export interface SignalTradeItem {
   tp1: number | null;
   status: string;
   opened_at?: string | undefined;
+  controlMode?: "auto" | "manual";
+  trailingStop?: Record<string, unknown> | null;
 }
 
 interface SignalPositionsTableProps {
@@ -164,6 +166,11 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
                 <div className="row">
                   <span>Take Profit 1 Limit ({activePosition.symbol})</span>
                   <span style={{ color: "#42F5B9", fontWeight: 600 }}>${formatCryptoPrice(activePosition.tp1)} (Reduce-Only)</span>
+                </div>
+              )}
+              {activePosition.controlMode === "manual" && (
+                <div style={{ marginTop: "6px", padding: "6px 10px", background: "#261E14", border: "1px solid #FFC24B44", borderRadius: "4px", color: "#FFE2A6", fontSize: "12px" }}>
+                  ⏸️ <b>Ручний режим:</b> Автоматичне зіставлення цих рівнів призупинено. Трейдер контролює закриття позиції самостійно.
                 </div>
               )}
             </div>

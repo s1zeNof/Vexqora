@@ -3,6 +3,7 @@ import type { Signal } from "@crypto-bot/shared";
 import { getWorkerConfig } from "./config";
 import { logger } from "./logger";
 import { startPulseScanner } from "./pulse-scanner";
+import { startPaperWorker } from "./paper-worker";
 import { reconcileOnStartup } from "./reconciler";
 import { processJob, type ExecutionJobData } from "./runner";
 import { startWsListener } from "./ws-listener";
@@ -111,6 +112,9 @@ async function startWorker() {
   // Start Bybit Private WebSocket Listener Manager
   const stopWsListener = startWsListener(supabase, config.masterKey, config.discordWebhookUrl);
 
+  // Start 24/7 Paper Matching Engine Worker
+  const stopPaper = startPaperWorker(supabase);
+
   logger.info({ pollIntervalMs: config.pollIntervalMs }, "Worker queue consumer active. Waiting for execution jobs...");
 
   let isRunning = true;
@@ -120,6 +124,7 @@ async function startWorker() {
     isRunning = false;
     stopPulse();
     stopWsListener();
+    stopPaper();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
