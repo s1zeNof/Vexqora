@@ -179,14 +179,14 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
               {/* Row 5: Action buttons */}
               <div style={{ display: "flex", gap: "8px" }}>
                 <Link
-                  href={`/dashboard/signal/${item.symbol}`}
+                  href={`/dashboard/signal/${item.id}`}
                   className="bt"
                   style={{ flex: 1, textAlign: "center" }}
                 >
                   Open
                 </Link>
                 <Link
-                  href={`/dashboard/signal/${item.symbol}?trade=1`}
+                  href={`/dashboard/signal/${item.id}?trade=1`}
                   className="bt pr"
                   style={{ flex: 1, textAlign: "center" }}
                 >

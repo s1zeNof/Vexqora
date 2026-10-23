@@ -13,6 +13,7 @@ interface SignalExecutionPanelProps {
   defaultRiskPct?: number;
   stopLossPrice?: number;
   tp1Price?: number;
+  lockSignalSide?: boolean;
   onExecute: (data: { orderType: "Market" | "Limit"; margin: number; leverage: number }) => Promise<void>;
 }
 
@@ -25,6 +26,7 @@ export function SignalExecutionPanel({
   defaultRiskPct = 1.0,
   stopLossPrice,
   tp1Price,
+  lockSignalSide = false,
   onExecute
 }: SignalExecutionPanelProps) {
   const [side, setSide] = useState<"long" | "short">(initialSide);
@@ -121,11 +123,12 @@ export function SignalExecutionPanel({
         <button
           type="button"
           onClick={() => setSide("long")}
+          disabled={lockSignalSide}
           style={{
             height: "36px",
             font: "700 13px Inter, sans-serif",
             borderRadius: "6px",
-            cursor: "pointer",
+            cursor: lockSignalSide ? "not-allowed" : "pointer",
             border: isLong ? "1px solid #42F5B9" : "1px solid #262626",
             background: isLong ? "#42F5B9" : "#1A1A1A",
             color: isLong ? "#000000" : "#9A9A9A"
@@ -136,11 +139,12 @@ export function SignalExecutionPanel({
         <button
           type="button"
           onClick={() => setSide("short")}
+          disabled={lockSignalSide}
           style={{
             height: "36px",
             font: "700 13px Inter, sans-serif",
             borderRadius: "6px",
-            cursor: "pointer",
+            cursor: lockSignalSide ? "not-allowed" : "pointer",
             border: !isLong ? "1px solid #FF5A6E" : "1px solid #262626",
             background: !isLong ? "#FF5A6E" : "#1A1A1A",
             color: !isLong ? "#FFFFFF" : "#9A9A9A"

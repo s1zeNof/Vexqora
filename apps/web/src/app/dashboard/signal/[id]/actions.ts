@@ -29,6 +29,21 @@ export async function executeSignalAction(
   if (!rawAccount) throw new Error("No active exchange account found");
   const account = accountConnectionSchema.parse(rawAccount);
 
+  let canonicalRawText: string | null = null;
+  if (existingSignalId) {
+    const { data: storedSignal, error: storedSignalError } = await supabase
+      .from("signals")
+      .select("raw_text")
+      .eq("id", existingSignalId)
+      .eq("account_id", account.id)
+      .maybeSingle();
+    const rawText = (storedSignal as { raw_text?: string | null } | null)?.raw_text;
+    if (storedSignalError || !rawText) {
+      throw new Error("Canonical signal snapshot is unavailable");
+    }
+    canonicalRawText = rawText;
+  }
+
   // Check risk settings
   const { data: rawSettings } = await supabase
     .from("risk_settings")
@@ -40,34 +55,37 @@ export async function executeSignalAction(
     throw new Error("Emergency Kill Switch is ACTIVE for this account");
   }
 
+  const canonicalSignal = canonicalRawText ? parseSignalText(canonicalRawText, "api") : null;
+  const executionSymbol = canonicalSignal?.symbol ?? symbol;
+  const executionSide = canonicalSignal?.side ?? side;
   const client = createAccountClient(account);
   const [ticker, instrument, balance] = await Promise.all([
-    client.getTicker(symbol),
-    client.getInstrument(symbol),
+    client.getTicker(executionSymbol),
+    client.getInstrument(executionSymbol),
     client.getBalance()
   ]);
 
   const entryPrice = ticker.lastPrice;
   const slDist = entryPrice * 0.025;
-  const slPrice = side === "long" ? entryPrice - slDist : entryPrice + slDist;
-  const tp1Price = side === "long" ? entryPrice + slDist * 1.8 : entryPrice - slDist * 1.8;
-  const tp2Price = side === "long" ? entryPrice + slDist * 2.6 : entryPrice - slDist * 2.6;
-  const tp3Price = side === "long" ? entryPrice + slDist * 3.5 : entryPrice - slDist * 3.5;
+  const slPrice = executionSide === "long" ? entryPrice - slDist : entryPrice + slDist;
+  const tp1Price = executionSide === "long" ? entryPrice + slDist * 1.8 : entryPrice - slDist * 1.8;
+  const tp2Price = executionSide === "long" ? entryPrice + slDist * 2.6 : entryPrice - slDist * 2.6;
+  const tp3Price = executionSide === "long" ? entryPrice + slDist * 3.5 : entryPrice - slDist * 3.5;
 
-  const rawSignalText = `${symbol} ${side.toUpperCase()}
+  const rawSignalText = canonicalRawText ?? `${executionSymbol} ${executionSide.toUpperCase()}
 entry ${entryPrice}
 sl ${slPrice}
 tp ${tp1Price} 40%, ${tp2Price} 30%, ${tp3Price} 30%
 trail 1% after tp1
 lev ${leverage}`;
 
-  const parsedSignal = parseSignalText(rawSignalText, "chat");
+  const parsedSignal = { ...parseSignalText(rawSignalText, "api"), leverage };
   const preview = createTradePreview(
     parsedSignal,
     instrument,
     {
       riskPerTradePct: Number(rawSettings?.risk_per_trade_pct ?? 1),
-      maxLeverage: Math.max(leverage, Number(rawSettings?.max_leverage ?? 5)),
+      maxLeverage: Number(rawSettings?.max_leverage ?? 5),
       maxOpenPositions: Number(rawSettings?.max_open_positions ?? 3),
       maxDailyLossPct: Number(rawSettings?.max_daily_loss_pct ?? 5),
       killSwitch: false

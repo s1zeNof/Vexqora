@@ -189,14 +189,14 @@ Before committing any changes or concluding a working session, run these command
 ```powershell
 npm run typecheck   # Typecheck all 5 workspaces
 npm run lint        # ESLint check
-npm test            # Run Vitest test suites (46 unit tests currently)
+npm test            # Run Vitest test suites (49 unit tests currently)
 npm run build       # Next.js Turbopack production build & worker build
 ```
 
 Expected baseline:
 - 0 TypeScript errors.
 - 0 ESLint warnings/errors.
-- 46 unit tests passing across `@crypto-bot/trading`, `@crypto-bot/exchange`, `@crypto-bot/shared`, `@crypto-bot/worker`.
+- 49 unit tests passing across `@crypto-bot/trading`, `@crypto-bot/exchange`, `@crypto-bot/shared`, `@crypto-bot/worker`.
 - Next.js production build completes cleanly.
 
 ---
@@ -236,6 +236,8 @@ Expected baseline:
 - [x] Positions Page (`/dashboard/positions`) enhancements with dual tabs (Active vs Archive) and mode badges (`👤 Ручний`, `🤖 Автопілот`, `⚡ Трейлінг`).
 - [x] Atomic Paper trade settlement with idempotent PnL/balance updates and persisted exit provenance.
 - [x] Custom Paper balance add/remove controls and a dedicated Profile navigation entry.
+- [x] Canonical Immutable Signal Snapshot Architecture (origin_key, signals, /dashboard/signal/[id]) eliminating discrepancy between feed cards and detail terminal.
+- [x] Machine Learning Signal Outcome Monitor (signal-outcome.ts, signal-monitor.ts, signal_outcomes, signal_learning_events) automatically tracking MFE, MAE, TP1/2/3 hits and SL failure reasons 24/7 even without user execution.
 
 ### Immediate Next Tasks (Stage 6):
 1. **External Integrations**:

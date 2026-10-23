@@ -156,6 +156,8 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
       rationale?: string;
       qualityScore?: number;
       qualityTier?: string;
+      winProbabilityPct?: number;
+      riskReward?: number;
     };
   } | null;
 
@@ -174,6 +176,8 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   const rationale = parsedPreview?.opportunity?.rationale ?? "Structural liquidity sweep followed by market structure shift (MSS) into discount value gap.";
   const qualityScore = parsedPreview?.opportunity?.qualityScore ? parsedPreview.opportunity.qualityScore.toFixed(1) : "9.5";
   const qualityTier = parsedPreview?.opportunity?.qualityTier ?? "A+";
+  const winProbabilityPct = parsedPreview?.opportunity?.winProbabilityPct ?? 73;
+  const riskReward = parsedPreview?.opportunity?.riskReward ?? 2.4;
 
   // 6. Fetch active trade and trade history from DB (Де ми входили по Live/Paper)
   const tradesList: SignalTradeItem[] = [];
@@ -337,11 +341,11 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
               </div>
               <div className="row">
                 <span>R : R коефіцієнт</span>
-                <span style={{ color: "#42F5B9" }}>1 : 2.40</span>
+                 <span style={{ color: "#42F5B9" }}>1 : {riskReward.toFixed(2)}</span>
               </div>
               <div className="row">
                 <span>Впевненість ШІ</span>
-                <span style={{ color: "#42F5B9" }}>73% Win Rate</span>
+                 <span style={{ color: "#42F5B9" }}>{winProbabilityPct}% Win Rate</span>
               </div>
             </div>
           </div>
@@ -354,6 +358,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
             availableBalance={availableBalance}
             stopLossPrice={stopLoss}
             tp1Price={tp1}
+            lockSignalSide={Boolean(targetSignalId)}
             onExecute={handleExecuteAction}
           />
         </div>

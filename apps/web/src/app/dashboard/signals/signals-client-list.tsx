@@ -32,6 +32,13 @@ interface SignalItem {
     realized_pnl: number;
     leverage: number;
   } | null;
+  outcome: {
+    status: string;
+    outcome: string | null;
+    failure_reason: string | null;
+    max_favorable_pct: number;
+    max_adverse_pct: number;
+  } | null;
 }
 
 interface SignalsClientListProps {
@@ -131,6 +138,12 @@ export function SignalsClientList({ signals, isArchive, isPaperTrading }: Signal
                     }}
                   >
                     🎯 {isTradeActive ? "В трейді" : "Закрито"}: {isPaperTrading ? "Paper" : "Live"} (Вхід ${formatCryptoPrice(s.trade?.entry_avg ?? s.entryPrice)})
+                  </span>
+                ) : null}
+                {s.outcome ? (
+                  <span className={`tg ${s.outcome.outcome === "win" ? "lg" : s.outcome.outcome === "loss" ? "sh" : "gy"}`}>
+                    ML: {s.outcome.status.replaceAll("_", " ")}
+                    {s.outcome.failure_reason ? ` · ${s.outcome.failure_reason.replaceAll("_", " ")}` : ""}
                   </span>
                 ) : null}
               </div>

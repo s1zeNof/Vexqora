@@ -30,6 +30,15 @@ const tradeRowSchema = z.object({
   opened_at: z.string().nullable()
 });
 
+const outcomeRowSchema = z.object({
+  signal_id: z.string(),
+  status: z.string(),
+  outcome: z.string().nullable(),
+  failure_reason: z.string().nullable(),
+  max_favorable_pct: z.coerce.number(),
+  max_adverse_pct: z.coerce.number()
+});
+
 export default async function SignalsPage({ searchParams }: SignalsPageProps) {
   const query = await searchParams;
   const currentTab = query.tab === "archive" ? "archive" : "active";
@@ -67,6 +76,13 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
     .order("opened_at", { ascending: false }) : { data: [] };
 
   const parsedTrades = z.array(tradeRowSchema).safeParse(rawTrades ?? []).data ?? [];
+
+  const { data: rawOutcomes } = account ? await supabase
+    .from("signal_outcomes")
+    .select("signal_id, status, outcome, failure_reason, max_favorable_pct, max_adverse_pct")
+    .eq("account_id", account.id) : { data: [] };
+  const parsedOutcomes = z.array(outcomeRowSchema).safeParse(rawOutcomes ?? []).data ?? [];
+  const outcomesMap = new Map(parsedOutcomes.map((outcome) => [outcome.signal_id, outcome]));
 
   const tradesMap = new Map<string, {
     id: string;
@@ -155,7 +171,8 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
       isArchived,
       remainingHours,
       createdAt: row.created_at,
-      trade: correlatedTrade
+      trade: correlatedTrade,
+      outcome: outcomesMap.get(id) ?? null
     };
   });
 
