@@ -539,7 +539,8 @@ export function PnlShareCardModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "20px"
+        padding: "12px",
+        overflowY: "auto"
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -554,10 +555,12 @@ export function PnlShareCardModal({
           border: "1px solid #2A2145",
           borderRadius: "16px",
           boxShadow: "0 24px 64px rgba(0,0,0,0.8)",
-          padding: "24px",
+          padding: "16px",
+          maxHeight: "92vh",
+          overflowY: "auto",
           display: "flex",
           flexDirection: "column",
-          gap: "18px"
+          gap: "14px"
         }}
       >
         {/* Modal Header */}
@@ -639,7 +642,7 @@ export function PnlShareCardModal({
         </div>
 
         {/* Action Buttons with clean SVG icons (NO EMOJIS) */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
           <button
             type="button"
             onClick={onClose}

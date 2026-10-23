@@ -428,7 +428,7 @@ export function SignalChart({
             viewBox={`0 0 ${width} ${height}`}
             role="img"
             aria-label={`${symbol} interactive chart with Entry, SL, TP levels`}
-            style={{ display: "block", cursor: isDragging ? "grabbing" : "crosshair" }}
+            className="chart-svg" style={{ cursor: isDragging ? "grabbing" : "crosshair" }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}

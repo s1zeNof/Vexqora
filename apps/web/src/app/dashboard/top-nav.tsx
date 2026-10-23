@@ -31,9 +31,18 @@ export function TopNav({
   const [profileOpen, setProfileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const settingsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns and drawer on route change
+  useEffect(() => {
+    setSettingsOpen(false);
+    setProfileOpen(false);
+    setSearchOpen(false);
+    setMobileDrawerOpen(false);
+  }, [pathname]);
 
   // Close dropdowns on click outside
   useEffect(() => {
@@ -57,6 +66,7 @@ export function TopNav({
         setSearchOpen((prev) => !prev);
       } else if (event.key === "Escape") {
         setSearchOpen(false);
+        setMobileDrawerOpen(false);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -64,7 +74,10 @@ export function TopNav({
   }, []);
 
   const isPulse = pathname === "/dashboard/pulse";
-  const isSignals = pathname.startsWith("/dashboard/signals") || pathname.startsWith("/dashboard/signal") || pathname === "/dashboard/chat";
+  const isSignals =
+    pathname.startsWith("/dashboard/signals") ||
+    pathname.startsWith("/dashboard/signal") ||
+    pathname === "/dashboard/chat";
   const isPositions = pathname === "/dashboard/positions";
   const isHistory = pathname === "/dashboard/history";
   const isProfile = pathname === "/dashboard/profile";
@@ -76,6 +89,18 @@ export function TopNav({
 
   const isLive = account?.environment === "live";
   const avatarLetter = (displayName || userEmail || "U")[0]?.toUpperCase() ?? "U";
+
+  const formattedBalance =
+    availableBalance === null
+      ? "— USDT"
+      : `${availableBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`;
+
+  const compactBalance =
+    availableBalance === null
+      ? "—"
+      : availableBalance >= 1000
+        ? `$${(availableBalance / 1000).toFixed(1)}k`
+        : `$${availableBalance.toFixed(0)}`;
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,18 +122,19 @@ export function TopNav({
             display: "flex",
             alignItems: "center",
             gap: "10px",
-            marginRight: "20px",
+            marginRight: "16px",
             font: "700 17px Inter, sans-serif",
             color: "#FFFFFF",
-            letterSpacing: "-0.01em"
+            letterSpacing: "-0.01em",
+            flexShrink: 0
           }}
         >
           <VexqoraLogo size={24} />
           <span>Vexqora</span>
         </Link>
 
-        {/* Primary Navigation */}
-        <nav style={{ display: "flex", alignItems: "center", height: "64px" }}>
+        {/* Desktop Primary Navigation */}
+        <nav className="desktop-nav">
           <Link href="/dashboard/pulse" className={`nav-link ${isPulse ? "active" : ""}`}>
             Pulse
           </Link>
@@ -125,7 +151,7 @@ export function TopNav({
             Profile
           </Link>
 
-          {/* Settings Dropdown */}
+          {/* Desktop Settings Dropdown */}
           <div ref={settingsRef} style={{ position: "relative", height: "64px", display: "flex", alignItems: "center" }}>
             <button
               type="button"
@@ -231,14 +257,13 @@ export function TopNav({
                     Telegram & Discord webhooks
                   </div>
                 </Link>
-
               </div>
             )}
           </div>
         </nav>
 
-        {/* Right Toolbar */}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
+        {/* Desktop Right Toolbar */}
+        <div className="desktop-toolbar">
           {/* Search Trigger */}
           <button
             type="button"
@@ -277,7 +302,7 @@ export function TopNav({
                 display: "inline-block"
               }}
             />
-            {isLive ? "Live" : (account?.exchange === "paper" ? "Paper · VEXQORA" : "Paper · DEMO")}
+            {isLive ? "Live" : account?.exchange === "paper" ? "Paper · VEXQORA" : "Paper · DEMO"}
           </Link>
 
           {/* Balance */}
@@ -289,9 +314,7 @@ export function TopNav({
               padding: "0 4px"
             }}
           >
-            {availableBalance === null
-              ? "— USDT"
-              : `${availableBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`}
+            {formattedBalance}
           </span>
 
           {/* Add Funds button (for demo accounts) */}
@@ -389,7 +412,347 @@ export function TopNav({
             )}
           </div>
         </div>
+
+        {/* Mobile Toolbar (Visible on screens <= 960px) */}
+        <div className="mobile-toolbar">
+          {/* Quick Search */}
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            className="bt sm"
+            aria-label="Search pairs"
+            style={{ width: "32px", height: "32px", padding: 0 }}
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#FFFFFF" strokeWidth="1.5">
+              <circle cx="7" cy="7" r="5" />
+              <path d="M11 11l3.5 3.5" />
+            </svg>
+          </button>
+
+          {/* Compact Balance Pill */}
+          <Link
+            href="/dashboard/accounts"
+            className="tg gy"
+            style={{
+              height: "32px",
+              padding: "0 8px",
+              borderRadius: "6px",
+              fontSize: "12px",
+              background: "#171229",
+              border: "1px solid #2A2145",
+              display: "flex",
+              alignItems: "center",
+              gap: "5px"
+            }}
+          >
+            <i
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "3px",
+                background: isLive ? "#F5C451" : "#42F5B9",
+                display: "inline-block"
+              }}
+            />
+            <span style={{ fontWeight: 700, color: "#FFFFFF" }}>{compactBalance}</span>
+          </Link>
+
+          {/* Hamburger Drawer Toggle */}
+          <button
+            type="button"
+            onClick={() => setMobileDrawerOpen((prev) => !prev)}
+            className="mobile-nav-toggle"
+            aria-label="Toggle navigation menu"
+          >
+            {mobileDrawerOpen ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            )}
+          </button>
+        </div>
       </header>
+
+      {/* Mobile Navigation Drawer Sheet */}
+      {mobileDrawerOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            zIndex: 999,
+            display: "flex",
+            justifyContent: "flex-end",
+            animation: "drawerFadeIn 0.18s ease-out"
+          }}
+          onClick={() => setMobileDrawerOpen(false)}
+        >
+          <div
+            style={{
+              width: "82%",
+              maxWidth: "340px",
+              height: "100%",
+              background: "#0E0B1A",
+              borderLeft: "1px solid #2A2145",
+              display: "flex",
+              flexDirection: "column",
+              padding: "20px 16px",
+              gap: "16px",
+              overflowY: "auto",
+              animation: "drawerSlideRight 0.22s ease-out"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #262626", paddingBottom: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <VexqoraLogo size={22} />
+                <b style={{ font: "700 16px Inter, sans-serif", color: "#FFFFFF" }}>Vexqora Trade</b>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileDrawerOpen(false)}
+                className="bt sm"
+                style={{ width: "30px", height: "30px", padding: 0 }}
+                aria-label="Close menu"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Account Card */}
+            <div
+              style={{
+                background: "#171229",
+                border: "1px solid #2A2145",
+                borderRadius: "10px",
+                padding: "12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span className="lb" style={{ fontSize: "11px" }}>Активний рахунок</span>
+                <span className={`tg ${isLive ? "warn" : "gy"}`} style={{ fontSize: "11px" }}>
+                  <i style={{ width: "6px", height: "6px", borderRadius: "3px", background: isLive ? "#F5C451" : "#42F5B9" }} />
+                  {isLive ? "Live" : account?.exchange === "paper" ? "Paper Vexqora" : "Bybit Demo"}
+                </span>
+              </div>
+              <div style={{ font: "700 18px 'JetBrains Mono', monospace", color: "#FFFFFF" }}>
+                {formattedBalance}
+              </div>
+              <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                {!isLive && (
+                  <Link
+                    href="/dashboard/accounts"
+                    onClick={() => setMobileDrawerOpen(false)}
+                    className="bt sm pr"
+                    style={{ flex: 1, fontSize: "12px" }}
+                  >
+                    + Поповнити
+                  </Link>
+                )}
+                <Link
+                  href="/dashboard/risk"
+                  onClick={() => setMobileDrawerOpen(false)}
+                  className="bt sm dn"
+                  style={{ flex: 1, fontSize: "12px" }}
+                >
+                  Kill Switch
+                </Link>
+              </div>
+            </div>
+
+            {/* Main Navigation Links */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span className="lb" style={{ fontSize: "11px", padding: "4px 8px" }}>Головне меню</span>
+              <Link
+                href="/dashboard/pulse"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: isPulse ? "#1A1A1A" : "transparent",
+                  color: isPulse ? "#42F5B9" : "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "14px"
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Pulse (Скринер)
+              </Link>
+
+              <Link
+                href="/dashboard/signals"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: isSignals ? "#1A1A1A" : "transparent",
+                  color: isSignals ? "#42F5B9" : "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "14px"
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                </svg>
+                Signals (Сигнали ШІ)
+              </Link>
+
+              <Link
+                href="/dashboard/positions"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: isPositions ? "#1A1A1A" : "transparent",
+                  color: isPositions ? "#42F5B9" : "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "14px"
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 20V10" />
+                  <path d="M12 20V4" />
+                  <path d="M6 20v-6" />
+                </svg>
+                Positions (Позиції)
+              </Link>
+
+              <Link
+                href="/dashboard/history"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: isHistory ? "#1A1A1A" : "transparent",
+                  color: isHistory ? "#42F5B9" : "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "14px"
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                History (Історія)
+              </Link>
+
+              <Link
+                href="/dashboard/profile"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: isProfile ? "#1A1A1A" : "transparent",
+                  color: isProfile ? "#42F5B9" : "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "14px"
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                Profile (Профіль)
+              </Link>
+            </div>
+
+            {/* Settings Links */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px", borderTop: "1px solid #262626", paddingTop: "12px" }}>
+              <span className="lb" style={{ fontSize: "11px", padding: "4px 8px" }}>Налаштування</span>
+              <Link
+                href="/dashboard/accounts"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  color: pathname === "/dashboard/accounts" ? "#42F5B9" : "#A59CC4",
+                  fontSize: "13px"
+                }}
+              >
+                Рахунки та Bybit API
+              </Link>
+              <Link
+                href="/dashboard/risk"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  color: pathname === "/dashboard/risk" ? "#42F5B9" : "#A59CC4",
+                  fontSize: "13px"
+                }}
+              >
+                Ліміти ризику
+              </Link>
+              <Link
+                href="/dashboard/integrations"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  color: pathname === "/dashboard/integrations" ? "#42F5B9" : "#A59CC4",
+                  fontSize: "13px"
+                }}
+              >
+                Інтеграції (Telegram, Discord)
+              </Link>
+            </div>
+
+            {/* Sign out */}
+            <div style={{ marginTop: "auto", borderTop: "1px solid #262626", paddingTop: "12px" }}>
+              <form action={signOut}>
+                <button
+                  type="submit"
+                  className="bt dn sm"
+                  style={{ width: "100%", justifyContent: "center" }}
+                >
+                  Вийти з акаунту
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cmd/Ctrl+K Search Modal */}
       {searchOpen && (
@@ -400,10 +763,12 @@ export function TopNav({
             position: "fixed",
             inset: 0,
             background: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
             display: "flex",
             alignItems: "flex-start",
             justifyContent: "center",
-            paddingTop: "15vh",
+            padding: "15vh 16px 20px",
             zIndex: 999
           }}
           onClick={() => setSearchOpen(false)}
@@ -426,7 +791,7 @@ export function TopNav({
               <input
                 type="text"
                 autoFocus
-                placeholder="Search Bybit linear pair (e.g. BTC, ETH, SOL)..."
+                placeholder="Введіть пару Bybit (наприклад BTC, ETH, SOL)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{
@@ -434,18 +799,18 @@ export function TopNav({
                   background: "#1A1A1A",
                   border: "1px solid #262626",
                   color: "#FFFFFF",
-                  fontSize: "15px",
-                  padding: "10px 14px",
+                  fontSize: "14px",
+                  padding: "10px 12px",
                   borderRadius: "8px"
                 }}
               />
               <button type="submit" className="bt pr">
-                Open
+                Знайти
               </button>
             </form>
 
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-              <span className="lb">Popular:</span>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+              <span className="lb" style={{ fontSize: "11px" }}>Популярні:</span>
               {["BTCUSDT", "ETHUSDT", "SOLUSDT", "BTRUSDT", "PEPEUSDT", "SUIUSDT"].map((p) => (
                 <button
                   key={p}
@@ -455,7 +820,7 @@ export function TopNav({
                     router.push(`/dashboard/signal/${p}`);
                   }}
                   className="tg gy"
-                  style={{ cursor: "pointer", border: "1px solid #262626" }}
+                  style={{ cursor: "pointer", border: "1px solid #262626", fontSize: "11px" }}
                 >
                   {p}
                 </button>
@@ -465,38 +830,110 @@ export function TopNav({
         </div>
       )}
 
-      {/* Mobile Bottom Navigation (Pulse, Signals, Positions, Settings) */}
-      <nav
-        style={{
-          display: "none",
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: "56px",
-          background: "#000000",
-          borderTop: "1px solid #262626",
-          zIndex: 40,
-          justifyContent: "space-around",
-          alignItems: "center"
-        }}
-        className="mobile-tabbar"
-      >
-        <Link href="/dashboard/pulse" style={{ color: isPulse ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
-          Pulse
+      {/* Mobile Bottom Tabbar (Visible on screens <= 768px) */}
+      <nav className="mobile-tabbar">
+        <Link
+          href="/dashboard/pulse"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "3px",
+            color: isPulse ? "#42F5B9" : "#9A9A9A",
+            textDecoration: "none",
+            flex: 1,
+            padding: "6px 0"
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          </svg>
+          <span style={{ font: "600 10.5px Inter, sans-serif" }}>Pulse</span>
         </Link>
-        <Link href="/dashboard/signals" style={{ color: isSignals ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
-          Signals
+
+        <Link
+          href="/dashboard/signals"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "3px",
+            color: isSignals ? "#42F5B9" : "#9A9A9A",
+            textDecoration: "none",
+            flex: 1,
+            padding: "6px 0"
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+          <span style={{ font: "600 10.5px Inter, sans-serif" }}>Signals</span>
         </Link>
-        <Link href="/dashboard/positions" style={{ color: isPositions ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
-          Positions
+
+        <Link
+          href="/dashboard/positions"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "3px",
+            color: isPositions ? "#42F5B9" : "#9A9A9A",
+            textDecoration: "none",
+            flex: 1,
+            padding: "6px 0"
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M18 20V10" />
+            <path d="M12 20V4" />
+            <path d="M6 20v-6" />
+          </svg>
+          <span style={{ font: "600 10.5px Inter, sans-serif" }}>Positions</span>
         </Link>
-        <Link href="/dashboard/profile" style={{ color: isProfile ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
-          Profile
+
+        <Link
+          href="/dashboard/history"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "3px",
+            color: isHistory ? "#42F5B9" : "#9A9A9A",
+            textDecoration: "none",
+            flex: 1,
+            padding: "6px 0"
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span style={{ font: "600 10.5px Inter, sans-serif" }}>History</span>
         </Link>
-        <Link href="/dashboard/accounts" style={{ color: isSettings ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
-          Settings
-        </Link>
+
+        <button
+          type="button"
+          onClick={() => setMobileDrawerOpen(true)}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "3px",
+            color: mobileDrawerOpen ? "#42F5B9" : "#9A9A9A",
+            background: "transparent",
+            border: 0,
+            cursor: "pointer",
+            flex: 1,
+            padding: "6px 0"
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="19" cy="12" r="1" />
+            <circle cx="5" cy="12" r="1" />
+          </svg>
+          <span style={{ font: "600 10.5px Inter, sans-serif" }}>Menu</span>
+        </button>
       </nav>
     </>
   );

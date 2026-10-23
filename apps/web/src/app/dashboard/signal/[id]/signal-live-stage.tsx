@@ -476,7 +476,7 @@ export function SignalLiveStage({
           {ticker.price24hPcnt}
         </span>
 
-        <div style={{ marginLeft: "auto", display: "flex", gap: "24px", flexWrap: "wrap" }}>
+        <div className="ticker-stats-row">
           <div>
             <div className="lb">24h high</div>
             <div className="v" style={{ margin: "2px 0 0" }}>{ticker.high24h}</div>

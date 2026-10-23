@@ -213,7 +213,7 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
       </div>
 
       {/* Tabs: Active vs Archive */}
-      <div style={{ display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #262626", paddingBottom: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid #262626", paddingBottom: "12px", flexWrap: "wrap" }}>
         <Link
           href="/dashboard/signals?tab=active"
           className={`tab ${currentTab === "active" ? "on" : ""}`}

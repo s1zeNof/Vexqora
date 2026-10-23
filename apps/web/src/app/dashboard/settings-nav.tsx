@@ -13,7 +13,7 @@ export function SettingsNav() {
   ];
 
   return (
-    <aside style={{ width: "220px", display: "flex", flexDirection: "column", gap: "6px" }}>
+    <aside className="settings-nav-aside">
       {links.map((link) => {
         const isActive = pathname === link.href;
         return (
@@ -29,13 +29,14 @@ export function SettingsNav() {
               borderColor: isActive ? "#262626" : "transparent",
               display: "flex",
               flexDirection: "column",
-              gap: "2px"
+              gap: "2px",
+              whiteSpace: "nowrap"
             }}
           >
-            <div style={{ font: "600 14px Inter", color: isActive ? "#FFFFFF" : "#9A9A9A" }}>
+            <div style={{ font: "600 14px Inter, sans-serif", color: isActive ? "#FFFFFF" : "#9A9A9A" }}>
               {link.label}
             </div>
-            <div style={{ font: "400 12px Inter", color: "#666666" }}>
+            <div style={{ font: "400 12px Inter, sans-serif", color: "#666666" }}>
               {link.desc}
             </div>
           </Link>

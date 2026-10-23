@@ -95,6 +95,7 @@ export function TradingViewChart({
 
   return (
     <div
+      className="tradingview-container-box"
       style={{
         position: "relative",
         width: "100%",

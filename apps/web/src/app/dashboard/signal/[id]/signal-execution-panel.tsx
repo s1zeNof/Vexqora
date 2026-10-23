@@ -790,7 +790,9 @@ export function SignalExecutionPanel({
         disabled={isPending}
         onClick={handleSubmit}
         style={{
-          height: "46px",
+          minHeight: "46px",
+          height: "auto",
+          padding: "10px 14px",
           width: "100%",
           borderRadius: "8px",
           font: "700 14px 'Plus Jakarta Sans', sans-serif",
@@ -808,6 +810,9 @@ export function SignalExecutionPanel({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          textAlign: "center",
+          whiteSpace: "normal",
+          lineHeight: 1.3,
           gap: "8px"
         }}
       >

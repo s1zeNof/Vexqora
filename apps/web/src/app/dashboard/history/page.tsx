@@ -29,6 +29,7 @@ export default async function HistoryPage() {
       </div>
 
       <div className="cd" style={{ overflow: "hidden" }}>
+        <div className="table-responsive">
         <table className="dt-table">
           <thead>
             <tr>
@@ -92,6 +93,7 @@ export default async function HistoryPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

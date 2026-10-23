@@ -45,6 +45,7 @@ export default async function AccountsPage({
 
         {/* Accounts Table */}
         <div className="cd" style={{ overflow: "hidden" }}>
+          <div className="table-responsive">
           <table className="dt-table">
             <thead>
               <tr>
@@ -142,6 +143,7 @@ export default async function AccountsPage({
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Connect Bybit Card */}
@@ -152,7 +154,7 @@ export default async function AccountsPage({
           </p>
 
           <form action={connectBybitAccount} style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "16px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                 <label className="lb">Account Label</label>
                 <input name="label" placeholder="e.g. Bybit Main Demo" required />
@@ -166,7 +168,7 @@ export default async function AccountsPage({
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                 <label className="lb">API Key</label>
                 <input name="apiKey" type="password" placeholder="Paste Bybit API key" required />

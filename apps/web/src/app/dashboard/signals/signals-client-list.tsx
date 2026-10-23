@@ -111,7 +111,7 @@ export function SignalsClientList({ signals, isArchive, isPaperTrading }: Signal
           >
             {/* Top Bar: Symbol, Badges, Status Pill & Time */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <Link
                   href={`/dashboard/signal/${s.id}`}
                   style={{ font: "700 18px Inter, sans-serif", color: "#FFFFFF", textDecoration: "none" }}
@@ -216,7 +216,7 @@ export function SignalsClientList({ signals, isArchive, isPaperTrading }: Signal
             </div>
 
             {/* Bottom Actions */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "10px", marginTop: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px", flexWrap: "wrap", marginTop: "4px" }}>
               {isArchive ? (
                 <button
                   type="button"

@@ -84,7 +84,8 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
               Немає активної позиції для {symbol}. Скористайтеся панеллю виконання праворуч для входу.
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column" }}>
+            <div className="table-responsive">
+              <div style={{ display: "flex", flexDirection: "column", minWidth: "680px" }}>
               {/* Header */}
               <div
                 style={{
@@ -165,6 +166,7 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
                 </span>
               </div>
             </div>
+            </div>
           )}
         </>
       )}
@@ -208,7 +210,7 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {historyTrades.map((t) => (
-                <div key={t.id} className="row" style={{ fontSize: "13px" }}>
+                <div key={t.id} className="row" style={{ fontSize: "13px", flexWrap: "wrap", gap: "8px" }}>
                   <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                     <span className={`tg ${t.side === "long" ? "lg" : "sh"}`}>{t.side.toUpperCase()}</span>
                     <span>Вхід: ${formatPrice(t.entryPrice)}</span>

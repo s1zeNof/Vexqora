@@ -101,7 +101,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
             <span className="mono" style={{ fontSize: "12px", color: "var(--muted)", marginLeft: "12px" }}>vexqora.terminal.desk · BTCUSDT USDT-Perpetual</span>
           </div>
 
-          <div style={{ padding: "20px", display: "grid", gridTemplateColumns: "1fr 320px", gap: "16px" }}>
+          <div className="terminal-showcase-grid">
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <div className="message user" style={{ alignSelf: "flex-end" }}>
                 <p>BTCUSDT LONG<br />entry 65000<br />tp 66000 40%, 67000 30%, 68500 30%<br />sl 64000 · trail 1% after tp1<br />lev 5 · risk 1%</p>
@@ -173,7 +173,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       </section>
 
       {/* Footer */}
-      <footer style={{ marginTop: "auto", borderTop: "1px solid var(--line)", padding: "32px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--muted)", fontSize: "13px" }}>
+      <footer style={{ marginTop: "auto", borderTop: "1px solid var(--line)", padding: "24px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px", color: "var(--muted)", fontSize: "13px" }}>
         <div>Vexqora Trade · Intelligent Trade Execution Platform</div>
         <div style={{ display: "flex", gap: "20px" }}>
           <Link href="/dashboard/chat">Terminal</Link>

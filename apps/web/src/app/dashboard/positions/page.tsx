@@ -192,6 +192,7 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
       {currentTab === "active" ? (
         /* Active Open Positions Table */
         <div className="cd" style={{ overflow: "hidden" }}>
+          <div className="table-responsive">
           <table className="dt-table">
             <thead>
               <tr>
@@ -326,10 +327,12 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
               )}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         /* Archived / Closed Positions Table */
         <div className="cd" style={{ overflow: "hidden" }}>
+          <div className="table-responsive">
           <table className="dt-table">
             <thead>
               <tr>
@@ -446,6 +449,7 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
