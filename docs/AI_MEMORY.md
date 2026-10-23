@@ -1,7 +1,7 @@
 # Vexqora Trade — Master AI Memory & Handoff Guide
 
 > **Target Audience**: AI Agents (Antigravity, Claude, ChatGPT, Cursor, Copilot) & Engineers continuing development on a new environment (e.g. laptop).
-> **Last Updated**: 2026-10-22
+> **Last Updated**: 2026-10-23 (Post Paper Matching Engine & Autopilot Switcher)
 > **Repository**: `https://github.com/s1zeNof/Vexqora`
 > **Active Production URL**: `https://vexqora.vercel.app/`
 
@@ -96,6 +96,27 @@ Vexqora-trade/
 - Any exception during AI signal creation, pulse analysis, or trade preview is caught gracefully.
 - Next.js `redirect()` is safely preserved via `isRedirectError(error)`.
 - Fallbacks are implemented for risk settings (`.limit(1).maybeSingle()`) with bounded leverage (`Math.min(leverage, 5)`).
+
+### 4.6. Paper Matching Engine & Control Mode Switcher (Autopilot vs Manual)
+- Located in: `packages/trading/src/paper-engine.ts`, `apps/web/src/lib/paper-service.ts`, `apps/web/src/app/api/trading/paper-tick/route.ts`, and `apps/worker/src/paper-worker.ts`.
+- **Pure Matching Engine (`evaluatePaperTrade`)**:
+  - Deterministically evaluates active paper positions against incoming market ticks.
+  - **Partial Take Profit**: TP1 closes 40% of initial position, credits USDT to `exchange_accounts.paper_balance`, and activates the dynamic Trailing Stop. TP2 closes 30%. TP3 closes the final 30% and moves the trade to `closed` status.
+  - **Dynamic Trailing Stop**: After TP1 is filled, tracks local peak price (`highestPrice` / `lowestPrice`). If price pulls back 1% from peak, remaining quantity is market-closed, and remaining open targets are cancelled.
+  - **Protective Stop Loss**: Immediately closes full position upon price crossing SL level.
+- **Autopilot vs Manual Control Switcher (`[🤖 Автопілот]` / `[👤 Ручний контроль]`)**:
+  - Located on signal page (`signal-live-stage.tsx`) and positions table.
+  - In **Manual mode**, automated closures (TP/SL/Trailing) are paused so the trader can observe live prices, let profits run, or exit manually using `50%` or `Close` buttons.
+  - In **Autopilot mode**, automated rules resume immediately.
+  - Persisted in DB as `trades.trailing_stop.controlMode: "auto" | "manual"` via `toggleTradeControlMode` server action.
+- **Dual Execution (Realtime Browser + 24/7 Worker)**:
+  - While viewing the signal page, client evaluates ticks every 1.5s via `POST /api/trading/paper-tick`.
+  - In the background, `paper-worker.ts` runs 24/7 in Node.js every 3s, ensuring orders execute even if the trader's browser is closed.
+
+### 4.7. Interactive Terminal & Realtime Chart Canvas
+- Located in: `apps/web/src/app/dashboard/signal/[id]/signal-chart.tsx` & `signal-live-stage.tsx`.
+- **Canvas Chart**: Smooth mouse-wheel zoom, drag-and-drop panning, timeframe selection (`1m`, `5m`, `15m`, `1H`, `4H`, `1D`) with dynamic `/api/market/klines` fetching, and crosshair cursor with OHLCV data.
+- **Sub-second Ticker Engine (`useLiveTicker`)**: Connects to public Bybit/Binance WebSocket streams with automatic fallback to 1.5s Ajax polling (`/api/market/ticker`), synchronizing Mark price, PnL, ticker header, and live candle updates.
 
 ---
 
@@ -201,6 +222,14 @@ Expected baseline:
 - [x] Dual OpenRouter API keys with automatic failover and rate-limit rotation.
 - [x] UI Overhaul: Clean, minimalist, institutional feed cards with interactive modal (SignalCard) featuring SMC tabs, mobile copy button, and chart vision scanner.
 - [x] High-frequency Bybit universe scanning (Scan Bybit Universe 300+ Pairs) and lowered pulse threshold (1.2% rapid volume expansion).
+- [x] Dedicated Signal Terminal Page (`/dashboard/signal/[id]`) with 48h lifecycle archive notice, trade entry fact box, synchronized PnL calculations, and OKX-style layout.
+- [x] Interactive Chart Canvas (`signal-chart.tsx`) with dynamic timeframe switching (`1m`, `5m`, `15m`, `1H`, `4H`, `1D`), mouse-wheel zoom, drag-and-drop panning, crosshair cursor with OHLCV data.
+- [x] Real-time Public WebSocket & 1.5s Ajax ticker engine (`use-live-ticker.ts`) with sub-second price ticks and live candle updates.
+- [x] Pure Paper Matching Engine (`packages/trading/src/paper-engine.ts`) with automated partial TP1 (40%), TP2 (30%), TP3 (30%) fills, virtual USDT balance crediting, and SL protective exits.
+- [x] Dynamic Trailing Stop tracking local peak prices after TP1 and market-closing position on 1% pullback.
+- [x] Control Mode Switcher (`[🤖 Автопілот]` vs `[👤 Ручний контроль]`) with pause of automated closures and instant manual exit buttons (`50%`, `Close`).
+- [x] 24/7 Node.js Background Paper Worker (`apps/worker/src/paper-worker.ts`) monitoring and executing active paper trades even when browser is closed.
+- [x] Positions Page (`/dashboard/positions`) enhancements with dual tabs (Active vs Archive) and mode badges (`👤 Ручний`, `🤖 Автопілот`, `⚡ Трейлінг`).
 
 ### Immediate Next Tasks (Stage 6):
 1. **External Integrations**:

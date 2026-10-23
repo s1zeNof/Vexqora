@@ -49,34 +49,32 @@ Completed:
 - Vexqora Trade visual system and responsive terminal layout.
 - SaaS user profiles and an automatically provisioned Vexqora Paper workspace with keyless virtual balance.
 - Clear separation between internal Vexqora Paper and external Bybit Demo/Live accounts.
+- Worker queue consumption with `claim_execution_job` using `FOR UPDATE SKIP LOCKED`.
+- Private WebSocket manager for Bybit order/execution events and automatic SL/TP placement (`protectFilledPosition`) upon fill.
+- Real-time aggregate daily loss enforcement and kill-switch checks pre-execution in `runner.ts`.
+- Dedicated Signal Terminal Page (`/dashboard/signal/[id]`) with OKX styling, 48h lifecycle notice, and trade entry fact box.
+- Interactive Canvas Chart (`signal-chart.tsx`) with smooth mouse-wheel zoom, drag pan, timeframes (`1m` - `1D`), and crosshair OHLCV.
+- Live Public WebSocket & 1.5s Ajax ticker engine (`use-live-ticker.ts`).
+- Pure Paper Matching Engine (`packages/trading/src/paper-engine.ts`) with automated partial TP1 (40%), TP2 (30%), TP3 (30%) fills, virtual USDT balance crediting, and SL protective exits.
+- Dynamic Trailing Stop tracking local peak prices after TP1 and market-closing position on 1% pullback.
+- Control Mode Switcher (`[🤖 Автопілот]` vs `[👤 Ручний контроль]`) with pause of automated closures and instant manual exit buttons (`50%`, `Close`).
+- 24/7 Node.js Background Paper Worker (`apps/worker/src/paper-worker.ts`) monitoring and executing active paper trades even when browser is closed.
+- Positions Dashboard (`/dashboard/positions`) with active vs archive tabs and control mode badges.
 
 Not completed:
 
-- Worker consumption and locking of `execution_jobs`.
-- Persisting executor state transitions and order acknowledgements.
-- Waiting for entry fills before adding protective orders.
-- WebSocket event reconciliation into trades, orders and chat messages.
-- Recovery/reconciliation after worker restart.
-- Working kill-switch actions and daily-loss enforcement at queue/execution time.
-- Telegram and Discord integrations.
-- Full active-trade UI backed by live data.
-- Supabase and Vercel deployment; credentials/project identifiers have not been supplied.
+- Telegram bot webhook to receive signals directly from private channels and push execution confirmations.
+- Discord webhook order notifications.
+- Supabase production migrations & Vercel deployment; credentials/project identifiers have not been supplied.
 
-## Immediate next task
+## Immediate next task (Stage 6)
 
-Continue Stage 4 by implementing the execution worker:
-
-1. Add a safe PostgreSQL claim function for `execution_jobs` using `FOR UPDATE SKIP LOCKED` so multiple workers cannot execute the same job.
-2. Make the worker use `SUPABASE_SERVICE_ROLE_KEY`; never expose this key to the web application.
-3. Load the account credentials, decrypt them server-side and create the exchange adapter through the account factory.
-4. Revalidate kill-switch, daily loss, open-position limits, balance, instrument filters and ticker immediately before execution. A preview is not authority to trade with stale data.
-5. Call `submitEntry` with the persisted unique trade ID. Preserve deterministic `orderLinkId` values for retries.
-6. Persist the trade and entry order acknowledgement.
-7. Use private WebSocket order/execution events to detect partial/full fills.
-8. Only after an entry fill, call `protectFilledPosition` and persist SL/TP state.
-9. Write every state transition to `trades`, `orders`, `trade_targets`, `audit_log` and `chat_messages` as appropriate.
-10. Add retry/backoff for transient exchange errors and mark permanent failures clearly.
-11. Add worker tests for idempotency, retries, partial fills and restart reconciliation.
+1. Implement Telegram Bot Integration:
+   - Webhook endpoint in Next.js to ingest incoming signals formatted by Telegram channels.
+   - Run signals through deterministic parser & mathematical risk validation.
+   - Dispatch trade confirmation or execution alerts back to user's Telegram chat.
+2. Implement Discord Webhook Integration for order events and pulse notifications.
+3. Prepare production deployment runbook for Supabase and Vercel.
 
 ## Non-negotiable architecture rules
 
