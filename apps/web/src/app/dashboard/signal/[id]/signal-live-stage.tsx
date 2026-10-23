@@ -494,7 +494,8 @@ export function SignalLiveStage({
               entryPrice: activePosition.entryPrice,
               pnlUsdt: livePnlUsdt,
               pnlPct: livePnlPct,
-              isPaper: isPaperTrading
+              isPaper: isPaperTrading,
+              openedAt: activePosition.opened_at
             } : null}
           />
 

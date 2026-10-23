@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatPrice, formatCryptoPrice } from "../../../../lib/format";
 import { closeTradePosition } from "../../actions";
+import { PnlShareButton } from "../../positions/pnl-share-button";
 
 export interface SignalTradeItem {
   id: string;
@@ -88,7 +89,7 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.1fr .6fr .7fr 1fr 1fr 1.4fr 1.1fr 1.1fr",
+                  gridTemplateColumns: "1.1fr .6fr .7fr 1fr 1fr 1.3fr 1fr 1.4fr",
                   gap: "8px",
                   padding: "10px 0 6px"
                 }}
@@ -107,7 +108,7 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.1fr .6fr .7fr 1fr 1fr 1.4fr 1.1fr 1.1fr",
+                  gridTemplateColumns: "1.1fr .6fr .7fr 1fr 1fr 1.3fr 1fr 1.4fr",
                   gap: "8px",
                   alignItems: "center",
                   padding: "10px 0",
@@ -129,7 +130,24 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
                   <span style={{ color: "#FF5A6E" }}>{activePosition.sl ? `$${formatCryptoPrice(activePosition.sl)}` : "—"}</span> /{" "}
                   <span style={{ color: "#42F5B9" }}>{activePosition.tp1 ? `$${formatCryptoPrice(activePosition.tp1)}` : "—"}</span>
                 </span>
-                <span style={{ display: "flex", gap: "6px" }}>
+                <span style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                  <PnlShareButton
+                    label=""
+                    className="bt sm"
+                    title="Отримати картку результату угоди"
+                    data={{
+                      symbol: activePosition.symbol,
+                      side: activePosition.side,
+                      leverage: activePosition.leverage,
+                      entryPrice: activePosition.entryPrice,
+                      currentOrExitPrice: currentMarkPrice,
+                      pnlUsdt: currentPnlUsdt,
+                      pnlPct: currentPnlPct,
+                      isClosed: false,
+                      openedAt: activePosition.opened_at,
+                      isPaper: true
+                    }}
+                  />
                   <form action={closeTradePosition}>
                     <input type="hidden" name="tradeId" value={activePosition.id} />
                     <input type="hidden" name="qtyPct" value="50" />
@@ -202,9 +220,30 @@ export function SignalPositionsTable({ symbol, trades, historyTrades, livePrice 
                       {t.exitPrice ? ` @ $${formatCryptoPrice(t.exitPrice)}` : ""}
                     </span>
                   </div>
-                  <span style={{ color: t.pnlUsdt >= 0 ? "#42F5B9" : "#FF5A6E", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                    {t.pnlUsdt >= 0 ? "+" : ""}{t.pnlUsdt.toFixed(2)} USDT ({t.pnlPct >= 0 ? "+" : ""}{t.pnlPct.toFixed(2)}%)
-                  </span>
+                  <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                    <span style={{ color: t.pnlUsdt >= 0 ? "#42F5B9" : "#FF5A6E", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                      {t.pnlUsdt >= 0 ? "+" : ""}{t.pnlUsdt.toFixed(2)} USDT ({t.pnlPct >= 0 ? "+" : ""}{t.pnlPct.toFixed(2)}%)
+                    </span>
+                    <PnlShareButton
+                      label=""
+                      className="bt sm"
+                      title="Картка результату угоди"
+                      data={{
+                        symbol: t.symbol,
+                        side: t.side,
+                        leverage: t.leverage,
+                        entryPrice: t.entryPrice,
+                        currentOrExitPrice: t.exitPrice ?? t.markPrice,
+                        pnlUsdt: t.pnlUsdt,
+                        pnlPct: t.pnlPct,
+                        isClosed: true,
+                        exitReason: t.exitReason,
+                        openedAt: t.opened_at,
+                        closedAt: t.closed_at,
+                        isPaper: true
+                      }}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

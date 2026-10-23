@@ -33,6 +33,7 @@ interface SignalChartProps {
     pnlUsdt: number;
     pnlPct: number;
     isPaper: boolean;
+    openedAt?: string | null | undefined;
   } | null;
 }
 
@@ -689,31 +690,112 @@ export function SignalChart({
               );
             })}
 
-            {/* Active Position Badge overlaying Entry line */}
+            {/* Active Position Badge on Entry line */}
             {position && entry > 0 && (
               <g>
-                <rect
-                  x="450"
-                  y={getY(entry) - 13}
-                  width="280"
-                  height="26"
-                  rx="6"
-                  fill="#141414"
-                  stroke="#42F5B9"
-                  strokeWidth="1"
-                />
-                <text
-                  x="460"
-                  y={getY(entry) + 4}
-                  fill="#FFFFFF"
-                  fontSize="12"
-                  fontWeight="600"
-                  fontFamily="Inter, sans-serif"
-                >
-                  {position.isPaper ? "Paper" : "Live"} {position.side.toUpperCase()} {position.leverage}x · {position.pnlUsdt >= 0 ? "+" : ""}{position.pnlUsdt.toFixed(2)} USDT ({position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(2)}%)
-                </text>
+                {(() => {
+                  const sideText = position.side.toUpperCase();
+                  const pnlSign = position.pnlUsdt >= 0 ? "+" : "";
+                  const displayText = `${sideText} ${pnlSign}${position.pnlUsdt.toFixed(2)} USDT`;
+                  const isLong = position.side === "long";
+                  const accentColor = isLong ? "#35F2D0" : "#FF4F9A";
+                  const badgeWidth = Math.max(140, displayText.length * 8.5 + 24);
+                  const badgeX = Math.max(20, Math.min(chartRight - badgeWidth - 10, 420));
+                  const badgeY = getY(entry) - 13;
+
+                  return (
+                    <g>
+                      <rect
+                        x={badgeX}
+                        y={badgeY}
+                        width={badgeWidth}
+                        height={26}
+                        rx="6"
+                        fill="#0E0B1A"
+                        stroke={accentColor}
+                        strokeWidth="1.2"
+                      />
+                      <text
+                        x={badgeX + badgeWidth / 2}
+                        y={badgeY + 17}
+                        fill="#F1EEFF"
+                        fontSize="12"
+                        fontWeight="700"
+                        fontFamily="'JetBrains Mono', monospace"
+                        textAnchor="middle"
+                        style={{ fontVariantNumeric: "tabular-nums" }}
+                      >
+                        {displayText}
+                      </text>
+                    </g>
+                  );
+                })()}
               </g>
             )}
+
+            {/* Entry Arrow (Long = under candle pointing UP, Short = above candle pointing DOWN) */}
+            {position && visibleKlines.length > 0 && (() => {
+              let candleIdx = -1;
+              if (position.openedAt) {
+                const openedTime = new Date(position.openedAt).getTime();
+                let closestDiff = Infinity;
+                visibleKlines.forEach((k, idx) => {
+                  const diff = Math.abs(k.time - openedTime);
+                  if (diff < closestDiff) {
+                    closestDiff = diff;
+                    candleIdx = idx;
+                  }
+                });
+              }
+              if (candleIdx === -1) {
+                candleIdx = visibleKlines.length - 1;
+              }
+
+              const targetCandle = visibleKlines[candleIdx];
+              if (!targetCandle) return null;
+
+              const arrowX = candleIdx * candleSlot + candleSlot / 2;
+              const isLong = position.side === "long";
+              const arrowColor = isLong ? "#35F2D0" : "#FF4F9A";
+
+              if (isLong) {
+                // Long: under the candle wick, pointing UP
+                const yBase = getY(targetCandle.low) + 8;
+                if (yBase > chartBottom + 30) return null;
+                return (
+                  <g filter={`drop-shadow(0 0 6px ${arrowColor}aa)`}>
+                    <path
+                      d={`M ${arrowX} ${yBase}
+                          L ${arrowX - 7} ${yBase + 10}
+                          L ${arrowX - 3} ${yBase + 10}
+                          L ${arrowX - 3} ${yBase + 22}
+                          L ${arrowX + 3} ${yBase + 22}
+                          L ${arrowX + 3} ${yBase + 10}
+                          L ${arrowX + 7} ${yBase + 10} Z`}
+                      fill={arrowColor}
+                    />
+                  </g>
+                );
+              } else {
+                // Short: above the candle wick, pointing DOWN
+                const yBase = getY(targetCandle.high) - 8;
+                if (yBase < chartTop - 30) return null;
+                return (
+                  <g filter={`drop-shadow(0 0 6px ${arrowColor}aa)`}>
+                    <path
+                      d={`M ${arrowX} ${yBase}
+                          L ${arrowX - 7} ${yBase - 10}
+                          L ${arrowX - 3} ${yBase - 10}
+                          L ${arrowX - 3} ${yBase - 22}
+                          L ${arrowX + 3} ${yBase - 22}
+                          L ${arrowX + 3} ${yBase - 10}
+                          L ${arrowX + 7} ${yBase - 10} Z`}
+                      fill={arrowColor}
+                    />
+                  </g>
+                );
+              }
+            })()}
 
             {/* Interactive Crosshair */}
             {hoverIndex !== null && hoverY !== null && (

@@ -1,3 +1,4 @@
+import { PnlShareButton } from "./pnl-share-button";
 import Link from "next/link";
 import type { TradeRow } from "@crypto-bot/shared";
 import { formatCryptoPrice } from "../../../lib/format";
@@ -217,11 +218,13 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
 
                   let pnlDisplay = "—";
                   let isProfit = true;
+                  let unrealizedPnl = 0;
+                  let pnlPct = 0;
 
                   if (markPrice !== null && entryPrice > 0 && qty > 0) {
                     const diff = markPrice - entryPrice;
-                    const unrealizedPnl = diff * qty * direction;
-                    const pnlPct = (diff / entryPrice) * leverage * 100 * direction;
+                    unrealizedPnl = diff * qty * direction;
+                    pnlPct = (diff / entryPrice) * leverage * 100 * direction;
                     isProfit = unrealizedPnl >= 0;
                     pnlDisplay = `${isProfit ? "+" : ""}${unrealizedPnl.toFixed(2)} USDT (${isProfit ? "+" : ""}${pnlPct.toFixed(2)}%)`;
                   }
@@ -267,7 +270,21 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
                         {trade.opened_at ? formatTimeAgo(trade.opened_at) : "Щойно"}
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: "6px" }}>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                          <PnlShareButton
+                            data={{
+                              symbol: trade.symbol,
+                              side: trade.side,
+                              leverage,
+                              entryPrice,
+                              currentOrExitPrice: markPrice ?? entryPrice,
+                              pnlUsdt: unrealizedPnl,
+                              pnlPct,
+                              isClosed: false,
+                              openedAt: trade.opened_at,
+                              isPaper: active?.environment !== "live"
+                            }}
+                          />
                           <Link
                             href={`/dashboard/signal/${trade.symbol}`}
                             className="bt sm"
@@ -384,12 +401,32 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
                         </span>
                       </td>
                       <td>
-                        <Link
-                          href={`/dashboard/signal/${trade.symbol}`}
-                          className="bt sm"
-                        >
-                          Аналіз ↗
-                        </Link>
+                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                          <PnlShareButton
+                            data={{
+                              symbol: trade.symbol,
+                              side: trade.side,
+                              leverage: Number(trade.leverage) || 1,
+                              entryPrice: trade.entry_avg ? Number(trade.entry_avg) : 0,
+                              currentOrExitPrice: trade.exit_price ? Number(trade.exit_price) : (trade.entry_avg ? Number(trade.entry_avg) : 0),
+                              pnlUsdt: pnl,
+                              pnlPct: trade.entry_avg && Number(trade.entry_avg) > 0 && trade.exit_price
+                                ? (((Number(trade.exit_price) - Number(trade.entry_avg)) / Number(trade.entry_avg)) * (Number(trade.leverage) || 1) * 100 * (trade.side === "long" ? 1 : -1))
+                                : 0,
+                              isClosed: true,
+                              exitReason: trade.exit_reason,
+                              openedAt: trade.opened_at,
+                              closedAt: trade.closed_at,
+                              isPaper: active?.environment !== "live"
+                            }}
+                          />
+                          <Link
+                            href={`/dashboard/signal/${trade.symbol}`}
+                            className="bt sm"
+                          >
+                            Аналіз ↗
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
