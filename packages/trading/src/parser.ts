@@ -20,7 +20,12 @@ function requiredLine(lines: string[], prefix: string): string {
 }
 
 export function parseSignalText(rawText: string, source: Signal["source"] = "chat"): Signal {
-  const lines = rawText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // Strip inline bracketed tags (e.g. [origin:pulse:...]) and comments (# ...)
+  const sanitizedText = rawText
+    .replace(/\[.*?\]/g, "")
+    .replace(/#.*$/gm, "");
+
+  const lines = sanitizedText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const header = lines[0]?.match(/^([A-Z0-9]{5,20})\s+(LONG|SHORT)$/i);
   if (!header?.[1] || !header[2]) throw new SignalParseError("First line must be SYMBOL LONG or SYMBOL SHORT", lines[0]);
 
@@ -53,6 +58,18 @@ export function parseSignalText(rawText: string, source: Signal["source"] = "cha
     };
   }
 
+  let leverage: number | undefined;
+  if (leverageLine) {
+    const match = leverageLine.slice(4).trim().match(/^(\d+(?:[.,]\d+)?)/);
+    leverage = parsePositive(match?.[1] ?? leverageLine.slice(4).trim(), "Leverage");
+  }
+
+  let riskPct: number | undefined;
+  if (riskLine) {
+    const match = riskLine.slice(5).trim().match(/^(\d+(?:[.,]\d+)?)/);
+    riskPct = parsePositive(match?.[1] ?? riskLine.slice(5).trim().replace(/%$/, ""), "Risk");
+  }
+
   const candidate = {
     symbol: header[1],
     side: header[2].toLowerCase(),
@@ -60,12 +77,11 @@ export function parseSignalText(rawText: string, source: Signal["source"] = "cha
     stopLoss: parsePositive(requiredLine(lines.slice(1), "sl "), "Stop loss"),
     takeProfits,
     ...(trailingStop ? { trailingStop } : {}),
-    ...(leverageLine ? { leverage: parsePositive(leverageLine.slice(4).trim(), "Leverage") } : {}),
-    ...(riskLine ? { riskPct: parsePositive(riskLine.slice(5).trim().replace(/%$/, ""), "Risk") } : {}),
+    ...(leverage !== undefined ? { leverage } : {}),
+    ...(riskPct !== undefined ? { riskPct } : {}),
     source
   };
   const result = signalSchema.safeParse(candidate);
   if (!result.success) throw new SignalParseError(result.error.issues[0]?.message ?? "Invalid signal");
   return result.data;
 }
-

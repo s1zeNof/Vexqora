@@ -100,8 +100,8 @@ export default async function PulsePage() {
       }
     };
     const originKey = `pulse:${opp.symbol}:${side}:${bucket}`;
-    const originTag = `[origin:${originKey}]`;
-    const fullRawText = `${rawText} ${originTag}`;
+    const originTag = `origin:${originKey}`;
+    const fullRawText = `${rawText}\n# origin:${originKey}`;
 
     let storedId: string | null = null;
     let storedCreatedAt: string | null = null;
