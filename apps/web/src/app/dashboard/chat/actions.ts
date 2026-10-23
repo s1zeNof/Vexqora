@@ -520,7 +520,7 @@ export async function confirmSignal(formData: FormData) {
 
   // Transition signal to confirmed if in preview
   if (signalRow.status === "preview") {
-    await supabase.rpc("confirm_signal", { target_signal_id: signalId }).catch(() => null);
+    await supabase.rpc("confirm_signal", { target_signal_id: signalId });
   }
 
   const signal = z.object({
