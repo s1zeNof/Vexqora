@@ -5,14 +5,14 @@ import { PnlShareCardModal, type PnlShareData } from "./pnl-share-card-modal";
 
 export function PnlShareButton({
   data,
-  label = "Картка",
+  label = "Закритий PnL (USDT)",
   className = "bt sm",
   title = "Отримати та зберегти картку результату угоди"
 }: {
   data: PnlShareData;
-  label?: string;
-  className?: string;
-  title?: string;
+  label?: string | undefined;
+  className?: string | undefined;
+  title?: string | undefined;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -26,11 +26,26 @@ export function PnlShareButton({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          gap: "4px"
+          gap: "6px"
         }}
       >
-        <span>📸</span>
-        <span>{label}</span>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ flexShrink: 0, transition: "transform 0.2s ease" }}
+        >
+          <rect x="3" y="3" width="18" height="18" rx="3" />
+          <path d="M3 9h18" />
+          <path d="M9 21V9" />
+          <path d="m14 13 2 2 4-4" />
+        </svg>
+        {label ? <span>{label}</span> : null}
       </button>
 
       {isOpen && (
