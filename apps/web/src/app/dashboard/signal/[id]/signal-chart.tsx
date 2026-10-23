@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Kline } from "@crypto-bot/shared";
 import { formatPrice } from "../../../../lib/format";
+import { TradingViewChart } from "../../../../components/trading-view-chart";
 
 interface SignalChartProps {
   symbol: string;
@@ -33,10 +34,10 @@ export function SignalChart({
   currentPrice: initialCurrentPrice,
   position
 }: SignalChartProps) {
+  const [chartMode, setChartMode] = useState<"tradingview" | "svg">("tradingview");
   const [timeframe, setTimeframe] = useState<"1m" | "5m" | "15m" | "1H" | "4H" | "1D">("15m");
   const [klines] = useState<Kline[]>(initialKlines);
   const [currentPrice] = useState<number>(initialCurrentPrice);
-  const [showTVWidget, setShowTVWidget] = useState<boolean>(false);
 
   // Fallback synthetic candles if API returned empty
   const activeKlines: Kline[] = klines.length >= 5 ? klines : (() => {
@@ -55,10 +56,10 @@ export function SignalChart({
     return list;
   })();
 
-  // Calculate scales for 840x440 chart
+  // Calculate scales for 840x500 chart
   const width = 840;
-  const height = 440;
-  const chartRight = 776; // leave room for price axis labels on right
+  const height = 500;
+  const chartRight = 776;
 
   const allPrices = [
     ...activeKlines.map((k) => k.high),
@@ -85,283 +86,274 @@ export function SignalChart({
   const candleWidth = Math.max(3, candleSlot * 0.65);
 
   return (
-    <div className="cd" style={{ overflow: "hidden" }}>
-      {/* Timeframe Bar */}
+    <div className="cd" style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {/* Top Chart Header: Controls & Level Targets Bar */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "4px",
-          padding: "10px 12px",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "8px",
+          padding: "10px 14px",
           borderBottom: "1px solid #262626",
           background: "#111111"
         }}
       >
-        {(["1m", "5m", "15m", "1H", "4H", "1D"] as const).map((tf) => (
+        {/* View Mode Switcher */}
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
           <button
-            key={tf}
             type="button"
-            onClick={() => setTimeframe(tf)}
-            className={`tab ${timeframe === tf ? "on" : ""}`}
-            style={{ padding: "6px 10px", fontSize: "13px" }}
+            onClick={() => setChartMode("tradingview")}
+            className={`tab ${chartMode === "tradingview" ? "on" : ""}`}
+            style={{ padding: "5px 12px", fontSize: "12px", fontWeight: 600 }}
           >
-            {tf}
+            TradingView (Bybit Perp)
           </button>
-        ))}
+          <button
+            type="button"
+            onClick={() => setChartMode("svg")}
+            className={`tab ${chartMode === "svg" ? "on" : ""}`}
+            style={{ padding: "5px 12px", fontSize: "12px", fontWeight: 600 }}
+          >
+            OKX Рівні & Свічки
+          </button>
+        </div>
 
-        <button
-          type="button"
-          onClick={() => setShowTVWidget((prev) => !prev)}
-          className="tab"
-          style={{
-            marginLeft: "auto",
-            padding: "6px 12px",
-            fontSize: "13px",
-            background: showTVWidget ? "#1A1A1A" : "transparent",
-            color: showTVWidget ? "#42F5B9" : "#9A9A9A"
-          }}
-        >
-          {showTVWidget ? "Overlay Levels" : "Indicators / TV"}
-        </button>
-      </div>
-
-      {/* SVG Canvas Candlestick Chart with Overlaid Levels */}
-      <div style={{ position: "relative", width: "100%", height: "440px", background: "#000000" }}>
-        <svg
-          width="100%"
-          height="440"
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-label={`${symbol} ${timeframe} chart with Entry, SL, TP levels`}
-          style={{ display: "block" }}
-        >
-          {/* Horizontal Grid lines */}
-          {[0.2, 0.4, 0.6, 0.8].map((ratio, idx) => {
-            const y = height - 40 - ratio * (height - 80);
-            return (
-              <line
-                key={idx}
-                x1={0}
-                x2={chartRight}
-                y1={y}
-                y2={y}
-                stroke="#1A1A1A"
-                strokeWidth="1"
-              />
-            );
-          })}
-
-          {/* Candlesticks */}
-          {activeKlines.map((k, idx) => {
-            const x = idx * candleSlot + candleSlot / 2;
-            const isUp = k.close >= k.open;
-            const color = isUp ? "#42F5B9" : "#FF5A6E";
-
-            const yHigh = getY(k.high);
-            const yLow = getY(k.low);
-            const yOpen = getY(k.open);
-            const yClose = getY(k.close);
-
-            const rectY = Math.min(yOpen, yClose);
-            const rectHeight = Math.max(1.5, Math.abs(yClose - yOpen));
-
-            return (
-              <g key={k.time || idx}>
-                {/* Wick */}
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={yHigh}
-                  y2={yLow}
-                  stroke={color}
-                  strokeWidth="1.2"
-                />
-                {/* Body */}
-                <rect
-                  x={x - candleWidth / 2}
-                  y={rectY}
-                  width={candleWidth}
-                  height={rectHeight}
-                  fill={color}
-                />
-              </g>
-            );
-          })}
-
-          {/* Level: TP3 */}
-          {tp3 > 0 && (
-            <g>
-              <line
-                x1={0}
-                x2={chartRight}
-                y1={getY(tp3)}
-                y2={getY(tp3)}
-                stroke="#42F5B9"
-                strokeDasharray="5 4"
-                strokeWidth="1.2"
-              />
-              <text x="8" y={getY(tp3) - 6} fill="#42F5B9" fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif">
-                TP3
-              </text>
-              <rect x={chartRight + 4} y={getY(tp3) - 10} width="60" height="20" rx="4" fill="#42F5B9" />
-              <text x={chartRight + 8} y={getY(tp3) + 4} fill="#000000" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
-                {formatPrice(tp3)}
-              </text>
-            </g>
-          )}
-
-          {/* Level: TP2 */}
-          {tp2 > 0 && (
-            <g>
-              <line
-                x1={0}
-                x2={chartRight}
-                y1={getY(tp2)}
-                y2={getY(tp2)}
-                stroke="#42F5B9"
-                strokeDasharray="5 4"
-                strokeWidth="1.2"
-              />
-              <text x="8" y={getY(tp2) - 6} fill="#42F5B9" fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif">
-                TP2
-              </text>
-              <rect x={chartRight + 4} y={getY(tp2) - 10} width="60" height="20" rx="4" fill="#42F5B9" />
-              <text x={chartRight + 8} y={getY(tp2) + 4} fill="#000000" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
-                {formatPrice(tp2)}
-              </text>
-            </g>
-          )}
-
-          {/* Level: TP1 */}
-          {tp1 > 0 && (
-            <g>
-              <line
-                x1={0}
-                x2={chartRight}
-                y1={getY(tp1)}
-                y2={getY(tp1)}
-                stroke="#42F5B9"
-                strokeDasharray="5 4"
-                strokeWidth="1.2"
-              />
-              <text x="8" y={getY(tp1) - 6} fill="#42F5B9" fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif">
-                TP1
-              </text>
-              <rect x={chartRight + 4} y={getY(tp1) - 10} width="60" height="20" rx="4" fill="#42F5B9" />
-              <text x={chartRight + 8} y={getY(tp1) + 4} fill="#000000" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
-                {formatPrice(tp1)}
-              </text>
-            </g>
-          )}
-
-          {/* Level: Entry */}
+        {/* Level Badges in Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
           {entry > 0 && (
-            <g>
-              <line
-                x1={0}
-                x2={chartRight}
-                y1={getY(entry)}
-                y2={getY(entry)}
-                stroke="#FFFFFF"
-                strokeDasharray="5 4"
-                strokeWidth="1.2"
-              />
-              <text x="8" y={getY(entry) - 6} fill="#FFFFFF" fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif">
-                Entry
-              </text>
-              <rect x={chartRight + 4} y={getY(entry) - 10} width="60" height="20" rx="4" fill="#FFFFFF" />
-              <text x={chartRight + 8} y={getY(entry) + 4} fill="#000000" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
-                {formatPrice(entry)}
-              </text>
-            </g>
+            <span style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+              <span className="lb">Вхід:</span> <b style={{ color: "#FFFFFF" }}>{formatPrice(entry)}</b>
+            </span>
           )}
-
-          {/* Level: Stop Loss */}
           {stopLoss > 0 && (
-            <g>
-              <line
-                x1={0}
-                x2={chartRight}
-                y1={getY(stopLoss)}
-                y2={getY(stopLoss)}
-                stroke="#FF5A6E"
-                strokeDasharray="5 4"
-                strokeWidth="1.2"
-              />
-              <text x="8" y={getY(stopLoss) - 6} fill="#FF5A6E" fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif">
-                SL
-              </text>
-              <rect x={chartRight + 4} y={getY(stopLoss) - 10} width="60" height="20" rx="4" fill="#FF5A6E" />
-              <text x={chartRight + 8} y={getY(stopLoss) + 4} fill="#000000" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
-                {formatPrice(stopLoss)}
-              </text>
-            </g>
+            <span style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+              <span className="lb">SL:</span> <b style={{ color: "#FF5A6E" }}>{formatPrice(stopLoss)}</b>
+            </span>
           )}
-
-          {/* Level: Current Price (Solid Line) */}
-          {currentPrice > 0 && (
-            <g>
-              <line
-                x1={0}
-                x2={chartRight}
-                y1={getY(currentPrice)}
-                y2={getY(currentPrice)}
-                stroke="#42F5B9"
-                strokeWidth="1.5"
-              />
-              <rect x={chartRight + 4} y={getY(currentPrice) - 10} width="60" height="20" rx="4" fill="#42F5B9" />
-              <text x={chartRight + 8} y={getY(currentPrice) + 4} fill="#000000" fontSize="11" fontWeight="700" fontFamily="Inter, sans-serif">
-                {formatPrice(currentPrice)}
-              </text>
-            </g>
+          {tp1 > 0 && (
+            <span style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+              <span className="lb">TP1:</span> <b style={{ color: "#42F5B9" }}>{formatPrice(tp1)}</b>
+            </span>
           )}
-
-          {/* Active Position Badge on Entry line */}
-          {position && entry > 0 && (
-            <g>
-              <rect
-                x="500"
-                y={getY(entry) - 13}
-                width="220"
-                height="26"
-                rx="6"
-                fill="#1A1A1A"
-                stroke="#42F5B9"
-                strokeWidth="1"
-              />
-              <text
-                x="510"
-                y={getY(entry) + 4}
-                fill="#FFFFFF"
-                fontSize="12"
-                fontWeight="600"
-                fontFamily="Inter, sans-serif"
-              >
-                {position.isPaper ? "Paper" : "Live"} {position.side.toUpperCase()} {position.leverage}x · {position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)} USDT
-              </text>
-            </g>
+          {tp2 > 0 && (
+            <span style={{ fontSize: "12px", fontVariantNumeric: "tabular-nums" }}>
+              <span className="lb">TP2:</span> <b style={{ color: "#42F5B9" }}>{formatPrice(tp2)}</b>
+            </span>
           )}
-
-          {/* Bottom Time Axis */}
-          {activeKlines.filter((_, i) => i % 5 === 0).map((k, i) => {
-            const x = i * 5 * candleSlot + candleSlot / 2;
-            const date = new Date(k.time);
-            const timeStr = `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
-            return (
-              <text
-                key={k.time}
-                x={x}
-                y={height - 12}
-                fill="#9A9A9A"
-                fontSize="11"
-                fontFamily="Inter, sans-serif"
-              >
-                {timeStr}
-              </text>
-            );
-          })}
-        </svg>
+        </div>
       </div>
+
+      {/* Main Chart Body */}
+      {chartMode === "tradingview" ? (
+        <div style={{ position: "relative", width: "100%", height: "540px", background: "#000000" }}>
+          <TradingViewChart symbol={symbol} height="540px" interval="15" showToolbar={true} />
+        </div>
+      ) : (
+        <div style={{ position: "relative", width: "100%", height: "500px", background: "#000000" }}>
+          {/* Timeframe Bar for SVG */}
+          <div
+            style={{
+              position: "absolute",
+              top: "10px",
+              left: "14px",
+              zIndex: 2,
+              display: "flex",
+              gap: "4px"
+            }}
+          >
+            {(["1m", "5m", "15m", "1H", "4H", "1D"] as const).map((tf) => (
+              <button
+                key={tf}
+                type="button"
+                onClick={() => setTimeframe(tf)}
+                className={`tab ${timeframe === tf ? "on" : ""}`}
+                style={{ padding: "4px 8px", fontSize: "11px" }}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
+          <svg
+            width="100%"
+            height="500"
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label={`${symbol} chart with Entry, SL, TP levels`}
+            style={{ display: "block" }}
+          >
+            {/* Horizontal Grid lines */}
+            {[0.2, 0.4, 0.6, 0.8].map((ratio) => {
+              const y = height - 40 - ratio * (height - 80);
+              return (
+                <line
+                  key={ratio}
+                  x1={0}
+                  x2={chartRight}
+                  y1={y}
+                  y2={y}
+                  stroke="#1A1A1A"
+                  strokeWidth="1"
+                />
+              );
+            })}
+
+            {/* Candlesticks */}
+            {activeKlines.map((k, idx) => {
+              const x = idx * candleSlot + candleSlot / 2;
+              const isUp = k.close >= k.open;
+              const color = isUp ? "#42F5B9" : "#FF5A6E";
+
+              const wickY1 = getY(k.high);
+              const wickY2 = getY(k.low);
+              const bodyY = getY(Math.max(k.open, k.close));
+              const bodyHeight = Math.max(2, Math.abs(getY(k.open) - getY(k.close)));
+
+              return (
+                <g key={k.time}>
+                  <line
+                    x1={x}
+                    x2={x}
+                    y1={wickY1}
+                    y2={wickY2}
+                    stroke={color}
+                    strokeWidth="1"
+                  />
+                  <rect
+                    x={x - candleWidth / 2}
+                    y={bodyY}
+                    width={candleWidth}
+                    height={bodyHeight}
+                    fill={color}
+                  />
+                </g>
+              );
+            })}
+
+            {/* Level: Entry (White Dashed) */}
+            {entry > 0 && (
+              <g>
+                <line
+                  x1={0}
+                  x2={chartRight}
+                  y1={getY(entry)}
+                  y2={getY(entry)}
+                  stroke="#FFFFFF"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                />
+                <rect x={chartRight + 4} y={getY(entry) - 10} width="60" height="20" rx="4" fill="#1A1A1A" stroke="#FFFFFF" strokeWidth="1" />
+                <text x={chartRight + 8} y={getY(entry) + 4} fill="#FFFFFF" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
+                  {formatPrice(entry)}
+                </text>
+              </g>
+            )}
+
+            {/* Level: Stop Loss (Red Dashed) */}
+            {stopLoss > 0 && (
+              <g>
+                <line
+                  x1={0}
+                  x2={chartRight}
+                  y1={getY(stopLoss)}
+                  y2={getY(stopLoss)}
+                  stroke="#FF5A6E"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                />
+                <rect x={chartRight + 4} y={getY(stopLoss) - 10} width="60" height="20" rx="4" fill="#FF5A6E" />
+                <text x={chartRight + 8} y={getY(stopLoss) + 4} fill="#FFFFFF" fontSize="11" fontWeight="600" fontFamily="Inter, sans-serif">
+                  {formatPrice(stopLoss)}
+                </text>
+              </g>
+            )}
+
+            {/* Level: TP1 (Mint Dashed) */}
+            {tp1 > 0 && (
+              <g>
+                <line
+                  x1={0}
+                  x2={chartRight}
+                  y1={getY(tp1)}
+                  y2={getY(tp1)}
+                  stroke="#42F5B9"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                />
+                <rect x={chartRight + 4} y={getY(tp1) - 10} width="60" height="20" rx="4" fill="#42F5B9" />
+                <text x={chartRight + 8} y={getY(tp1) + 4} fill="#000000" fontSize="11" fontWeight="700" fontFamily="Inter, sans-serif">
+                  {formatPrice(tp1)}
+                </text>
+              </g>
+            )}
+
+            {/* Level: Current Price (Solid Line) */}
+            {currentPrice > 0 && (
+              <g>
+                <line
+                  x1={0}
+                  x2={chartRight}
+                  y1={getY(currentPrice)}
+                  y2={getY(currentPrice)}
+                  stroke="#42F5B9"
+                  strokeWidth="1.5"
+                />
+                <rect x={chartRight + 4} y={getY(currentPrice) - 10} width="60" height="20" rx="4" fill="#42F5B9" />
+                <text x={chartRight + 8} y={getY(currentPrice) + 4} fill="#000000" fontSize="11" fontWeight="700" fontFamily="Inter, sans-serif">
+                  {formatPrice(currentPrice)}
+                </text>
+              </g>
+            )}
+
+            {/* Active Position Badge */}
+            {position && entry > 0 && (
+              <g>
+                <rect
+                  x="500"
+                  y={getY(entry) - 13}
+                  width="220"
+                  height="26"
+                  rx="6"
+                  fill="#1A1A1A"
+                  stroke="#42F5B9"
+                  strokeWidth="1"
+                />
+                <text
+                  x="510"
+                  y={getY(entry) + 4}
+                  fill="#FFFFFF"
+                  fontSize="12"
+                  fontWeight="600"
+                  fontFamily="Inter, sans-serif"
+                >
+                  {position.isPaper ? "Paper" : "Live"} {position.side.toUpperCase()} {position.leverage}x · {position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)} USDT
+                </text>
+              </g>
+            )}
+
+            {/* Bottom Time Axis */}
+            {activeKlines.filter((_, i) => i % 5 === 0).map((k, i) => {
+              const x = i * 5 * candleSlot + candleSlot / 2;
+              const date = new Date(k.time);
+              const timeStr = `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+              return (
+                <text
+                  key={k.time}
+                  x={x}
+                  y={height - 12}
+                  fill="#9A9A9A"
+                  fontSize="11"
+                  fontFamily="Inter, sans-serif"
+                >
+                  {timeStr}
+                </text>
+              );
+            })}
+          </svg>
+        </div>
+      )}
     </div>
   );
 }

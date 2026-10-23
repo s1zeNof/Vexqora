@@ -64,7 +64,7 @@ export function TopNav({
   }, []);
 
   const isPulse = pathname === "/dashboard/pulse";
-  const isSignals = pathname === "/dashboard/chat" || pathname.startsWith("/dashboard/signal");
+  const isSignals = pathname.startsWith("/dashboard/signals") || pathname.startsWith("/dashboard/signal") || pathname === "/dashboard/chat";
   const isPositions = pathname === "/dashboard/positions";
   const isHistory = pathname === "/dashboard/history";
   const isSettings =
@@ -112,7 +112,7 @@ export function TopNav({
           <Link href="/dashboard/pulse" className={`nav-link ${isPulse ? "active" : ""}`}>
             Pulse
           </Link>
-          <Link href="/dashboard/chat" className={`nav-link ${isSignals ? "active" : ""}`}>
+          <Link href="/dashboard/signals" className={`nav-link ${isSignals ? "active" : ""}`}>
             Signals
           </Link>
           <Link href="/dashboard/positions" className={`nav-link ${isPositions ? "active" : ""}`}>
@@ -505,7 +505,7 @@ export function TopNav({
         <Link href="/dashboard/pulse" style={{ color: isPulse ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
           Pulse
         </Link>
-        <Link href="/dashboard/chat" style={{ color: isSignals ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
+        <Link href="/dashboard/signals" style={{ color: isSignals ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>
           Signals
         </Link>
         <Link href="/dashboard/positions" style={{ color: isPositions ? "#42F5B9" : "#9A9A9A", font: "600 12px Inter" }}>

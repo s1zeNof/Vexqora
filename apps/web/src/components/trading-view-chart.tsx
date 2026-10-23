@@ -11,7 +11,7 @@ interface TradingViewChartProps {
 
 export function TradingViewChart({
   symbol,
-  height = "420px",
+  height = "520px",
   interval = "15",
   showToolbar = true
 }: TradingViewChartProps) {
@@ -54,8 +54,8 @@ export function TradingViewChart({
       style: "1", // Candlesticks
       locale: "uk",
       enable_publishing: false,
-      backgroundColor: "#07050f",
-      gridColor: "#171229",
+      backgroundColor: "#000000",
+      gridColor: "#1A1A1A",
       hide_top_toolbar: !showToolbar,
       hide_legend: false,
       hide_side_toolbar: !showToolbar,
@@ -65,21 +65,21 @@ export function TradingViewChart({
       support_host: "https://www.tradingview.com",
       studies: ["STD;RSI"],
       overrides: {
-        "paneProperties.background": "#07050F",
+        "paneProperties.background": "#000000",
         "paneProperties.backgroundType": "solid",
-        "paneProperties.vertGridProperties.color": "#171229",
-        "paneProperties.horzGridProperties.color": "#171229",
-        "scalesProperties.textColor": "#A59CC4",
-        "scalesProperties.lineColor": "#2A2145",
-        "mainSeriesProperties.candleStyle.upColor": "#35F2D0",
-        "mainSeriesProperties.candleStyle.downColor": "#FF4F9A",
+        "paneProperties.vertGridProperties.color": "#1A1A1A",
+        "paneProperties.horzGridProperties.color": "#1A1A1A",
+        "scalesProperties.textColor": "#9A9A9A",
+        "scalesProperties.lineColor": "#262626",
+        "mainSeriesProperties.candleStyle.upColor": "#42F5B9",
+        "mainSeriesProperties.candleStyle.downColor": "#FF5A6E",
         "mainSeriesProperties.candleStyle.drawWick": true,
         "mainSeriesProperties.candleStyle.drawBorder": true,
-        "mainSeriesProperties.candleStyle.borderColor": "#2A2145",
-        "mainSeriesProperties.candleStyle.borderUpColor": "#35F2D0",
-        "mainSeriesProperties.candleStyle.borderDownColor": "#FF4F9A",
-        "mainSeriesProperties.candleStyle.wickUpColor": "#35F2D0",
-        "mainSeriesProperties.candleStyle.wickDownColor": "#FF4F9A"
+        "mainSeriesProperties.candleStyle.borderColor": "#262626",
+        "mainSeriesProperties.candleStyle.borderUpColor": "#42F5B9",
+        "mainSeriesProperties.candleStyle.borderDownColor": "#FF5A6E",
+        "mainSeriesProperties.candleStyle.wickUpColor": "#42F5B9",
+        "mainSeriesProperties.candleStyle.wickDownColor": "#FF5A6E"
       }
     };
 
@@ -98,17 +98,18 @@ export function TradingViewChart({
       style={{
         position: "relative",
         width: "100%",
-        height: typeof height === "number" ? `${height}px` : height,
-        background: "#07050f",
+        height,
+        background: "#000000",
         borderRadius: "8px",
-        overflow: "hidden",
-        border: "1px solid var(--line)"
+        overflow: "hidden"
       }}
     >
       <div
         ref={containerRef}
-        className="tradingview-widget-container"
-        style={{ width: "100%", height: "100%" }}
+        style={{
+          width: "100%",
+          height: "100%"
+        }}
       />
     </div>
   );

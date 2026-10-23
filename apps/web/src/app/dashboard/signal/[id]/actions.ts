@@ -11,7 +11,8 @@ export async function executeSignalAction(
   symbol: string,
   side: "long" | "short",
   margin: number,
-  leverage: number
+  leverage: number,
+  existingSignalId?: string | null
 ): Promise<void> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -80,23 +81,32 @@ lev ${leverage}`;
     }
   );
 
-  // Save signal
-  const { data: storedSignal, error: sigErr } = await supabase.from("signals").insert({
-    account_id: account.id,
-    raw_text: rawSignalText,
-    parsed: preview,
-    source: "chat",
-    status: "confirmed"
-  }).select("id").maybeSingle();
+  let targetSignalId = existingSignalId;
 
-  if (sigErr || !storedSignal) {
-    throw new Error(sigErr?.message ?? "Failed to save signal");
+  if (!targetSignalId) {
+    // Save new signal row
+    const { data: storedSignal, error: sigErr } = await supabase.from("signals").insert({
+      account_id: account.id,
+      raw_text: rawSignalText,
+      parsed: preview,
+      source: "chat",
+      status: "confirmed"
+    }).select("id").maybeSingle();
+
+    const parsedStored = z.object({ id: z.string() }).safeParse(storedSignal);
+    if (sigErr || !parsedStored.success) {
+      throw new Error(sigErr?.message ?? "Failed to save signal");
+    }
+    targetSignalId = parsedStored.data.id;
+  } else {
+    // Update existing signal status
+    await supabase.from("signals").update({ status: "confirmed" }).eq("id", targetSignalId);
   }
 
   // Create trade entry
   const { data: trade, error: tradeErr } = await supabase.from("trades").insert({
     account_id: account.id,
-    signal_id: storedSignal.id,
+    signal_id: targetSignalId,
     symbol: preview.signal.symbol,
     side: preview.signal.side,
     status: "entry_open",
@@ -123,6 +133,24 @@ lev ${leverage}`;
   }
 
   revalidatePath(`/dashboard/signal/${symbol}`);
+  if (targetSignalId) {
+    revalidatePath(`/dashboard/signal/${targetSignalId}`);
+  }
+  revalidatePath("/dashboard/signals");
   revalidatePath("/dashboard/positions");
+  revalidatePath("/dashboard/chat");
+}
+
+export async function deleteSignalAction(signalId: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { error } = await supabase.from("signals").delete().eq("id", signalId);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/dashboard/signals");
   revalidatePath("/dashboard/chat");
 }
