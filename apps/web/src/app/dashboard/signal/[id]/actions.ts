@@ -8,12 +8,24 @@ import { accountConnectionSchema, createAccountClient } from "../../../../lib/ac
 import { sanitizeSymbol } from "@crypto-bot/shared";
 import { parseSignalText, createTradePreview, submitEntry, protectFilledPosition } from "@crypto-bot/trading";
 
+export interface ExecuteSignalActionOptions {
+  orderType?: "Market" | "Limit" | undefined;
+  limitPrice?: number | undefined;
+  adaptedLevels?: {
+    stopLoss: number;
+    tp1: number;
+    tp2: number;
+    tp3: number;
+  } | undefined;
+}
+
 export async function executeSignalAction(
   symbol: string,
   side: "long" | "short",
   margin: number,
   leverage: number,
-  existingSignalId?: string | null
+  existingSignalId?: string | null,
+  options?: ExecuteSignalActionOptions
 ): Promise<void> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -39,10 +51,9 @@ export async function executeSignalAction(
       .eq("account_id", account.id)
       .maybeSingle();
     const rawText = (storedSignal as { raw_text?: string | null } | null)?.raw_text;
-    if (storedSignalError || !rawText) {
-      throw new Error("Canonical signal snapshot is unavailable");
+    if (!storedSignalError && rawText) {
+      canonicalRawText = rawText;
     }
-    canonicalRawText = rawText;
   }
 
   // Check risk settings
@@ -66,19 +77,66 @@ export async function executeSignalAction(
     client.getBalance()
   ]);
 
-  const entryPrice = ticker.lastPrice;
-  const slDist = entryPrice * 0.025;
-  const slPrice = executionSide === "long" ? entryPrice - slDist : entryPrice + slDist;
-  const tp1Price = executionSide === "long" ? entryPrice + slDist * 1.8 : entryPrice - slDist * 1.8;
-  const tp2Price = executionSide === "long" ? entryPrice + slDist * 2.6 : entryPrice - slDist * 2.6;
-  const tp3Price = executionSide === "long" ? entryPrice + slDist * 3.5 : entryPrice - slDist * 3.5;
+  const liveMarketPrice = ticker.lastPrice;
+  const orderType = options?.orderType ?? "Market";
+  const isLong = executionSide === "long";
 
-  const rawSignalText = canonicalRawText ?? `${executionSymbol} ${executionSide.toUpperCase()}
-entry ${entryPrice}
-sl ${slPrice}
-tp ${tp1Price} 40%, ${tp2Price} 30%, ${tp3Price} 30%
+  const canonicalSL = canonicalSignal?.stopLoss ?? (isLong ? liveMarketPrice * 0.975 : liveMarketPrice * 1.025);
+  const canonicalTP1 = canonicalSignal?.takeProfits?.[0]?.price ?? (isLong ? liveMarketPrice * 1.045 : liveMarketPrice * 0.955);
+  const canonicalTP2 = canonicalSignal?.takeProfits?.[1]?.price ?? (isLong ? liveMarketPrice * 1.065 : liveMarketPrice * 0.935);
+  const canonicalTP3 = canonicalSignal?.takeProfits?.[2]?.price ?? (isLong ? liveMarketPrice * 1.0875 : liveMarketPrice * 0.9125);
+
+  const isTp1Breached = isLong ? liveMarketPrice >= canonicalTP1 : liveMarketPrice <= canonicalTP1;
+  const isSlBreached = isLong ? liveMarketPrice <= canonicalSL : liveMarketPrice >= canonicalSL;
+
+  let effectiveSL: number;
+  let effectiveTP1: number;
+  let effectiveTP2: number;
+  let effectiveTP3: number;
+
+  if (options?.adaptedLevels) {
+    effectiveSL = options.adaptedLevels.stopLoss;
+    effectiveTP1 = options.adaptedLevels.tp1;
+    effectiveTP2 = options.adaptedLevels.tp2;
+    effectiveTP3 = options.adaptedLevels.tp3;
+  } else if (orderType === "Market" && (isTp1Breached || isSlBreached)) {
+    // If the market moved past TP1 or SL, dynamically recalibrate so the new order has valid targets ahead of entry
+    const slDist = liveMarketPrice * 0.025;
+    effectiveSL = isLong ? liveMarketPrice - slDist : liveMarketPrice + slDist;
+    effectiveTP1 = isLong ? liveMarketPrice + slDist * 1.8 : liveMarketPrice - slDist * 1.8;
+    effectiveTP2 = isLong ? liveMarketPrice + slDist * 2.6 : liveMarketPrice - slDist * 2.6;
+    effectiveTP3 = isLong ? liveMarketPrice + slDist * 3.5 : liveMarketPrice - slDist * 3.5;
+  } else {
+    effectiveSL = canonicalSL;
+    effectiveTP1 = canonicalTP1;
+    effectiveTP2 = canonicalTP2;
+    effectiveTP3 = canonicalTP3;
+  }
+
+  let rawSignalText: string;
+  let isImmediatelyFilled = true;
+  let effectiveEntryPrice: number;
+
+  if (orderType === "Market") {
+    effectiveEntryPrice = liveMarketPrice;
+    rawSignalText = `${executionSymbol} ${executionSide.toUpperCase()}
+entry market
+sl ${effectiveSL}
+tp ${effectiveTP1} 40%, ${effectiveTP2} 30%, ${effectiveTP3} 30%
 trail 1% after tp1
 lev ${leverage}`;
+  } else {
+    // Limit order
+    const targetLimitPrice = options?.limitPrice ?? (canonicalSignal?.entry.type === "limit" ? canonicalSignal.entry.price : (canonicalSignal?.entry.type === "range" ? (canonicalSignal.entry.from + canonicalSignal.entry.to) / 2 : liveMarketPrice));
+    effectiveEntryPrice = targetLimitPrice;
+    isImmediatelyFilled = isLong ? liveMarketPrice <= targetLimitPrice : liveMarketPrice >= targetLimitPrice;
+    rawSignalText = `${executionSymbol} ${executionSide.toUpperCase()}
+entry ${targetLimitPrice}
+sl ${effectiveSL}
+tp ${effectiveTP1} 40%, ${effectiveTP2} 30%, ${effectiveTP3} 30%
+trail 1% after tp1
+lev ${leverage}`;
+  }
 
   const parsedSignal = { ...parseSignalText(rawSignalText, "api"), leverage };
   const preview = createTradePreview(
@@ -93,7 +151,7 @@ lev ${leverage}`;
     },
     {
       balance: balance.equity,
-      marketPrice: entryPrice,
+      marketPrice: liveMarketPrice,
       openPositions: 0,
       dailyPnl: 0,
       customMargin: margin
@@ -118,25 +176,31 @@ lev ${leverage}`;
     }
     targetSignalId = parsedStored.data.id;
   } else {
-    // Update existing signal status
-    await supabase.from("signals").update({ status: "confirmed" }).eq("id", targetSignalId);
+    // Update existing signal status and snapshot to match executed levels
+    await supabase.from("signals").update({
+      status: "confirmed",
+      raw_text: rawSignalText,
+      parsed: preview
+    }).eq("id", targetSignalId);
   }
 
-  // Create trade entry with active status and opened_at timestamp
+  // Create trade entry
   const nowIso = new Date().toISOString();
+  const tradeStatus = isImmediatelyFilled ? "active" : "entry_open";
+
   const { data: trade, error: tradeErr } = await supabase.from("trades").insert({
     account_id: account.id,
     signal_id: targetSignalId,
     symbol: preview.signal.symbol,
     side: preview.signal.side,
-    status: "active",
-    entry_avg: preview.entryPrice,
+    status: tradeStatus,
+    entry_avg: isImmediatelyFilled ? liveMarketPrice : effectiveEntryPrice,
     qty: preview.qty,
     leverage: preview.leverage,
     sl: preview.signal.stopLoss,
     trailing_stop: preview.signal.trailingStop ?? null,
     realized_pnl: 0,
-    opened_at: nowIso
+    opened_at: isImmediatelyFilled ? nowIso : null
   }).select("id").single();
 
   const parsedTrade = z.object({ id: z.string() }).safeParse(trade);
@@ -154,28 +218,30 @@ lev ${leverage}`;
     trade_id: tradeId,
     exchange_order_id: entrySubmission.entryOrder.orderId,
     order_link_id: entrySubmission.entryOrder.orderLinkId ?? `entry-${tradeId}`,
-    type: preview.signal.entry.type === "market" ? "market" : "limit",
+    type: orderType === "Market" ? "market" : "limit",
     side: preview.signal.side === "long" ? "buy" : "sell",
     price: preview.entryPrice,
     qty: preview.qty,
-    status: "filled",
+    status: isImmediatelyFilled ? "filled" : "open",
     reduce_only: false,
     raw: { preview: JSON.parse(JSON.stringify(preview)) as Record<string, unknown>, exchange: account.exchange }
   });
 
-  // Protect filled position with SL and TP
-  const protection = await protectFilledPosition(client, preview, tradeId);
-  for (const [idx, tpOrder] of protection.takeProfitOrders.entries()) {
-    const target = preview.signal.takeProfits[idx];
-    if (target) {
-      await supabase.from("trade_targets").insert({
-        trade_id: tradeId,
-        idx: idx + 1,
-        price: target.price,
-        share_pct: target.sharePct,
-        status: "open",
-        order_id: tpOrder.orderId
-      });
+  // Protect filled position with SL and TP if position is active
+  if (isImmediatelyFilled) {
+    const protection = await protectFilledPosition(client, preview, tradeId);
+    for (const [idx, tpOrder] of protection.takeProfitOrders.entries()) {
+      const target = preview.signal.takeProfits[idx];
+      if (target) {
+        await supabase.from("trade_targets").insert({
+          trade_id: tradeId,
+          idx: idx + 1,
+          price: target.price,
+          share_pct: target.sharePct,
+          status: "open",
+          order_id: tpOrder.orderId
+        });
+      }
     }
   }
 

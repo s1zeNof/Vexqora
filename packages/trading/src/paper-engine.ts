@@ -72,6 +72,11 @@ export type PaperTradeAction =
   | {
       type: "MANUAL_HOLD";
       reason: string;
+    }
+  | {
+      type: "ENTRY_FILLED";
+      fillPrice: number;
+      reason: string;
     };
 
 export interface PaperEvaluationResult {
@@ -79,7 +84,7 @@ export interface PaperEvaluationResult {
   updatedTrade: {
     qty: number;
     realized_pnl: number;
-    status: "active" | "closed";
+    status: "active" | "closed" | "entry_open";
     trailing_stop: PaperTrailingStopState | null;
     closed_at?: string;
     exit?: {
@@ -168,6 +173,33 @@ export function evaluatePaperTrade(
   let remainingQty = trade.qty;
   let realizedPnlDelta = 0;
   const nowIso = new Date().toISOString();
+
+  // If trade is resting in entry_open, check if limit price has been touched
+  if (trade.status === "entry_open") {
+    const isLimitFilled = isLong
+      ? currentPrice <= trade.entry_avg
+      : currentPrice >= trade.entry_avg;
+
+    if (!isLimitFilled) {
+      return {
+        actions: [],
+        updatedTrade: {
+          qty: trade.qty,
+          realized_pnl: trade.realized_pnl,
+          status: "entry_open",
+          trailing_stop: trailingState
+        },
+        updatedTargets: [],
+        totalRealizedPnlDelta: 0
+      };
+    }
+
+    actions.push({
+      type: "ENTRY_FILLED",
+      fillPrice: trade.entry_avg,
+      reason: `Limit order filled at ${trade.entry_avg}`
+    });
+  }
 
   // 1. Check Stop Loss
   if (trade.sl !== null) {

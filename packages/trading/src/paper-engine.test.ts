@@ -243,4 +243,24 @@ describe("Paper Matching Engine (Pure Emulator)", () => {
       details: { configuredStopLoss: 0.038, closedQty: 1000 }
     });
   });
+
+  it("waits in entry_open when limit price is not yet touched and fills when reached", () => {
+    const pendingLongLimit: PaperTradeSnapshot = {
+      ...baseLongTrade,
+      entry_avg: 0.03519,
+      sl: 0.03400,
+      status: "entry_open"
+    };
+
+    // Current price is higher (0.037539), so long limit at 0.03519 must wait
+    const waitingResult = evaluatePaperTrade(pendingLongLimit, baseTargets, 0.037539);
+    expect(waitingResult.actions).toHaveLength(0);
+    expect(waitingResult.updatedTrade.status).toBe("entry_open");
+
+    // Price pulls back to 0.03510 (<= 0.03519), limit entry order fills
+    const filledResult = evaluatePaperTrade(pendingLongLimit, baseTargets, 0.03510);
+    expect(filledResult.actions).toHaveLength(1);
+    expect(filledResult.actions[0]?.type).toBe("ENTRY_FILLED");
+    expect(filledResult.updatedTrade.status).toBe("active");
+  });
 });

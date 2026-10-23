@@ -4,28 +4,45 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatCryptoPrice } from "../../../../lib/format";
 
-interface SignalExecutionPanelProps {
+export interface SignalExecutionPanelProps {
   symbol: string;
   side: "long" | "short";
   currentPrice: number;
+  signalEntry?: number | undefined;
   availableBalance: number;
-  defaultLeverage?: number;
-  defaultRiskPct?: number;
-  stopLossPrice?: number;
-  tp1Price?: number;
-  lockSignalSide?: boolean;
-  onExecute: (data: { orderType: "Market" | "Limit"; margin: number; leverage: number }) => Promise<void>;
+  defaultLeverage?: number | undefined;
+  defaultRiskPct?: number | undefined;
+  stopLossPrice?: number | undefined;
+  tp1Price?: number | undefined;
+  tp2Price?: number | undefined;
+  tp3Price?: number | undefined;
+  lockSignalSide?: boolean | undefined;
+  onExecute: (data: {
+    orderType: "Market" | "Limit";
+    margin: number;
+    leverage: number;
+    limitPrice?: number | undefined;
+    adaptedLevels?: {
+      stopLoss: number;
+      tp1: number;
+      tp2: number;
+      tp3: number;
+    } | undefined;
+  }) => Promise<void>;
 }
 
 export function SignalExecutionPanel({
   symbol,
   side: initialSide,
   currentPrice,
+  signalEntry,
   availableBalance,
   defaultLeverage = 5,
   defaultRiskPct = 1.0,
   stopLossPrice,
   tp1Price,
+  tp2Price,
+  tp3Price,
   lockSignalSide = false,
   onExecute
 }: SignalExecutionPanelProps) {
@@ -34,9 +51,67 @@ export function SignalExecutionPanel({
   const [leverage, setLeverage] = useState<number>(defaultLeverage);
   const [margin, setMargin] = useState<number>(100);
   const [customMarginInput, setCustomMarginInput] = useState<string>("100");
+  const [limitPriceInput, setLimitPriceInput] = useState<string>(
+    signalEntry && signalEntry > 0 ? signalEntry.toString() : currentPrice.toString()
+  );
+  const [isAdapted, setIsAdapted] = useState<boolean>(false);
   const [isPending, startTransition] = useTransition();
   const [statusMsg, setStatusMsg] = useState<{ text: string; error?: boolean } | null>(null);
 
+  const router = useRouter();
+  const isLong = side === "long";
+  const baseEntry = signalEntry && signalEntry > 0 ? signalEntry : currentPrice;
+
+  // Real-time drift & milestone evaluations
+  const priceDriftPct = baseEntry > 0
+    ? ((currentPrice - baseEntry) / baseEntry) * 100 * (isLong ? 1 : -1)
+    : 0;
+
+  const isTp1Reached = isLong
+    ? (tp1Price ? currentPrice >= tp1Price : false)
+    : (tp1Price ? currentPrice <= tp1Price : false);
+
+  const isSlReached = isLong
+    ? (stopLossPrice ? currentPrice <= stopLossPrice : false)
+    : (stopLossPrice ? currentPrice >= stopLossPrice : false);
+
+  const isHighDrift = priceDriftPct >= 1.2 && !isTp1Reached && !isSlReached;
+
+  // Calculated adaptive levels from the live market price
+  const slDist = currentPrice * 0.025;
+  const adaptedSL = isLong ? currentPrice - slDist : currentPrice + slDist;
+  const adaptedTP1 = isLong ? currentPrice + slDist * 1.8 : currentPrice - slDist * 1.8;
+  const adaptedTP2 = isLong ? currentPrice + slDist * 2.6 : currentPrice - slDist * 2.6;
+  const adaptedTP3 = isLong ? currentPrice + slDist * 3.5 : currentPrice - slDist * 3.5;
+
+  // Effective execution prices
+  const parsedLimit = parseFloat(limitPriceInput);
+  const effectiveEntry = orderType === "Market"
+    ? currentPrice
+    : (!isNaN(parsedLimit) && parsedLimit > 0 ? parsedLimit : baseEntry);
+
+  const effectiveSL = isAdapted
+    ? adaptedSL
+    : (stopLossPrice ?? (isLong ? effectiveEntry * 0.975 : effectiveEntry * 1.025));
+
+  const effectiveTP1 = isAdapted
+    ? adaptedTP1
+    : (tp1Price ?? (isLong ? effectiveEntry * 1.045 : effectiveEntry * 0.955));
+
+  const effectiveTP2 = isAdapted
+    ? adaptedTP2
+    : (tp2Price ?? (isLong ? effectiveEntry * 1.065 : effectiveEntry * 0.935));
+
+  const effectiveTP3 = isAdapted
+    ? adaptedTP3
+    : (tp3Price ?? (isLong ? effectiveEntry * 1.0875 : effectiveEntry * 0.9125));
+
+  // Effective R:R from current price
+  const curRiskDist = Math.abs(currentPrice - (stopLossPrice ?? (isLong ? currentPrice * 0.975 : currentPrice * 1.025)));
+  const curRewardDist = Math.abs((tp1Price ?? (isLong ? currentPrice * 1.045 : currentPrice * 0.955)) - currentPrice);
+  const effectiveRR = curRiskDist > 0 ? curRewardDist / curRiskDist : 0;
+
+  // Preset handlers
   const presets = [25, 50, 100, 250, 500, 1000];
   const percentPresets = [10, 25, 50, 100];
 
@@ -46,7 +121,7 @@ export function SignalExecutionPanel({
   };
 
   const handleSelectPercent = (pct: number) => {
-    const val = Math.max(10, Math.floor((availableBalance * (pct / 100))));
+    const val = Math.max(10, Math.floor(availableBalance * (pct / 100)));
     setMargin(val);
     setCustomMarginInput(val.toString());
   };
@@ -62,41 +137,57 @@ export function SignalExecutionPanel({
 
   // Calculations
   const notionalSize = margin * leverage;
-  const approxQty = currentPrice > 0 ? (notionalSize / currentPrice) : 0;
+  const approxQty = effectiveEntry > 0 ? notionalSize / effectiveEntry : 0;
 
-  // Approx liquidation price
+  // Liquidation calculation
   const maintenanceMarginRate = 0.005;
-  const liqDistance = leverage > 1 ? (currentPrice * (1 / leverage - maintenanceMarginRate)) : currentPrice * 0.9;
-  const estLiqPrice = side === "long"
-    ? Math.max(0, currentPrice - liqDistance)
-    : (currentPrice + liqDistance);
+  const liqDistance = leverage > 1 ? effectiveEntry * (1 / leverage - maintenanceMarginRate) : effectiveEntry * 0.9;
+  const estLiqPrice = isLong ? Math.max(0, effectiveEntry - liqDistance) : effectiveEntry + liqDistance;
 
-  // Profit & Loss calculations
-  const sl = stopLossPrice ?? (side === "long" ? currentPrice * 0.975 : currentPrice * 1.025);
-  const tp = tp1Price ?? (side === "long" ? currentPrice * 1.045 : currentPrice * 0.955);
-
-  const slDiffPct = currentPrice > 0 ? Math.abs((currentPrice - sl) / currentPrice) * 100 : 2.5;
-  const tpDiffPct = currentPrice > 0 ? Math.abs((tp - currentPrice) / currentPrice) * 100 : 4.5;
-
+  // SL & TP Diff
+  const slDiffPct = effectiveEntry > 0 ? Math.abs((effectiveEntry - effectiveSL) / effectiveEntry) * 100 : 2.5;
+  const tpDiffPct = effectiveEntry > 0 ? Math.abs((effectiveTP1 - effectiveEntry) / effectiveEntry) * 100 : 4.5;
   const estSlLossUsdt = (margin * (slDiffPct / 100) * leverage).toFixed(2);
   const estTpGainUsdt = (margin * (tpDiffPct / 100) * leverage).toFixed(2);
-
-  const router = useRouter();
 
   const handleSubmit = () => {
     setStatusMsg(null);
     startTransition(async () => {
       try {
-        await onExecute({ orderType, margin, leverage });
-        setStatusMsg({ text: `Позицію успішно відкрито! ${side.toUpperCase()} ${symbol} на $${margin} (${leverage}x).` });
+        const mustAdapt = isAdapted || (orderType === "Market" && (isTp1Reached || isSlReached));
+        await onExecute({
+          orderType,
+          margin,
+          leverage,
+          limitPrice: orderType === "Limit" ? effectiveEntry : undefined,
+          adaptedLevels: mustAdapt ? {
+            stopLoss: adaptedSL,
+            tp1: adaptedTP1,
+            tp2: adaptedTP2,
+            tp3: adaptedTP3
+          } : {
+            stopLoss: effectiveSL,
+            tp1: effectiveTP1,
+            tp2: effectiveTP2,
+            tp3: effectiveTP3
+          }
+        });
+
+        const entryLabel = orderType === "Market"
+          ? `по ринку @ $${formatCryptoPrice(currentPrice)}`
+          : `Limit @ $${formatCryptoPrice(effectiveEntry)}`;
+        setStatusMsg({
+          text: `Ордер успішно розміщено! ${side.toUpperCase()} ${symbol} ${entryLabel} на $${margin} (${leverage}x).`
+        });
         router.refresh();
       } catch (err) {
-        setStatusMsg({ text: err instanceof Error ? err.message : "Помилка відкриття ордера", error: true });
+        setStatusMsg({
+          text: err instanceof Error ? err.message : "Помилка відкриття ордера",
+          error: true
+        });
       }
     });
   };
-
-  const isLong = side === "long";
 
   return (
     <div
@@ -106,17 +197,262 @@ export function SignalExecutionPanel({
         display: "flex",
         flexDirection: "column",
         gap: "14px",
-        background: "#111111",
-        border: "1px solid #262626"
+        background: "#0E0B1A",
+        border: "1px solid #2A2145"
       }}
     >
-      {/* Terminal Title & Account Status */}
+      {/* Terminal Title & Live Price Comparison */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <b style={{ font: "700 15px Inter, sans-serif", color: "#FFFFFF" }}>Торговий термінал</b>
-        <span className="tg gy" style={{ fontSize: "11px", color: "#42F5B9" }}>
-          OKX Pro Engine
+        <b style={{ font: "700 15px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>
+          Торговий термінал
+        </b>
+        <span
+          className="tg gy"
+          style={{
+            fontSize: "11px",
+            color: "#35F2D0",
+            border: "1px solid #35F2D044",
+            fontFamily: "'JetBrains Mono', monospace"
+          }}
+        >
+          ● Live: ${formatCryptoPrice(currentPrice)}
         </span>
       </div>
+
+      {/* Signal vs Live Price Bar */}
+      {signalEntry && signalEntry > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            background: "#171229",
+            border: "1px solid #2A2145",
+            borderRadius: "8px",
+            padding: "8px 12px",
+            fontSize: "12px"
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span className="lb" style={{ fontSize: "10px" }}>Ціна сигналу</span>
+            <span style={{ fontWeight: 600, color: "#FFFFFF", fontFamily: "'JetBrains Mono', monospace" }}>
+              ${formatCryptoPrice(signalEntry)}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span style={{ color: "#7C4DFF" }}>➔</span>
+            <span
+              className="tg"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                color: priceDriftPct >= 0 ? "#35F2D0" : "#FF4F9A",
+                background: priceDriftPct >= 0 ? "rgba(53, 242, 208, 0.12)" : "rgba(255, 79, 154, 0.12)",
+                fontFamily: "'JetBrains Mono', monospace"
+              }}
+            >
+              {priceDriftPct >= 0 ? "+" : ""}{priceDriftPct.toFixed(2)}%
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+            <span className="lb" style={{ fontSize: "10px" }}>Поточна ціна</span>
+            <span style={{ fontWeight: 700, color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>
+              ${formatCryptoPrice(currentPrice)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Nemotron AI Intelligence & Advisory Banner */}
+      {isTp1Reached ? (
+        <div
+          style={{
+            background: "rgba(124, 77, 255, 0.12)",
+            border: "1px solid #7C4DFF",
+            borderRadius: "10px",
+            padding: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ font: "700 12px 'Plus Jakarta Sans', sans-serif", color: "#B9A2FF" }}>
+              🤖 ШІ Nemotron · Ризик-контроль
+            </span>
+            <span
+              className="tg"
+              style={{
+                fontSize: "10px",
+                background: "#7C4DFF",
+                color: "#FFFFFF",
+                fontWeight: 700
+              }}
+            >
+              🎯 TP1 досягнуто!
+            </span>
+          </div>
+
+          <p style={{ margin: 0, fontSize: "12px", color: "#F1EEFF", lineHeight: 1.45 }}>
+            Ціна вже досягла першої цілі <b>${formatCryptoPrice(tp1Price ?? 0)}</b> ({priceDriftPct >= 0 ? "+" : ""}{priceDriftPct.toFixed(2)}%). Вхід за старими цілями заблоковано, оскільки сетап частково відпрацював.
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "2px" }}>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdapted(true);
+                setOrderType("Market");
+              }}
+              className="bt sm"
+              style={{
+                background: isAdapted ? "#35F2D0" : "linear-gradient(135deg, #7C4DFF, #B24BFF)",
+                color: isAdapted ? "#07050F" : "#FFFFFF",
+                fontWeight: 700,
+                fontSize: "11px",
+                padding: "8px 10px",
+                borderRadius: "6px",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between"
+              }}
+            >
+              <span>{isAdapted ? "✓ Цілі адаптовано!" : "🎯 Адаптувати цілі під поточну ціну"}</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px" }}>
+                TP1: ${formatCryptoPrice(adaptedTP1)}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdapted(false);
+                setOrderType("Limit");
+                if (signalEntry) setLimitPriceInput(signalEntry.toString());
+              }}
+              className="bt sm"
+              style={{
+                background: orderType === "Limit" && !isAdapted ? "#171229" : "transparent",
+                border: "1px solid #2A2145",
+                color: "#A59CC4",
+                fontWeight: 600,
+                fontSize: "11px",
+                padding: "6px 10px",
+                borderRadius: "6px",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between"
+              }}
+            >
+              <span>⏳ Чекати ретест (Limit ордер)</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px" }}>
+                ${formatCryptoPrice(baseEntry)}
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : isSlReached ? (
+        <div
+          style={{
+            background: "rgba(255, 79, 154, 0.12)",
+            border: "1px solid #FF4F9A",
+            borderRadius: "10px",
+            padding: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ font: "700 12px 'Plus Jakarta Sans', sans-serif", color: "#FF4F9A" }}>
+              ⛔ ШІ Nemotron · Сетап інвалідовано
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: "12px", color: "#F1EEFF", lineHeight: 1.4 }}>
+            Ціна пробила захисний Stop Loss (${formatCryptoPrice(stopLossPrice ?? 0)}). Первинний сетап скасовано ринком. Вхід за старим сигналом не рекомендується.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setIsAdapted(true);
+              setOrderType("Market");
+            }}
+            className="bt sm"
+            style={{
+              background: "#171229",
+              border: "1px solid #FF4F9A66",
+              color: "#FF4F9A",
+              fontWeight: 700,
+              fontSize: "11px",
+              padding: "6px 10px",
+              marginTop: "4px"
+            }}
+          >
+            🔄 Сформувати новий вхід від поточної ціни ($${formatCryptoPrice(currentPrice)})
+          </button>
+        </div>
+      ) : isHighDrift ? (
+        <div
+          style={{
+            background: "rgba(255, 194, 75, 0.1)",
+            border: "1px solid #FFC24B",
+            borderRadius: "10px",
+            padding: "10px 12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ font: "700 12px 'Plus Jakarta Sans', sans-serif", color: "#FFC24B" }}>
+              ⚠️ ШІ Nemotron: Зсув ціни (+{priceDriftPct.toFixed(1)}%)
+            </span>
+            <span style={{ fontSize: "11px", color: "#FFC24B", fontWeight: 700 }}>
+              R:R 1:{effectiveRR.toFixed(2)}
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: "11.5px", color: "#A59CC4", lineHeight: 1.4 }}>
+            Ціна вже частково пройшла шлях до цілі. Потенціал скоротився, а ризик зріс.
+          </p>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              type="button"
+              onClick={() => setIsAdapted(!isAdapted)}
+              className="bt sm"
+              style={{
+                flex: 1,
+                fontSize: "11px",
+                background: isAdapted ? "#35F2D0" : "#171229",
+                color: isAdapted ? "#07050F" : "#FFFFFF",
+                border: "1px solid #2A2145"
+              }}
+            >
+              {isAdapted ? "✓ Рівні підтягнуто" : "🎯 Підтягнути рівні"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOrderType("Limit");
+                if (signalEntry) setLimitPriceInput(signalEntry.toString());
+              }}
+              className="bt sm"
+              style={{
+                flex: 1,
+                fontSize: "11px",
+                background: orderType === "Limit" ? "#171229" : "transparent",
+                color: "#A59CC4",
+                border: "1px solid #2A2145"
+              }}
+            >
+              ⏳ Limit ордер
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* Direction Switcher (LONG / SHORT) */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
@@ -126,12 +462,12 @@ export function SignalExecutionPanel({
           disabled={lockSignalSide}
           style={{
             height: "36px",
-            font: "700 13px Inter, sans-serif",
+            font: "700 13px 'JetBrains Mono', monospace",
             borderRadius: "6px",
             cursor: lockSignalSide ? "not-allowed" : "pointer",
-            border: isLong ? "1px solid #42F5B9" : "1px solid #262626",
-            background: isLong ? "#42F5B9" : "#1A1A1A",
-            color: isLong ? "#000000" : "#9A9A9A"
+            border: isLong ? "1px solid #35F2D0" : "1px solid #2A2145",
+            background: isLong ? "#35F2D0" : "#171229",
+            color: isLong ? "#07050F" : "#A59CC4"
           }}
         >
           LONG
@@ -142,12 +478,12 @@ export function SignalExecutionPanel({
           disabled={lockSignalSide}
           style={{
             height: "36px",
-            font: "700 13px Inter, sans-serif",
+            font: "700 13px 'JetBrains Mono', monospace",
             borderRadius: "6px",
             cursor: lockSignalSide ? "not-allowed" : "pointer",
-            border: !isLong ? "1px solid #FF5A6E" : "1px solid #262626",
-            background: !isLong ? "#FF5A6E" : "#1A1A1A",
-            color: !isLong ? "#FFFFFF" : "#9A9A9A"
+            border: !isLong ? "1px solid #FF4F9A" : "1px solid #2A2145",
+            background: !isLong ? "#FF4F9A" : "#171229",
+            color: !isLong ? "#FFFFFF" : "#A59CC4"
           }}
         >
           SHORT
@@ -161,17 +497,17 @@ export function SignalExecutionPanel({
             type="button"
             onClick={() => setOrderType("Market")}
             className={`tab ${orderType === "Market" ? "on" : ""}`}
-            style={{ padding: "5px 12px", fontSize: "12px" }}
+            style={{ padding: "5px 12px", fontSize: "12px", fontWeight: 600 }}
           >
-            Market
+            Market (По ринку)
           </button>
           <button
             type="button"
             onClick={() => setOrderType("Limit")}
             className={`tab ${orderType === "Limit" ? "on" : ""}`}
-            style={{ padding: "5px 12px", fontSize: "12px" }}
+            style={{ padding: "5px 12px", fontSize: "12px", fontWeight: 600 }}
           >
-            Limit
+            Limit (У стакан)
           </button>
         </div>
 
@@ -180,9 +516,83 @@ export function SignalExecutionPanel({
         </span>
       </div>
 
+      {/* Limit Price Input if orderType === "Limit" */}
+      {orderType === "Limit" && (
+        <div
+          style={{
+            background: "#171229",
+            borderRadius: "8px",
+            padding: "10px 12px",
+            border: "1px solid #2A2145"
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+            <span className="lb" style={{ fontSize: "11px" }}>Ціна Limit ордера</span>
+            <button
+              type="button"
+              onClick={() => {
+                if (signalEntry) setLimitPriceInput(signalEntry.toString());
+              }}
+              style={{
+                background: "transparent",
+                border: 0,
+                color: "#7C4DFF",
+                fontSize: "11px",
+                cursor: "pointer",
+                padding: 0
+              }}
+            >
+              Встановити ціну сигналу (${formatCryptoPrice(baseEntry)})
+            </button>
+          </div>
+          <div style={{ position: "relative" }}>
+            <input
+              type="number"
+              step="any"
+              value={limitPriceInput}
+              onChange={(e) => setLimitPriceInput(e.target.value)}
+              placeholder="Ціна входу"
+              style={{
+                width: "100%",
+                height: "36px",
+                padding: "0 55px 0 10px",
+                fontSize: "14px",
+                fontWeight: 600,
+                fontFamily: "'JetBrains Mono', monospace",
+                background: "#0E0B1A",
+                border: "1px solid #2A2145",
+                borderRadius: "6px",
+                color: "#FFFFFF"
+              }}
+            />
+            <span
+              style={{
+                position: "absolute",
+                right: "10px",
+                top: "8px",
+                color: "#A59CC4",
+                fontSize: "12px",
+                fontFamily: "'JetBrains Mono', monospace"
+              }}
+            >
+              USDT
+            </span>
+          </div>
+          <p style={{ margin: "6px 0 0", fontSize: "11px", color: "#A59CC4" }}>
+            {isLong && currentPrice > effectiveEntry ? (
+              <span>⏳ Ціна вище ліміту. Ордер чекатиме корекції до <b>${formatCryptoPrice(effectiveEntry)}</b>.</span>
+            ) : !isLong && currentPrice < effectiveEntry ? (
+              <span>⏳ Ціна нижче ліміту. Ордер чекатиме підйому до <b>${formatCryptoPrice(effectiveEntry)}</b>.</span>
+            ) : (
+              <span style={{ color: "#35F2D0" }}>⚡ Ціна вже на рівні ліміту. Ордер виконається миттєво.</span>
+            )}
+          </p>
+        </div>
+      )}
+
       {/* Leverage Selector & Risk pill */}
       <div style={{ display: "flex", gap: "8px" }}>
-        <div style={{ flex: 1, background: "#1A1A1A", borderRadius: "8px", padding: "8px 12px", border: "1px solid #262626" }}>
+        <div style={{ flex: 1, background: "#171229", borderRadius: "8px", padding: "8px 12px", border: "1px solid #2A2145" }}>
           <div className="lb" style={{ fontSize: "11px" }}>Кредитне плече</div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
             <select
@@ -197,11 +607,12 @@ export function SignalExecutionPanel({
                 fontSize: "14px",
                 padding: 0,
                 cursor: "pointer",
-                outline: "none"
+                outline: "none",
+                fontFamily: "'JetBrains Mono', monospace"
               }}
             >
               {[1, 2, 3, 5, 10, 20, 50].map((l) => (
-                <option key={l} value={l} style={{ background: "#1A1A1A", color: "#FFFFFF" }}>
+                <option key={l} value={l} style={{ background: "#171229", color: "#FFFFFF" }}>
                   {l}x Cross
                 </option>
               ))}
@@ -209,9 +620,9 @@ export function SignalExecutionPanel({
           </div>
         </div>
 
-        <div style={{ flex: 1, background: "#1A1A1A", borderRadius: "8px", padding: "8px 12px", border: "1px solid #262626" }}>
+        <div style={{ flex: 1, background: "#171229", borderRadius: "8px", padding: "8px 12px", border: "1px solid #2A2145" }}>
           <div className="lb" style={{ fontSize: "11px" }}>Ризик на угоду</div>
-          <div className="v" style={{ margin: "4px 0 0", fontSize: "14px" }}>
+          <div className="v" style={{ margin: "4px 0 0", fontSize: "14px", fontFamily: "'JetBrains Mono', monospace" }}>
             {defaultRiskPct.toFixed(1)}% балансу
           </div>
         </div>
@@ -221,7 +632,7 @@ export function SignalExecutionPanel({
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
           <span className="lb" style={{ fontSize: "12px" }}>Сума маржі (USDT)</span>
-          <span className="lb" style={{ fontSize: "11px", color: "#9A9A9A" }}>
+          <span className="lb" style={{ fontSize: "11px", color: "#A59CC4" }}>
             Плече: {leverage}x
           </span>
         </div>
@@ -242,9 +653,9 @@ export function SignalExecutionPanel({
               padding: "0 55px 0 12px",
               fontSize: "15px",
               fontWeight: 600,
-              fontVariantNumeric: "tabular-nums",
-              background: "#1A1A1A",
-              border: "1px solid #262626",
+              fontFamily: "'JetBrains Mono', monospace",
+              background: "#171229",
+              border: "1px solid #2A2145",
               borderRadius: "6px",
               color: "#FFFFFF"
             }}
@@ -254,8 +665,8 @@ export function SignalExecutionPanel({
               position: "absolute",
               right: "12px",
               top: "10px",
-              color: "#9A9A9A",
-              font: "600 13px Inter, sans-serif"
+              color: "#A59CC4",
+              font: "600 13px 'JetBrains Mono', monospace"
             }}
           >
             USDT
@@ -274,9 +685,10 @@ export function SignalExecutionPanel({
                 flex: "1 1 auto",
                 padding: "4px 8px",
                 fontSize: "12px",
-                background: margin === p ? "#262626" : "transparent",
-                border: "1px solid #262626",
-                color: margin === p ? "#42F5B9" : "#FFFFFF"
+                fontFamily: "'JetBrains Mono', monospace",
+                background: margin === p ? "#2A2145" : "transparent",
+                border: "1px solid #2A2145",
+                color: margin === p ? "#35F2D0" : "#FFFFFF"
               }}
             >
               ${p}
@@ -296,9 +708,10 @@ export function SignalExecutionPanel({
                 flex: 1,
                 padding: "3px 4px",
                 fontSize: "11px",
+                fontFamily: "'JetBrains Mono', monospace",
                 background: "transparent",
-                border: "1px solid #262626",
-                color: "#9A9A9A"
+                border: "1px solid #2A2145",
+                color: "#A59CC4"
               }}
             >
               {pct}%
@@ -310,36 +723,46 @@ export function SignalExecutionPanel({
       {/* Live Order Calculations Breakdown */}
       <div
         style={{
-          background: "#1A1A1A",
+          background: "#171229",
           borderRadius: "8px",
           padding: "12px",
-          border: "1px solid #262626",
+          border: "1px solid #2A2145",
           display: "flex",
           flexDirection: "column",
           gap: "8px"
         }}
       >
         <div className="row" style={{ padding: "2px 0", border: 0 }}>
+          <span className="lb" style={{ fontSize: "12px" }}>Ціна входу</span>
+          <span className="v" style={{ fontSize: "13px", color: "#F1EEFF", fontFamily: "'JetBrains Mono', monospace" }}>
+            ${formatCryptoPrice(effectiveEntry)} {orderType === "Market" ? "(Зараз по ринку)" : "(Limit)"}
+          </span>
+        </div>
+        <div className="row" style={{ padding: "2px 0", border: 0 }}>
           <span className="lb" style={{ fontSize: "12px" }}>Розмір позиції</span>
-          <span className="v" style={{ fontSize: "13px" }}>
+          <span className="v" style={{ fontSize: "13px", fontFamily: "'JetBrains Mono', monospace" }}>
             ${notionalSize.toFixed(2)} USDT ({approxQty.toFixed(approxQty >= 10 ? 2 : 4)} {symbol.replace("USDT", "")})
           </span>
         </div>
         <div className="row" style={{ padding: "2px 0", border: 0 }}>
           <span className="lb" style={{ fontSize: "12px" }}>Ціна ліквідації</span>
-          <span className="v" style={{ fontSize: "13px", color: "#F5C451" }}>
+          <span className="v" style={{ fontSize: "13px", color: "#FFC24B", fontFamily: "'JetBrains Mono', monospace" }}>
             ${formatCryptoPrice(estLiqPrice)}
           </span>
         </div>
         <div className="row" style={{ padding: "2px 0", border: 0 }}>
-          <span className="lb" style={{ fontSize: "12px" }}>Прибуток на TP1 (+{tpDiffPct.toFixed(1)}%)</span>
-          <span className="v" style={{ fontSize: "13px", color: "#42F5B9" }}>
+          <span className="lb" style={{ fontSize: "12px" }}>
+            Прибуток на TP1 ({effectiveTP1 ? `$${formatCryptoPrice(effectiveTP1)}` : `+${tpDiffPct.toFixed(1)}%`})
+          </span>
+          <span className="v" style={{ fontSize: "13px", color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>
             +${estTpGainUsdt} USDT
           </span>
         </div>
         <div className="row" style={{ padding: "2px 0", border: 0 }}>
-          <span className="lb" style={{ fontSize: "12px" }}>Ризик на SL (-{slDiffPct.toFixed(1)}%)</span>
-          <span className="v" style={{ fontSize: "13px", color: "#FF5A6E" }}>
+          <span className="lb" style={{ fontSize: "12px" }}>
+            Ризик на SL ({effectiveSL ? `$${formatCryptoPrice(effectiveSL)}` : `-${slDiffPct.toFixed(1)}%`})
+          </span>
+          <span className="v" style={{ fontSize: "13px", color: "#FF4F9A", fontFamily: "'JetBrains Mono', monospace" }}>
             -${estSlLossUsdt} USDT
           </span>
         </div>
@@ -350,8 +773,9 @@ export function SignalExecutionPanel({
         <div
           className="notice"
           style={{
-            color: statusMsg.error ? "#FF5A6E" : "#42F5B9",
-            borderColor: statusMsg.error ? "#FF5A6E33" : "#42F5B933",
+            color: statusMsg.error ? "#FF4F9A" : "#35F2D0",
+            borderColor: statusMsg.error ? "#FF4F9A44" : "#35F2D044",
+            background: statusMsg.error ? "rgba(255, 79, 154, 0.1)" : "rgba(53, 242, 208, 0.1)",
             fontSize: "12px",
             padding: "8px 12px"
           }}
@@ -368,12 +792,18 @@ export function SignalExecutionPanel({
         style={{
           height: "46px",
           width: "100%",
-          borderRadius: "6px",
-          font: "700 15px Inter, sans-serif",
+          borderRadius: "8px",
+          font: "700 14px 'Plus Jakarta Sans', sans-serif",
           cursor: isPending ? "not-allowed" : "pointer",
           border: 0,
-          background: isPending ? "#262626" : (isLong ? "#42F5B9" : "#FF5A6E"),
-          color: isPending ? "#9A9A9A" : (isLong ? "#000000" : "#FFFFFF"),
+          background: isPending
+            ? "#2A2145"
+            : (orderType === "Market"
+                ? (isLong ? "#35F2D0" : "#FF4F9A")
+                : "linear-gradient(135deg, #7C4DFF, #B24BFF)"),
+          color: isPending
+            ? "#A59CC4"
+            : (orderType === "Market" && isLong ? "#07050F" : "#FFFFFF"),
           transition: "opacity 0.15s ease",
           display: "flex",
           alignItems: "center",
@@ -383,7 +813,11 @@ export function SignalExecutionPanel({
       >
         {isPending
           ? "⏳ Відкриваю ордер..."
-          : `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} ${symbol} ($${margin})`}
+          : orderType === "Market"
+            ? (isAdapted || isTp1Reached
+                ? `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} за $${formatCryptoPrice(currentPrice)} з новими TP`
+                : `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} по ринку ($${formatCryptoPrice(currentPrice)})`)
+            : `⏳ Виставити Limit ${isLong ? "LONG" : "SHORT"} на $${formatCryptoPrice(effectiveEntry)}`}
       </button>
     </div>
   );

@@ -232,6 +232,23 @@ export function startPaperWorker(
               content: `🛑 Paper Stop Loss спрацював для ${trade.symbol} @ $${currentPrice}. Позицію закрито для захисту депозиту. Результат: ${action.realizedPnl.toFixed(2)} USDT.`,
               payload: { tradeId: trade.id, symbol: trade.symbol, pnl: action.realizedPnl }
             });
+          } else if (action.type === "ENTRY_FILLED") {
+            await supabase.from("trades").update({
+              opened_at: new Date().toISOString(),
+              status: "active"
+            }).eq("id", trade.id);
+
+            await supabase.from("orders").update({
+              status: "filled"
+            }).eq("trade_id", trade.id).eq("reduce_only", false);
+
+            await supabase.from("chat_messages").insert({
+              account_id: trade.account_id,
+              role: "system",
+              kind: "order_event",
+              content: `⚡ Limit вхід для ${trade.symbol} спрацював @ $${action.fillPrice}. Позицію активовано.`,
+              payload: { tradeId: trade.id, symbol: trade.symbol, fillPrice: action.fillPrice }
+            });
           }
         }
       }

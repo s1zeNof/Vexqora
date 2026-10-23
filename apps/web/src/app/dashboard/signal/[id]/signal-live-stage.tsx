@@ -9,6 +9,7 @@ import { formatTimeAgo } from "../../../../lib/date";
 import { useLiveTicker } from "../../../../hooks/use-live-ticker";
 import { SignalChart } from "./signal-chart";
 import { SignalPositionsTable, type SignalTradeItem } from "./signal-positions-table";
+import { SignalExecutionPanel } from "./signal-execution-panel";
 import { toggleTradeControlMode } from "./actions";
 
 interface SignalLiveStageProps {
@@ -40,6 +41,22 @@ interface SignalLiveStageProps {
   qualityTier: string;
   strategy: string;
   rationale: string;
+  createdAtTime?: string | number | null | undefined;
+  riskReward?: number | undefined;
+  winProbabilityPct?: number | undefined;
+  availableBalance?: number | undefined;
+  onExecute?: ((data: {
+    orderType: "Market" | "Limit";
+    margin: number;
+    leverage: number;
+    limitPrice?: number | undefined;
+    adaptedLevels?: {
+      stopLoss: number;
+      tp1: number;
+      tp2: number;
+      tp3: number;
+    } | undefined;
+  }) => Promise<void>) | undefined;
   onDeleteFromArchive?: () => Promise<void>;
   children?: React.ReactNode;
 }
@@ -73,6 +90,11 @@ export function SignalLiveStage({
   qualityTier,
   strategy,
   rationale,
+  createdAtTime,
+  riskReward,
+  winProbabilityPct,
+  availableBalance,
+  onExecute,
   onDeleteFromArchive,
   children
 }: SignalLiveStageProps) {
@@ -531,7 +553,111 @@ export function SignalLiveStage({
         </div>
 
         {/* Right Column (360px): Signal Specs + Execution Panel */}
-        {children}
+        {onExecute ? (
+          <div className="signal-panel">
+            {/* Signal Specs Card */}
+            <div className="cd" style={{ padding: "20px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <b style={{ font: "700 16px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>Специфікація сигналу</b>
+                <span className={`tg ${side === "long" ? "lg" : "sh"}`}>
+                  {side.toUpperCase()}
+                </span>
+                <span className="lb" style={{ marginLeft: "auto" }}>
+                  {createdAtTime ? formatTimeAgo(createdAtTime) : "Щойно"}
+                </span>
+              </div>
+
+              {/* Status pill based on live currentPrice */}
+              <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+                {(() => {
+                  const isLong = side === "long";
+                  const driftPct = entry > 0 ? ((currentPrice - entry) / entry) * 100 * (isLong ? 1 : -1) : 0;
+                  const isTp1Breached = isLong ? currentPrice >= tp1 : currentPrice <= tp1;
+                  const isSlBreached = isLong ? currentPrice <= stopLoss : currentPrice >= stopLoss;
+
+                  if (isTp1Breached) {
+                    return (
+                      <span className="tg" style={{ background: "rgba(124, 77, 255, 0.18)", color: "#B9A2FF", border: "1px solid #7C4DFF", fontSize: "11px", fontWeight: 700 }}>
+                        🎯 TP1 вже досягнуто (+{driftPct.toFixed(1)}%)
+                      </span>
+                    );
+                  }
+                  if (isSlBreached) {
+                    return (
+                      <span className="tg sh" style={{ fontSize: "11px", fontWeight: 700 }}>
+                        ⛔ SL пробито ({driftPct.toFixed(1)}%)
+                      </span>
+                    );
+                  }
+                  if (Math.abs(driftPct) >= 1.2) {
+                    return (
+                      <span className="tg" style={{ background: "rgba(255, 194, 75, 0.15)", color: "#FFC24B", border: "1px solid #FFC24B55", fontSize: "11px", fontWeight: 700 }}>
+                        ⚠️ Зсув {driftPct >= 0 ? "+" : ""}{driftPct.toFixed(1)}%
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="tg lg" style={{ fontSize: "11px", fontWeight: 700 }}>
+                      🟢 Сетап активний
+                    </span>
+                  );
+                })()}
+              </div>
+
+              <div style={{ marginTop: "12px" }}>
+                <div className="row">
+                  <span>Ціна входу (Entry)</span>
+                  <span style={{ fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(entry)}</span>
+                </div>
+                <div className="row">
+                  <span>Stop Loss</span>
+                  <span style={{ color: "#FF4F9A", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(stopLoss)}</span>
+                </div>
+                <div className="row">
+                  <span>TP 1 · 40%</span>
+                  <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp1)}</span>
+                </div>
+                <div className="row">
+                  <span>TP 2 · 30%</span>
+                  <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp2)}</span>
+                </div>
+                <div className="row">
+                  <span>TP 3 · 30%</span>
+                  <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp3)}</span>
+                </div>
+                <div className="row">
+                  <span>Trailing Stop</span>
+                  <span>1% після TP1</span>
+                </div>
+                <div className="row">
+                  <span>R : R коефіцієнт</span>
+                  <span style={{ color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>1 : {(riskReward ?? 1.8).toFixed(2)}</span>
+                </div>
+                <div className="row">
+                  <span>Впевненість ШІ</span>
+                  <span style={{ color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>{winProbabilityPct ?? 69}% Win Rate</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Live OKX Order Terminal */}
+            <SignalExecutionPanel
+              symbol={symbol}
+              side={side}
+              currentPrice={currentPrice}
+              signalEntry={entry}
+              availableBalance={availableBalance ?? 20050}
+              stopLossPrice={stopLoss}
+              tp1Price={tp1}
+              tp2Price={tp2}
+              tp3Price={tp3}
+              lockSignalSide={Boolean(targetSignalId)}
+              onExecute={onExecute}
+            />
+          </div>
+        ) : (
+          children
+        )}
       </div>
     </>
   );

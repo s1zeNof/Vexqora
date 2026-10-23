@@ -4,10 +4,8 @@ import { fetchRecentKlines } from "@crypto-bot/exchange";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
-import { formatTimeAgo } from "../../../../lib/date";
 import { sanitizeSymbol } from "@crypto-bot/shared";
 import { SignalLiveStage } from "./signal-live-stage";
-import { SignalExecutionPanel } from "./signal-execution-panel";
 import type { SignalTradeItem } from "./signal-positions-table";
 import { executeSignalAction, deleteSignalAction } from "./actions";
 
@@ -254,9 +252,24 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
   const targetSignalId = signalRecord?.id ?? null;
 
-  const handleExecuteAction = async (data: { orderType: "Market" | "Limit"; margin: number; leverage: number }) => {
+  const handleExecuteAction = async (data: {
+    orderType: "Market" | "Limit";
+    margin: number;
+    leverage: number;
+    limitPrice?: number | undefined;
+    adaptedLevels?: {
+      stopLoss: number;
+      tp1: number;
+      tp2: number;
+      tp3: number;
+    } | undefined;
+  }) => {
     "use server";
-    await executeSignalAction(formattedSymbol, side, data.margin, data.leverage, targetSignalId);
+    await executeSignalAction(formattedSymbol, side, data.margin, data.leverage, targetSignalId, {
+      orderType: data.orderType,
+      limitPrice: data.limitPrice,
+      adaptedLevels: data.adaptedLevels
+    });
   };
 
   const handleDeleteFromArchive = async () => {
@@ -298,71 +311,13 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
         qualityTier={qualityTier}
         strategy={strategy}
         rationale={rationale}
+        createdAtTime={createdAtTime}
+        riskReward={riskReward}
+        winProbabilityPct={winProbabilityPct}
+        availableBalance={availableBalance}
+        onExecute={handleExecuteAction}
         onDeleteFromArchive={handleDeleteFromArchive}
-      >
-        {/* Right Column (360px): Signal Specs + OKX Execution Panel */}
-        <div className="signal-panel">
-          {/* Signal Specs Card */}
-          <div className="cd" style={{ padding: "20px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <b style={{ font: "700 16px Inter, sans-serif", color: "#FFFFFF" }}>Специфікація сигналу</b>
-              <span className={`tg ${isLong ? "lg" : "sh"}`}>
-                {side.toUpperCase()}
-              </span>
-              <span className="lb" style={{ marginLeft: "auto" }}>
-                {formatTimeAgo(createdAtTime)}
-              </span>
-            </div>
-
-            <div style={{ marginTop: "12px" }}>
-              <div className="row">
-                <span>Ціна входу (Entry)</span>
-                <span style={{ fontWeight: 600 }}>{formatPrice(entry)}</span>
-              </div>
-              <div className="row">
-                <span>Stop Loss</span>
-                <span style={{ color: "#FF5A6E", fontWeight: 600 }}>{formatPrice(stopLoss)}</span>
-              </div>
-              <div className="row">
-                <span>TP 1 · 40%</span>
-                <span style={{ color: "#42F5B9", fontWeight: 600 }}>{formatPrice(tp1)}</span>
-              </div>
-              <div className="row">
-                <span>TP 2 · 30%</span>
-                <span style={{ color: "#42F5B9", fontWeight: 600 }}>{formatPrice(tp2)}</span>
-              </div>
-              <div className="row">
-                <span>TP 3 · 30%</span>
-                <span style={{ color: "#42F5B9", fontWeight: 600 }}>{formatPrice(tp3)}</span>
-              </div>
-              <div className="row">
-                <span>Trailing Stop</span>
-                <span>1% після TP1</span>
-              </div>
-              <div className="row">
-                <span>R : R коефіцієнт</span>
-                 <span style={{ color: "#42F5B9" }}>1 : {riskReward.toFixed(2)}</span>
-              </div>
-              <div className="row">
-                <span>Впевненість ШІ</span>
-                 <span style={{ color: "#42F5B9" }}>{winProbabilityPct}% Win Rate</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Real OKX Exchange Order Terminal */}
-          <SignalExecutionPanel
-            symbol={formattedSymbol}
-            side={side}
-            currentPrice={currentPrice}
-            availableBalance={availableBalance}
-            stopLossPrice={stopLoss}
-            tp1Price={tp1}
-            lockSignalSide={Boolean(targetSignalId)}
-            onExecute={handleExecuteAction}
-          />
-        </div>
-      </SignalLiveStage>
+      />
     </div>
   );
 }
