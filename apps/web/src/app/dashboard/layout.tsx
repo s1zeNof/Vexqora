@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "../../lib/supabase/server";
-import { signOut } from "../login/actions";
-import { VexqoraLogo } from "../../components/logo";
 import { z } from "zod";
 import { accountConnectionSchema, createAccountClient } from "../../lib/account-client";
+import { TopNav } from "./top-nav";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
@@ -29,60 +27,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const profile = z.object({ display_name: z.string().nullable() }).nullable().safeParse(rawProfile).data ?? null;
   let availableBalance: number | null = null;
   if (account) {
-    try { availableBalance = (await createAccountClient(account).getBalance()).available; } catch { availableBalance = null; }
+    try {
+      availableBalance = (await createAccountClient(account).getBalance()).available;
+    } catch {
+      availableBalance = null;
+    }
   }
 
   return (
-    <div className="terminal-layout">
-      <aside className="sidebar">
-        <Link className="brand" href="/dashboard/chat">
-          <VexqoraLogo size={24} />
-          <span>Vexqora Trade</span>
-        </Link>
-        <nav className="side-nav">
-          <Link href="/dashboard/chat">⚡ Signals chat</Link>
-          <Link href="/dashboard/positions">📊 Positions</Link>
-          <Link href="/dashboard/history">📜 History</Link>
-          <Link href="/dashboard/accounts">🔑 Accounts</Link>
-          <Link href="/dashboard/risk">🛡️ Risk limits</Link>
-          <Link href="/dashboard/integrations">💬 Integrations</Link>
-          <Link href="/dashboard/profile">👤 Profile</Link>
-        </nav>
-        <div className="sidebar-foot">
-          <div className="sidebar-user" title={user.email}>{profile?.display_name ?? user.email}</div>
-          <div><span className="status-dot" /> Systems nominal</div>
-        </div>
-      </aside>
-
-      <div className="terminal-main">
-        <header className="topbar">
-          <div className="topbar-title">
-            <strong>{account?.label ?? "Workspace initializing"}</strong>
-            {account ? <span className="kicker" style={{ fontSize: "11px" }}>{account.exchange.toUpperCase()}</span> : null}
-            {account ? <span className={`badge ${account.environment}`}>{account.environment}</span> : null}
-          </div>
-          <div className="topbar-actions">
-            <span className="mono balance">{availableBalance === null ? "—" : availableBalance.toLocaleString("en-US", { maximumFractionDigits: 2 })} USDT</span>
-            {account?.environment === "demo" ? (
-              <Link href="/dashboard/accounts" className="button secondary" style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}>
-                Add virtual funds
-              </Link>
-            ) : null}
-            <Link href="/dashboard/risk" className="button danger" style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}>
-              Kill switch
-            </Link>
-            <form action={signOut}>
-              <button className="button secondary" style={{ minHeight: "36px", padding: "0 12px", fontSize: "12px" }}>
-                Sign out
-              </button>
-            </form>
-          </div>
-        </header>
-
-        <main className="terminal-content">
-          {children}
-        </main>
-      </div>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#000000" }}>
+      <TopNav
+        account={account}
+        availableBalance={availableBalance}
+        userEmail={user.email ?? ""}
+        displayName={profile?.display_name ?? null}
+      />
+      <main className="main-shell">
+        {children}
+      </main>
     </div>
   );
 }

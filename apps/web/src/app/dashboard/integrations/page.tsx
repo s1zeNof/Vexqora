@@ -1,60 +1,79 @@
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { SettingsNav } from "../settings-nav";
 
 export default async function IntegrationsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  void user; // user verification
+  void user;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%", maxWidth: "1000px" }}>
-      <div>
-        <span className="eyebrow">External Channels</span>
-        <h1 style={{ marginTop: "6px" }}>Telegram & Discord Integrations</h1>
-        <p className="lead">Receive real-time trade execution notifications and forward signals directly into your desk.</p>
-      </div>
+    <div className="settings-layout">
+      <SettingsNav />
 
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{ fontSize: "24px" }}>✈️</span>
-          <div>
-            <h3>Telegram Bot Link</h3>
-            <p style={{ fontSize: "13px", color: "var(--muted)" }}>Two-way notifications and signal ingestion via private bot.</p>
-          </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px", minWidth: 0 }}>
+        <div>
+          <h1 style={{ margin: 0, font: "700 24px Inter, sans-serif" }}>Integrations</h1>
+          <p className="lb" style={{ marginTop: "4px" }}>
+            Real-time trade execution notifications and signal forwarding via Telegram and Discord.
+          </p>
         </div>
 
-        <div style={{ background: "var(--plum)", padding: "16px", borderRadius: "10px", marginTop: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div className="kicker">Your One-Time Pairing Code</div>
-            <div className="mono" style={{ fontSize: "20px", fontWeight: "700", color: "var(--aqua)", marginTop: "4px" }}>
-              VXQ-9842
+        {/* Telegram Card */}
+        <div className="cd" style={{ padding: "20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#1A1A1A", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#42F5B9" strokeWidth="1.5">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "16px" }}>Telegram Bot Connection</h3>
+              <p className="lb" style={{ marginTop: "2px" }}>Two-way notifications and signal ingestion via private bot.</p>
             </div>
           </div>
-          <button className="button primary">Generate New Code</button>
+
+          <div style={{ background: "#1A1A1A", border: "1px solid #262626", padding: "14px 16px", borderRadius: "8px", marginTop: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+            <div>
+              <div className="lb">One-Time Pairing Code</div>
+              <div style={{ font: "700 20px Inter", fontVariantNumeric: "tabular-nums", color: "#42F5B9", marginTop: "4px" }}>
+                VXQ-9842
+              </div>
+            </div>
+            <button type="button" className="bt pr sm">Generate New Code</button>
+          </div>
+
+          <p className="lb" style={{ marginTop: "12px", lineHeight: "1.6" }}>
+            Open <strong>@VexqoraBot</strong> in Telegram and send: <code style={{ background: "#1A1A1A", border: "1px solid #262626", padding: "2px 6px", borderRadius: "4px", color: "#FFFFFF" }}>/link VXQ-9842</code>.
+          </p>
         </div>
 
-        <p style={{ fontSize: "13px", color: "var(--muted)", marginTop: "12px", lineHeight: "1.6" }}>
-          Open the bot <strong>@VexqoraBot</strong> in Telegram and send the command: <code className="mono" style={{ background: "#0e0b1a", padding: "2px 6px", borderRadius: "4px" }}>/link VXQ-9842</code>.
-        </p>
-      </div>
-
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{ fontSize: "24px" }}>🎮</span>
-          <div>
-            <h3>Discord Channel Webhook</h3>
-            <p style={{ fontSize: "13px", color: "var(--muted)" }}>Post rich trade alerts, target hits, and daily summaries to your private server.</p>
+        {/* Discord Card */}
+        <div className="cd" style={{ padding: "20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "#1A1A1A", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#42F5B9" strokeWidth="1.5">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "16px" }}>Discord Webhook</h3>
+              <p className="lb" style={{ marginTop: "2px" }}>Post trade alerts and summaries to your Discord server.</p>
+            </div>
           </div>
+
+          <form style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label className="lb">Webhook URL</label>
+              <input placeholder="https://discord.com/api/webhooks/..." />
+            </div>
+            <button type="button" className="bt" style={{ alignSelf: "flex-start" }}>
+              Save Discord Webhook
+            </button>
+          </form>
         </div>
-
-        <form style={{ display: "grid", gap: "12px", marginTop: "16px" }}>
-          <div className="form-group">
-            <label>Webhook URL</label>
-            <input placeholder="https://discord.com/api/webhooks/..." />
-          </div>
-          <button className="button secondary" type="button" style={{ width: "fit-content" }}>
-            Save Discord Webhook
-          </button>
-        </form>
       </div>
     </div>
   );

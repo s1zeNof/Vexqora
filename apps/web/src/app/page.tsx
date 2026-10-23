@@ -73,7 +73,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
         <div className="kicker" style={{ color: "var(--soft-violet)" }}>Intelligent Trade Execution Platform</div>
         <h1 style={{ maxWidth: "900px" }}>
           Ultraviolet terminal. <br />
-          <span style={{ background: "linear-gradient(90deg, #B9A2FF, #35F2D0)", WebkitBackgroundClip: "text", color: "transparent" }}>
+          <span style={{ color: "#42F5B9" }}>
             Quiet surfaces, sharp signals.
           </span>
         </h1>

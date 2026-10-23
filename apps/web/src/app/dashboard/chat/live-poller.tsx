@@ -30,17 +30,17 @@ export function LiveUniversePoller() {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      padding: "6px 12px",
-      background: "#0c0919",
-      border: "1px solid var(--line)",
+      padding: "8px 12px",
+      background: "#111111",
+      border: "1px solid #262626",
       borderRadius: "8px",
-      fontSize: "11px",
-      color: "var(--muted)",
+      fontSize: "12px",
+      color: "#9A9A9A",
       marginBottom: "8px"
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span className="status-dot" style={{ background: "var(--aqua)", boxShadow: "0 0 6px var(--aqua)" }} />
-        <span>24/7 Universe Scanner: <strong>916 Bybit пар у моніторингу</strong> (Оновлено: {secondsAgo}с тому)</span>
+        <span style={{ width: "8px", height: "8px", borderRadius: "4px", background: "#42F5B9", display: "inline-block" }} />
+        <span>24/7 Universe Scanner: <strong style={{ color: "#FFFFFF" }}>916 Bybit pairs</strong> (Updated {secondsAgo}s ago)</span>
       </div>
       <button
         type="button"
@@ -48,11 +48,12 @@ export function LiveUniversePoller() {
           router.refresh();
           setLastRefreshed(Date.now());
         }}
-        className="button secondary"
-        style={{ minHeight: "24px", padding: "0 8px", fontSize: "11px" }}
+        className="bt"
+        style={{ height: "28px", padding: "0 10px", fontSize: "12px" }}
       >
-        🔄 Оновити стрічку
+        Refresh
       </button>
     </div>
   );
 }
+

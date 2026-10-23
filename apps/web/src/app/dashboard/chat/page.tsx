@@ -8,17 +8,18 @@ import {
   type TradePreview
 } from "@crypto-bot/trading";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { VexqoraLogo } from "../../../components/logo";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { formatTimeAgo } from "../../../lib/date";
-import { closeAllPositions, closeTradePosition } from "../actions";
-import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
+import { formatPrice } from "../../../lib/format";
+import { closeTradePosition } from "../actions";
+import { scanMarketOpportunityAction } from "./actions";
 import { LiveUniversePoller } from "./live-poller";
 import { SignalCard } from "./signal-card";
 import { SignalComposer } from "./signal-composer";
-import { ProTerminalStage } from "./pro-terminal-stage";
 
 const messageSchema = z.object({
   id: z.string(),
@@ -46,36 +47,35 @@ export default async function ChatPage({
 }: {
   searchParams: Promise<{ error?: string; queued?: string; executed?: string; tab?: string }>;
 }) {
-  const supabase = await createSupabaseServerClient();
   const query = (await searchParams) ?? {};
-  const activeTab = query?.tab === "pulse" ? "pulse" : "signals";
+  if (query?.tab === "pulse") {
+    redirect("/dashboard/pulse");
+  }
 
+  const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
+
   const rawAccountQuery = user
     ? supabase.from("exchange_accounts").select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("user_id", user.id).eq("is_active", true).limit(1).maybeSingle()
     : supabase.from("exchange_accounts").select("id, label, exchange, environment, api_key_enc, api_secret_enc, paper_balance").eq("is_active", true).limit(1).maybeSingle();
   const { data: rawAccount } = await rawAccountQuery;
   const account = accountConnectionSchema.nullable().safeParse(rawAccount).data ?? null;
+
   let balance: number | null = null;
   if (account) {
     try { balance = (await createAccountClient(account).getBalance()).equity; } catch { balance = null; }
   }
 
-  const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
-  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [messagesResult, openTradesResult, todayResult, weekResult, riskResult] = account ? await Promise.all([
+  const [messagesResult, openTradesResult, riskResult] = account ? await Promise.all([
     supabase.from("chat_messages").select("id, role, kind, content, payload, created_at").eq("account_id", account.id).order("created_at", { ascending: false }).limit(40),
     supabase.from("trades").select("id, symbol, side, status, entry_avg, qty, leverage, sl, realized_pnl").eq("account_id", account.id).in("status", ["entry_open", "active"]).order("opened_at", { ascending: false }).limit(1),
-    supabase.from("trades").select("realized_pnl").eq("account_id", account.id).gte("closed_at", dayStart.toISOString()),
-    supabase.from("trades").select("realized_pnl").eq("account_id", account.id).gte("closed_at", weekStart).eq("status", "closed"),
     supabase.from("risk_settings").select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch").eq("account_id", account.id).maybeSingle()
-  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: null }];
+  ]) : [{ data: [] }, { data: [] }, { data: null }];
 
   const parsedMessages = z.array(messageSchema).safeParse(messagesResult.data ?? []);
   let messages = parsedMessages.success ? parsedMessages.data : [];
 
-  // Proactive Seeding & Fresh Universe Momentum:
-  // If chat is empty OR the newest signal is older than 5 minutes, auto-generate fresh setup from live universe!
+  // Proactive Seeding: auto-generate fresh setup if empty or stale
   const latestTimestamp = messages[0]?.created_at ? new Date(messages[0].created_at).getTime() : 0;
   const isFeedStale = !latestTimestamp || (Date.now() - latestTimestamp) > 5 * 60 * 1000;
 
@@ -99,80 +99,55 @@ export default async function ChatPage({
         maxOpenPositions: Number(riskRow?.max_open_positions ?? 3),
         maxDailyLossPct: Number(riskRow?.max_daily_loss_pct ?? 5),
         killSwitch: Boolean(riskRow?.kill_switch)
-      }, { balance: balance ?? 10000, marketPrice: ticker.lastPrice, openPositions: 0, dailyPnl: 0 });
+      }, {
+        balance: balance ?? 20000,
+        marketPrice: ticker.lastPrice,
+        openPositions: 0,
+        dailyPnl: 0
+      });
 
-      const { data: stored } = await supabase.from("signals").insert({
+      const { data: storedSignal } = await supabase.from("signals").insert({
         account_id: account.id,
         raw_text: opp.rawSignal,
         parsed: preview,
-        source: "universe_scanner",
+        source: "nemotron_autonomous",
         status: "preview"
-      }).select("id").single();
+      }).select("id").maybeSingle();
 
-      if (stored) {
-        const storedSignal = z.object({ id: z.string().uuid() }).parse(stored);
-        const pulseChange = bestOpp.change24hPct;
-        const [sigMsg, pulseMsg] = await Promise.all([
-          supabase.from("chat_messages").insert({
-            account_id: account.id,
-            role: "assistant",
-            kind: "ai_signal",
-            content: `Nemotron 3 Ultra: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
-            payload: {
-              opportunity: opp,
-              preview,
-              signalId: storedSignal.id,
-              rawSignal: opp.rawSignal,
-              historicalMatch: opp.historicalMatch
-            }
-          }).select("id, role, kind, content, payload, created_at").single(),
-          supabase.from("chat_messages").insert({
-            account_id: account.id,
-            role: "system",
-            kind: "market_pulse",
-            content: `${activeSymbol} ${pulseChange >= 0 ? "+" : ""}${pulseChange}% 24h · 24/7 BYBIT UNIVERSE SCANNER`,
-            payload: {
-              symbol: activeSymbol,
-              changePct: pulseChange,
-              timeframeSec: 60,
-              price: ticker.lastPrice,
-              eventType: pulseChange >= 0 ? "volume_spike" : "bearish_breakdown",
-              rationale: `Live Bybit linear price @ $${ticker.lastPrice}. Institutional momentum registered with ${pulseChange}% 24h delta. Order flow tracking active.`,
-              historicalMatch: {
-                sampleCount: 42,
-                winRatePct: 71.4,
-                patternName: "Momentum Breakout & Volume Expansion"
-              }
-            }
-          }).select("id, role, kind, content, payload, created_at").single()
-        ]);
+      const parsedSignalId = z.object({ id: z.string() }).safeParse(storedSignal);
+      const signalId: string | null = parsedSignalId.success ? parsedSignalId.data.id : null;
 
-        const newItems = [
-          ...(sigMsg.data ? [messageSchema.parse(sigMsg.data)] : []),
-          ...(pulseMsg.data ? [messageSchema.parse(pulseMsg.data)] : [])
-        ];
-        messages = [...newItems, ...messages];
+      const { data: newMsg } = await supabase.from("chat_messages").insert({
+        account_id: account.id,
+        role: "assistant",
+        kind: "ai_signal",
+        content: `Nemotron AI Setup: ${opp.symbol} ${opp.side.toUpperCase()} · ${opp.strategy}`,
+        payload: {
+          opportunity: opp,
+          preview,
+          signalId,
+          rawSignal: opp.rawSignal
+        }
+      }).select("id, role, kind, content, payload, created_at").maybeSingle();
+
+      if (newMsg) {
+        messages = [messageSchema.parse(newMsg), ...messages];
       }
     } catch {
-      // Graceful fallback
+      // Continue without auto-seeding
     }
   }
 
+  // Active Trade Details
   const parsedTrades = z.array(tradeSchema).safeParse(openTradesResult.data ?? []);
-  const activeTrade = parsedTrades.success ? parsedTrades.data[0] ?? null : null;
+  const activeTrade = parsedTrades.success && parsedTrades.data.length ? parsedTrades.data[0] : null;
 
   let activeTradeMarkPrice: number | null = null;
-  let activeTradeTargets: Array<{ target_index: number; price: number; share_pct: number; status: string }> = [];
-
   if (account && activeTrade) {
     try {
       const client = createAccountClient(account);
-      const [tTicker, targetsRes] = await Promise.all([
-        client.getTicker(activeTrade.symbol).catch(() => null),
-        supabase.from("trade_targets").select("target_index, price, share_pct, status").eq("trade_id", activeTrade.id).order("target_index", { ascending: true })
-      ]);
+      const tTicker = await client.getTicker(activeTrade.symbol).catch(() => null);
       activeTradeMarkPrice = tTicker?.lastPrice ?? null;
-      activeTradeTargets = targetsRes.data ?? [];
     } catch {
       // fallback
     }
@@ -181,246 +156,154 @@ export default async function ChatPage({
   const currentMark = activeTradeMarkPrice ?? activeTrade?.entry_avg ?? 0;
   const pnlDiff = activeTrade ? (activeTrade.side === "long" ? currentMark - (activeTrade.entry_avg ?? currentMark) : (activeTrade.entry_avg ?? currentMark) - currentMark) : 0;
   const unrealizedPnl = activeTrade ? pnlDiff * (activeTrade.qty ?? 0) : 0;
-  const posMargin = activeTrade && activeTrade.entry_avg ? (activeTrade.entry_avg * (activeTrade.qty ?? 0)) / (activeTrade.leverage ?? 1) : 0;
-  const unrealizedRoiPct = posMargin > 0 ? (unrealizedPnl / posMargin) * 100 : 0;
 
-  const todayPnl = (todayResult.data ?? []).reduce((sum: number, row: { realized_pnl: unknown }) => sum + Number(row.realized_pnl ?? 0), 0);
-  const weekly = weekResult.data ?? [];
-  const winRate = weekly.length ? Math.round(weekly.filter((row: { realized_pnl: unknown }) => Number(row.realized_pnl ?? 0) > 0).length / weekly.length * 100) : null;
-  const maxDailyLoss = Number((riskResult.data as { max_daily_loss_pct?: unknown } | null)?.max_daily_loss_pct ?? 0);
-  const openRisk = activeTrade && balance ? Math.abs((activeTrade.entry_avg ?? 0) - (activeTrade.sl ?? 0)) * (activeTrade.qty ?? 0) / balance * 100 : 0;
-
-  // Split messages by active channel
-  const pulseMessages = messages.filter(m => m.kind === "market_pulse");
   const signalMessages = messages.filter(m => m.kind !== "market_pulse");
 
-  const signalSymbols = Array.from(new Set(
-    signalMessages.map(m => {
-      const p = (m.payload && typeof m.payload === "object" ? m.payload : {}) as Record<string, unknown>;
-      const opp = p.opportunity as { symbol?: string } | undefined;
-      const prev = p.preview as { signal?: { symbol?: string } } | undefined;
-      return opp?.symbol ?? prev?.signal?.symbol ?? (typeof p.symbol === "string" ? p.symbol : null);
-    }).filter(Boolean) as string[]
-  ));
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%" }}>
-      <section className="metric-grid">
-        <article className="panel metric"><div className="metric-data"><span className="kicker">Equity</span><strong className="mono">{balance === null ? "—" : `${balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`}</strong></div></article>
-        <article className="panel metric"><div className="metric-data"><span className="kicker">Today PnL</span><strong className={`mono ${todayPnl >= 0 ? "positive" : "negative"}`}>{todayPnl >= 0 ? "+" : ""}${todayPnl.toFixed(2)}</strong></div></article>
-        <article className="panel metric"><div className="metric-data"><span className="kicker">Open risk</span><strong className="mono">{openRisk.toFixed(2)}%<small>of {maxDailyLoss.toFixed(1)}% daily limit</small></strong></div></article>
-        <article className="panel metric"><div className="metric-data"><span className="kicker">Win rate · 7D</span><strong className="mono">{winRate === null ? "—" : `${winRate}%`}</strong></div></article>
-      </section>
-      {query.error ? <p className="notice error">{query.error}</p> : null}
-      {query.executed ? <p className="notice success">⚡ Ордер успішно виконано! Позицію відкрито, рівні SL та TP розміщено на біржі.</p> : null}
-      {query.queued ? <p className="notice success">⚡ Ордер передано у виконання! Відстежуйте відкриту позицію на панелі терміналу праворуч.</p> : null}
-      <section className="trade-workspace">
-        <div className="panel chat-panel">
-          {/* Channel Selector Tabs */}
-          <div className="channel-tabs">
-            <Link
-              href="/dashboard/chat?tab=signals"
-              className={`channel-tab ${activeTab === "signals" ? "active" : ""}`}
-            >
-              <span>⚡ Vexqora Signals</span>
-              <span className="ai-score-badge" style={{ padding: "1px 6px" }}>{signalMessages.length}</span>
-            </Link>
-            <Link
-              href="/dashboard/chat?tab=pulse"
-              className={`channel-tab ${activeTab === "pulse" ? "active" : ""}`}
-            >
-              <span>📡 Vexqora Pulse (Market Activity)</span>
-              <span className="memory-badge" style={{ padding: "1px 6px" }}>913 Pairs 24/7</span>
-            </Link>
+    <div className="chat-container">
+      {/* Toast Notifications */}
+      {query.error && <p className="notice error">{query.error}</p>}
+      {query.executed && <p className="notice success">Signal executed! Position opened on exchange.</p>}
+      {query.queued && <p className="notice success">Signal queued for execution.</p>}
+
+      {/* Active Position Banner (OKX style) */}
+      {activeTrade && (
+        <div
+          className="cd"
+          style={{
+            padding: "14px 18px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "12px",
+            border: "1px solid #42F5B944"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "4px", background: "#42F5B9", display: "inline-block" }} />
+            <b style={{ font: "700 15px Inter", color: "#FFFFFF" }}>{activeTrade.symbol}</b>
+            <span className={`tg ${activeTrade.side === "long" ? "lg" : "sh"}`}>
+              {activeTrade.side.toUpperCase()} {activeTrade.leverage ?? 5}x
+            </span>
+            <span className="lb">Entry: {formatPrice(activeTrade.entry_avg ?? 0)}</span>
+            <span className="lb">Mark: {formatPrice(currentMark)}</span>
           </div>
 
-          {/* Real-time Bybit 916 Universe Live Poller */}
-          <LiveUniversePoller />
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginLeft: "auto" }}>
+            <span
+              style={{
+                font: "700 15px Inter",
+                fontVariantNumeric: "tabular-nums",
+                color: unrealizedPnl >= 0 ? "#42F5B9" : "#FF5A6E"
+              }}
+            >
+              {unrealizedPnl >= 0 ? "+" : ""}{unrealizedPnl.toFixed(2)} USDT
+            </span>
 
-          {/* AI Scanner Bar: Universe + Custom Pair Scanner */}
-          <div className="ai-scanner-bar">
-            <div className="ai-scanner-pulse">
-              <span className="ai-pulse-dot" />
-              <span>Bybit 916 пар</span>
-            </div>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="UNIVERSE" />
-              <button className="button primary" style={{ minHeight: "30px", fontSize: "11px", padding: "0 10px", fontWeight: "700" }} type="submit">
-                ⚡ Сканувати весь ринок
-              </button>
-            </form>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="SUIUSDT" />
-              <button className="ai-chip" type="submit">🔥 SUI</button>
-            </form>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="DOGEUSDT" />
-              <button className="ai-chip" type="submit">⚡ DOGE</button>
-            </form>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="PEPEUSDT" />
-              <button className="ai-chip" type="submit">🐸 PEPE</button>
-            </form>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="SOLUSDT" />
-              <button className="ai-chip" type="submit">💎 SOL</button>
-            </form>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
-              <input type="hidden" name="symbol" value="BTCUSDT" />
-              <button className="ai-chip" type="submit">🎯 BTC</button>
-            </form>
-            <form action={scanMarketOpportunityAction} style={{ display: "inline-flex", gap: "4px", marginLeft: "auto" }}>
-              <input
-                type="text"
-                name="symbol"
-                placeholder="Введіть пару (NEAR, TIA, AVAX...)"
-                style={{
-                  minHeight: "28px",
-                  padding: "0 8px",
-                  fontSize: "11px",
-                  background: "#0e0b1a",
-                  border: "1px solid var(--line)",
-                  borderRadius: "5px",
-                  color: "var(--text-main)",
-                  width: "190px"
-                }}
-              />
-              <button className="button secondary" style={{ minHeight: "28px", fontSize: "11px", padding: "0 8px" }} type="submit">
-                ШІ Аналіз
+            <Link
+              href={`/dashboard/signal/${activeTrade.symbol}`}
+              className="bt"
+              style={{ height: "30px", padding: "0 10px", fontSize: "12px" }}
+            >
+              Open chart →
+            </Link>
+
+            <form action={closeTradePosition}>
+              <input type="hidden" name="tradeId" value={activeTrade.id} />
+              <button
+                type="submit"
+                className="bt dn"
+                style={{ height: "30px", padding: "0 10px", fontSize: "12px" }}
+              >
+                Close
               </button>
             </form>
           </div>
-
-          <div className="chat-scroll">
-            {activeTab === "pulse" ? (
-              pulseMessages.length ? (
-                pulseMessages.map((message) => {
-                  const payload = (message.payload && typeof message.payload === "object" ? message.payload : {}) as Record<string, unknown>;
-                  const symbol = typeof payload.symbol === "string" ? payload.symbol : "BTCUSDT";
-                  const changePct = typeof payload.changePct === "number" ? payload.changePct : 0;
-                  const timeframeSec = typeof payload.timeframeSec === "number" ? payload.timeframeSec : 30;
-                  const eventType = typeof payload.eventType === "string" ? payload.eventType : "price_spike";
-                  const rationale = typeof payload.rationale === "string" ? payload.rationale : message.content;
-                  const hist = payload.historicalMatch && typeof payload.historicalMatch === "object" ? payload.historicalMatch as HistoricalPatternMatch : undefined;
-
-                  return (
-                    <article className="pulse-card" key={message.id}>
-                      <div className="pulse-header">
-                        <div className="pulse-title">
-                          <strong style={{ fontSize: "16px" }}>{symbol}</strong>
-                          <span className={`badge ${changePct >= 0 ? "long" : "short"}`}>
-                            {changePct >= 0 ? "+" : ""}{changePct.toFixed(2)}% / {timeframeSec}s
-                          </span>
-                          <span className="badge demo">Bybit Linear</span>
-                        </div>
-                        <div className="pulse-tags">
-                          <span className="pulse-tag">{eventType.replaceAll("_", " ").toUpperCase()}</span>
-                          <span className="pulse-tag">HIGH VOLATILITY</span>
-                          <span className="pulse-tag mono" style={{ color: "var(--soft-violet)" }}>
-                            ⏱ {formatTimeAgo(message.created_at)}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="pulse-rationale">
-                        <strong>Anomaly Detection:</strong> {rationale}
-                      </div>
-
-                      {hist ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                          <span className="memory-badge">
-                            Vexqora Memory: {Number(hist.sampleCount ?? 0)} Historical Matches · {Number(hist.winRatePct ?? 0)}% Win Rate
-                          </span>
-                        </div>
-                      ) : null}
-
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
-                        <span style={{ fontSize: "12px", color: "var(--muted)" }}>Status: Monitoring · Awaiting confirmation</span>
-                        <form action={analyzePulseAction}>
-                          <input type="hidden" name="symbol" value={symbol} />
-                          <input type="hidden" name="eventType" value={eventType} />
-                          <input type="hidden" name="changePct" value={String(changePct)} />
-                          <button className="button primary" style={{ minHeight: "34px", padding: "0 14px", fontSize: "12px" }}>
-                            🧠 Analyze with Nemotron 3 Ultra
-                          </button>
-                        </form>
-                      </div>
-                    </article>
-                  );
-                })
-              ) : (
-                <div className="empty-state">
-                  <VexqoraLogo size={42} />
-                  <h2>Vexqora Pulse Monitoring</h2>
-                  <p>24/7 background universe scanner is monitoring all 913 Bybit linear perpetual pairs for price & volume spikes.</p>
-                </div>
-              )
-            ) : (
-              signalMessages.length ? (
-                signalMessages.map((message) => {
-                  const payload = (message.payload && typeof message.payload === "object" ? message.payload : {}) as Record<string, unknown>;
-                  const opp = payload.opportunity && typeof payload.opportunity === "object" ? payload.opportunity as unknown as AISignalOpportunity : undefined;
-                  const preview = payload.preview && typeof payload.preview === "object" ? payload.preview as unknown as TradePreview : undefined;
-                  const signalId = typeof payload.signalId === "string" ? payload.signalId : null;
-                  const rawSignal = typeof payload.rawSignal === "string" ? payload.rawSignal : null;
-                  const hist = payload.historicalMatch && typeof payload.historicalMatch === "object" ? payload.historicalMatch as HistoricalPatternMatch : undefined;
-
-                  if ((message.kind === "ai_signal" && opp) || message.kind === "signal_preview") {
-                    return (
-                      <SignalCard
-                        key={message.id}
-                        messageId={message.id}
-                        createdAt={message.created_at}
-                        opp={opp}
-                        preview={preview}
-                        signalId={signalId}
-                        rawSignal={rawSignal}
-                        hist={hist}
-                      />
-                    );
-                  }
-
-                  return (
-                    <article className={`message ${message.role}`} key={message.id}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <small>{String(message.kind || "").replaceAll("_", " ")}</small>
-                        <small style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{formatTimeAgo(message.created_at)}</small>
-                      </div>
-                      <p>{message.content}</p>
-                    </article>
-                  );
-                })
-              ) : (
-                <div className="empty-state">
-                  <VexqoraLogo size={42} />
-                  <h2>Vexqora Signal Desk</h2>
-                  <p>Nvidia Nemotron 3 Ultra is actively scanning Bybit market setups. Click a pair above to generate an immediate verified signal.</p>
-                </div>
-              )
-            )}
-          </div>
-
-          {account ? (
-            <SignalComposer />
-          ) : (
-            <p className="notice error" style={{ marginTop: "auto" }}>
-              Your workspace is not initialized. Open Accounts and create Vexqora Paper.
-            </p>
-          )}
         </div>
+      )}
 
-        <ProTerminalStage
-          activeTrade={activeTrade}
-          currentMark={currentMark}
-          activeTradeTargets={activeTradeTargets}
-          unrealizedPnl={unrealizedPnl}
-          unrealizedRoiPct={unrealizedRoiPct}
-          closeTradeAction={closeTradePosition}
-          closeAllAction={closeAllPositions}
-          defaultSymbol={activeTrade?.symbol ?? signalSymbols[0] ?? "BTCUSDT"}
-          signalSymbols={signalSymbols}
-        />
-      </section>
+      {/* Universe Scanner Status */}
+      <LiveUniversePoller />
+
+      {/* Quick Pair Scan Pills */}
+      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+        <span className="lb" style={{ marginRight: "4px" }}>Quick Scan:</span>
+        {["BTCUSDT", "ETHUSDT", "SOLUSDT", "SUIUSDT", "PEPEUSDT", "DOGEUSDT"].map((sym) => (
+          <form key={sym} action={scanMarketOpportunityAction} style={{ display: "inline-flex" }}>
+            <input type="hidden" name="symbol" value={sym} />
+            <button
+              type="submit"
+              className="tg gy"
+              style={{ cursor: "pointer", border: "1px solid #262626" }}
+            >
+              {sym.replace("USDT", "")}
+            </button>
+          </form>
+        ))}
+      </div>
+
+      {/* Signal Stream */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        {signalMessages.length === 0 ? (
+          <div className="cd" style={{ padding: "40px 20px", textAlign: "center", color: "#9A9A9A" }}>
+            <VexqoraLogo size={36} />
+            <div style={{ font: "600 16px Inter", color: "#FFFFFF", marginTop: "12px" }}>Vexqora Signal Stream</div>
+            <p className="lb" style={{ marginTop: "6px" }}>
+              Scanning Bybit linear setups. Click a pair above or type a signal in the composer below.
+            </p>
+          </div>
+        ) : (
+          signalMessages.map((message) => {
+            const payload = (message.payload && typeof message.payload === "object" ? message.payload : {}) as Record<string, unknown>;
+            const opp = payload.opportunity as AISignalOpportunity | undefined;
+            const preview = payload.preview as TradePreview | undefined;
+            const signalId = typeof payload.signalId === "string" ? payload.signalId : null;
+            const rawSignal = typeof payload.rawSignal === "string" ? payload.rawSignal : null;
+            const hist = payload.historicalMatch as HistoricalPatternMatch | undefined;
+
+            if ((message.kind === "ai_signal" && opp) || message.kind === "signal_preview") {
+              return (
+                <SignalCard
+                  key={message.id}
+                  messageId={message.id}
+                  createdAt={message.created_at}
+                  opp={opp}
+                  preview={preview}
+                  signalId={signalId}
+                  rawSignal={rawSignal}
+                  hist={hist}
+                />
+              );
+            }
+
+            return (
+              <article
+                key={message.id}
+                className={`message ${message.role}`}
+                style={{ width: "100%", maxWidth: "100%" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <small style={{ color: "#9A9A9A" }}>{String(message.kind || "").replaceAll("_", " ")}</small>
+                  <small style={{ color: "#9A9A9A", fontVariantNumeric: "tabular-nums" }}>
+                    {formatTimeAgo(message.created_at)}
+                  </small>
+                </div>
+                <p style={{ color: "#FFFFFF" }}>{message.content}</p>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      {/* Signal Composer */}
+      {account ? (
+        <SignalComposer />
+      ) : (
+        <p className="notice error">
+          Workspace is initializing. Visit Accounts to verify your connection.
+        </p>
+      )}
     </div>
   );
 }
