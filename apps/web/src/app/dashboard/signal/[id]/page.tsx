@@ -196,12 +196,16 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   const historyTrades: TradeListItem[] = [];
 
   if (account) {
+    const symbolOrFilter = signalRecord
+      ? `symbol.eq.${formattedSymbol},symbol.eq.${formattedSymbol.replace("USDT", "")},signal_id.eq.${signalRecord.id}`
+      : `symbol.eq.${formattedSymbol},symbol.eq.${formattedSymbol.replace("USDT", "")}`;
+
     const { data: rawTrades } = await supabase
       .from("trades")
       .select("id, symbol, side, status, entry_avg, qty, leverage, sl, realized_pnl, opened_at, signal_id")
       .eq("account_id", account.id)
-      .eq("symbol", formattedSymbol)
-      .order("opened_at", { ascending: false })
+      .or(symbolOrFilter)
+      .order("opened_at", { ascending: false, nullsFirst: false })
       .limit(10);
 
     if (rawTrades) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { formatCryptoPrice } from "../../../../lib/format";
 
 interface SignalExecutionPanelProps {
@@ -78,12 +79,15 @@ export function SignalExecutionPanel({
   const estSlLossUsdt = (margin * (slDiffPct / 100) * leverage).toFixed(2);
   const estTpGainUsdt = (margin * (tpDiffPct / 100) * leverage).toFixed(2);
 
+  const router = useRouter();
+
   const handleSubmit = () => {
     setStatusMsg(null);
     startTransition(async () => {
       try {
         await onExecute({ orderType, margin, leverage });
         setStatusMsg({ text: `Позицію успішно відкрито! ${side.toUpperCase()} ${symbol} на $${margin} (${leverage}x).` });
+        router.refresh();
       } catch (err) {
         setStatusMsg({ text: err instanceof Error ? err.message : "Помилка відкриття ордера", error: true });
       }

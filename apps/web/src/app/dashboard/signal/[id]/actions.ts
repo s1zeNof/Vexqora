@@ -103,18 +103,21 @@ lev ${leverage}`;
     await supabase.from("signals").update({ status: "confirmed" }).eq("id", targetSignalId);
   }
 
-  // Create trade entry
+  // Create trade entry with active status and opened_at timestamp
+  const nowIso = new Date().toISOString();
   const { data: trade, error: tradeErr } = await supabase.from("trades").insert({
     account_id: account.id,
     signal_id: targetSignalId,
     symbol: preview.signal.symbol,
     side: preview.signal.side,
-    status: "entry_open",
+    status: "active",
     entry_avg: preview.entryPrice,
     qty: preview.qty,
     leverage: preview.leverage,
     sl: preview.signal.stopLoss,
-    realized_pnl: 0
+    trailing_stop: preview.signal.trailingStop ?? null,
+    realized_pnl: 0,
+    opened_at: nowIso
   }).select("id").single();
 
   const parsedTrade = z.object({ id: z.string() }).safeParse(trade);
@@ -127,9 +130,34 @@ lev ${leverage}`;
   // Execute entry on exchange/paper
   const entrySubmission = await submitEntry(client, preview, tradeId);
 
-  // Protect filled position
-  if (entrySubmission.status === "entry_open") {
-    await protectFilledPosition(client, preview, tradeId);
+  // Persist entry order
+  await supabase.from("orders").insert({
+    trade_id: tradeId,
+    exchange_order_id: entrySubmission.entryOrder.orderId,
+    order_link_id: entrySubmission.entryOrder.orderLinkId ?? `entry-${tradeId}`,
+    type: preview.signal.entry.type === "market" ? "market" : "limit",
+    side: preview.signal.side === "long" ? "buy" : "sell",
+    price: preview.entryPrice,
+    qty: preview.qty,
+    status: "filled",
+    reduce_only: false,
+    raw: { preview: JSON.parse(JSON.stringify(preview)) as Record<string, unknown>, exchange: account.exchange }
+  });
+
+  // Protect filled position with SL and TP
+  const protection = await protectFilledPosition(client, preview, tradeId);
+  for (const [idx, tpOrder] of protection.takeProfitOrders.entries()) {
+    const target = preview.signal.takeProfits[idx];
+    if (target) {
+      await supabase.from("trade_targets").insert({
+        trade_id: tradeId,
+        idx: idx + 1,
+        price: target.price,
+        share_pct: target.sharePct,
+        status: "open",
+        order_id: tpOrder.orderId
+      });
+    }
   }
 
   revalidatePath(`/dashboard/signal/${symbol}`);
@@ -138,7 +166,9 @@ lev ${leverage}`;
   }
   revalidatePath("/dashboard/signals");
   revalidatePath("/dashboard/positions");
+  revalidatePath("/dashboard/history");
   revalidatePath("/dashboard/chat");
+  revalidatePath("/dashboard");
 }
 
 export async function deleteSignalAction(signalId: string): Promise<void> {
