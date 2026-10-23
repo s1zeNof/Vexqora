@@ -184,11 +184,12 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     leverage: number;
     entryPrice: number;
     markPrice: number;
-    pnl: number;
+    qty: number;
+    pnlUsdt: number;
+    pnlPct: number;
     sl: number | null;
     tp1: number | null;
     status: string;
-    qty?: number | undefined;
     opened_at?: string | undefined;
   }
 
@@ -210,23 +211,38 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
     if (rawTrades) {
       for (const t of rawTrades) {
+        const side = t.side === "short" ? ("short" as const) : ("long" as const);
+        const leverage = Number(t.leverage ?? 5);
+        const entryPrice = Number(t.entry_avg ?? currentPrice);
+        const qty = Number(t.qty ?? 0);
+        const direction = side === "long" ? 1 : -1;
+        const priceDiff = (currentPrice - entryPrice) * direction;
+
+        const isActive = t.status === "active" || t.status === "entry_open";
+        const pnlUsdt = isActive
+          ? (qty > 0 ? priceDiff * qty : 0)
+          : Number(t.realized_pnl ?? 0);
+        const pnlPct = isActive
+          ? (entryPrice > 0 ? (priceDiff / entryPrice) * 100 * leverage : 0)
+          : (entryPrice > 0 && qty > 0 ? (pnlUsdt / ((entryPrice * qty) / leverage)) * 100 : 0);
+
         const item: TradeListItem = {
           id: String(t.id),
           symbol: String(t.symbol),
-          side: t.side === "short" ? ("short" as const) : ("long" as const),
-          leverage: Number(t.leverage ?? 5),
-          entryPrice: Number(t.entry_avg ?? currentPrice),
+          side,
+          leverage,
+          entryPrice,
           markPrice: currentPrice,
-          pnl: Number(t.realized_pnl ?? 0),
+          qty,
+          pnlUsdt: Number(pnlUsdt.toFixed(2)),
+          pnlPct: Number(pnlPct.toFixed(2)),
           sl: t.sl ? Number(t.sl) : null,
           tp1: tp1,
           status: String(t.status),
-          qty: Number(t.qty ?? 0),
           opened_at: t.opened_at ? String(t.opened_at) : undefined
         };
+
         if (t.status === "active" || t.status === "entry_open") {
-          const priceDiff = (currentPrice - item.entryPrice) * (item.side === "long" ? 1 : -1);
-          item.pnl = Number(((priceDiff / item.entryPrice) * 100 * item.leverage).toFixed(2));
           tradesList.push(item);
         } else {
           historyTrades.push(item);
@@ -282,7 +298,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
           {activePosition ? (
             <span className="tg lg" style={{ background: "#42F5B922", color: "#42F5B9" }}>
-              ⚡ В трейді: {isPaperTrading ? "Paper" : "Live"} (+{activePosition.pnl}%)
+              ⚡ В трейді: {isPaperTrading ? "Paper" : "Live"} ({activePosition.pnlUsdt >= 0 ? "+" : ""}{activePosition.pnlUsdt.toFixed(2)} USDT / {activePosition.pnlPct >= 0 ? "+" : ""}{activePosition.pnlPct.toFixed(2)}%)
             </span>
           ) : null}
 
@@ -386,11 +402,13 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
                 style={{
                   fontSize: "14px",
                   margin: "2px 0 0",
-                  color: (activePosition?.pnl ?? recentHistoricalTrade?.pnl ?? 0) >= 0 ? "#42F5B9" : "#FF5A6E"
+                  color: (activePosition?.pnlUsdt ?? recentHistoricalTrade?.pnlUsdt ?? 0) >= 0 ? "#42F5B9" : "#FF5A6E"
                 }}
               >
-                {(activePosition?.pnl ?? recentHistoricalTrade?.pnl ?? 0) >= 0 ? "+" : ""}
-                {(activePosition?.pnl ?? recentHistoricalTrade?.pnl ?? 0).toFixed(2)}%
+                {(activePosition?.pnlUsdt ?? recentHistoricalTrade?.pnlUsdt ?? 0) >= 0 ? "+" : ""}
+                {(activePosition?.pnlUsdt ?? recentHistoricalTrade?.pnlUsdt ?? 0).toFixed(2)} USDT (
+                {(activePosition?.pnlPct ?? recentHistoricalTrade?.pnlPct ?? 0) >= 0 ? "+" : ""}
+                {(activePosition?.pnlPct ?? recentHistoricalTrade?.pnlPct ?? 0).toFixed(2)}%)
               </div>
             </div>
           </div>
@@ -446,7 +464,8 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
               side: activePosition.side,
               leverage: activePosition.leverage,
               entryPrice: activePosition.entryPrice,
-              pnl: activePosition.pnl,
+              pnlUsdt: activePosition.pnlUsdt,
+              pnlPct: activePosition.pnlPct,
               isPaper: isPaperTrading
             } : null}
           />

@@ -18,7 +18,8 @@ interface SignalChartProps {
     side: "long" | "short";
     leverage: number;
     entryPrice: number;
-    pnl: number;
+    pnlUsdt: number;
+    pnlPct: number;
     isPaper: boolean;
   } | null;
 }
@@ -311,9 +312,9 @@ export function SignalChart({
             {position && entry > 0 && (
               <g>
                 <rect
-                  x="500"
+                  x="460"
                   y={getY(entry) - 13}
-                  width="220"
+                  width="270"
                   height="26"
                   rx="6"
                   fill="#1A1A1A"
@@ -321,14 +322,14 @@ export function SignalChart({
                   strokeWidth="1"
                 />
                 <text
-                  x="510"
+                  x="470"
                   y={getY(entry) + 4}
                   fill="#FFFFFF"
                   fontSize="12"
                   fontWeight="600"
                   fontFamily="Inter, sans-serif"
                 >
-                  {position.isPaper ? "Paper" : "Live"} {position.side.toUpperCase()} {position.leverage}x · {position.pnl >= 0 ? "+" : ""}{position.pnl.toFixed(2)} USDT
+                  {position.isPaper ? "Paper" : "Live"} {position.side.toUpperCase()} {position.leverage}x · {position.pnlUsdt >= 0 ? "+" : ""}{position.pnlUsdt.toFixed(2)} USDT ({position.pnlPct >= 0 ? "+" : ""}{position.pnlPct.toFixed(2)}%)
                 </text>
               </g>
             )}
