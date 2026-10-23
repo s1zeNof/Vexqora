@@ -274,13 +274,99 @@ p.lead { color: var(--muted); font-size: clamp(15px, 2vw, 18px); line-height: 1.
 .metric strong { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .metric small { color: var(--muted); font-size: 11px; margin-left: 4px; }
 
-/* Trading workspace (Dual column) */
+/* Trading workspace (Institutional OKX Pro Layout: Signals 420px + Wide Stage 1fr) */
 .trade-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: 420px minmax(0, 1fr);
   gap: 16px;
   flex: 1;
   min-height: calc(100vh - 210px);
+  width: 100%;
+}
+.trade-workspace.chart-only {
+  grid-template-columns: 1fr;
+}
+.trade-workspace.signals-only {
+  grid-template-columns: 1fr;
+}
+
+.pro-terminal-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  width: 100%;
+}
+
+.pro-chart-card {
+  background: var(--panel-dark, #0E0B1A);
+  border: 1px solid var(--border-color, #2A2145);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(7, 5, 15, 0.6);
+}
+
+.pro-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #0e0b1a;
+  border-bottom: 1px solid var(--border-color, #2A2145);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pro-chart-body {
+  width: 100%;
+  height: 540px;
+  min-height: 500px;
+  background: #07050f;
+  position: relative;
+}
+
+.pro-position-bar {
+  background: var(--panel-dark, #0E0B1A);
+  border: 1px solid var(--border-color, #2A2145);
+  border-radius: 12px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pro-pos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color, #2A2145);
+  padding-bottom: 8px;
+}
+
+.pro-pos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  align-items: center;
+}
+
+.pro-pos-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pro-pos-item span {
+  font-size: 10px;
+  color: var(--text-dim, #A59CC4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pro-pos-item strong {
+  font-size: 13px;
 }
 .chat-panel {
   padding: 20px;

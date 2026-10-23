@@ -29,6 +29,7 @@ export function SignalCard({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"chart" | "smc" | "targets" | "mobile" | "vision">("chart");
   const [customMargin, setCustomMargin] = useState<number>(100);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [visionImage, setVisionImage] = useState<string | null>(null);
   const [visionAnalyzing, setVisionAnalyzing] = useState(false);
@@ -227,16 +228,16 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pc
             📈 Графік / $
           </button>
           {signalId ? (
-            <form action={confirmSignal}>
+            <form action={confirmSignal} onSubmit={() => setIsSubmitting(true)}>
               <input type="hidden" name="signalId" value={signalId} />
               <input type="hidden" name="margin" value={effectiveMargin} />
               <button
                 type="submit"
                 className="button primary compact-btn-primary"
-                disabled={isPending}
+                disabled={isPending || isSubmitting}
                 title={`Увійти в угоду з маржею ${effectiveMargin} USDT (${leverage}x)`}
               >
-                ⚡ Увійти (${effectiveMargin})
+                {isSubmitting ? "⏳ Відкриваю..." : `⚡ Увійти ($${effectiveMargin})`}
               </button>
             </form>
           ) : null}
@@ -553,16 +554,16 @@ ${takeProfits.map(t => `🎯 TP${t.idx}: $${formatCryptoPrice(t.price)} (+${t.pc
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                   {signalId ? (
-                    <form action={confirmSignal}>
+                    <form action={confirmSignal} onSubmit={() => setIsSubmitting(true)}>
                       <input type="hidden" name="signalId" value={signalId} />
                       <input type="hidden" name="margin" value={effectiveMargin} />
                       <button
                         type="submit"
                         className="button primary"
-                        disabled={isPending}
+                        disabled={isPending || isSubmitting}
                         style={{ minHeight: "38px", fontSize: "13px", fontWeight: "700" }}
                       >
-                        ⚡ Увійти в угоду ({effectiveMargin}$ USDT)
+                        {isSubmitting ? "⏳ Відкриваю позицію..." : `⚡ Увійти в угоду (${effectiveMargin}$ USDT)`}
                       </button>
                     </form>
                   ) : null}

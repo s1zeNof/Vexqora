@@ -18,7 +18,7 @@ import { analyzePulseAction, scanMarketOpportunityAction } from "./actions";
 import { LiveUniversePoller } from "./live-poller";
 import { SignalCard } from "./signal-card";
 import { SignalComposer } from "./signal-composer";
-import { TerminalSidePanel } from "./terminal-side-panel";
+import { ProTerminalStage } from "./pro-terminal-stage";
 
 const messageSchema = z.object({
   id: z.string(),
@@ -193,6 +193,15 @@ export default async function ChatPage({
   // Split messages by active channel
   const pulseMessages = messages.filter(m => m.kind === "market_pulse");
   const signalMessages = messages.filter(m => m.kind !== "market_pulse");
+
+  const signalSymbols = Array.from(new Set(
+    signalMessages.map(m => {
+      const p = (m.payload && typeof m.payload === "object" ? m.payload : {}) as Record<string, unknown>;
+      const opp = p.opportunity as { symbol?: string } | undefined;
+      const prev = p.preview as { signal?: { symbol?: string } } | undefined;
+      return opp?.symbol ?? prev?.signal?.symbol ?? (typeof p.symbol === "string" ? p.symbol : null);
+    }).filter(Boolean) as string[]
+  ));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%" }}>
@@ -400,7 +409,7 @@ export default async function ChatPage({
           )}
         </div>
 
-        <TerminalSidePanel
+        <ProTerminalStage
           activeTrade={activeTrade}
           currentMark={currentMark}
           activeTradeTargets={activeTradeTargets}
@@ -408,7 +417,8 @@ export default async function ChatPage({
           unrealizedRoiPct={unrealizedRoiPct}
           closeTradeAction={closeTradePosition}
           closeAllAction={closeAllPositions}
-          defaultSymbol={activeTrade?.symbol ?? "BTCUSDT"}
+          defaultSymbol={activeTrade?.symbol ?? signalSymbols[0] ?? "BTCUSDT"}
+          signalSymbols={signalSymbols}
         />
       </section>
     </div>

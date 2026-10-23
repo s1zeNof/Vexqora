@@ -493,20 +493,34 @@ export async function confirmSignal(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // 1. Confirm signal status in DB & register job
-  const { error: rpcError } = await supabase.rpc("confirm_signal", { target_signal_id: signalId });
-  if (rpcError) redirect(`/dashboard/chat?error=${encodeURIComponent(rpcError.message)}`);
-
-  // 2. Fetch the signal details
+  // 1. Fetch the signal details
   const { data: signalRow, error: signalErr } = await supabase
     .from("signals")
-    .select("id, account_id, raw_text, parsed")
+    .select("id, account_id, raw_text, parsed, status")
     .eq("id", signalId)
     .single();
 
   if (signalErr || !signalRow) {
     revalidatePath("/dashboard/chat");
     redirect("/dashboard/chat?error=Signal+not+found");
+  }
+
+  // Check if an active position already exists for this signal
+  const { data: existingTrade } = await supabase
+    .from("trades")
+    .select("id, symbol, status")
+    .eq("signal_id", signalId)
+    .in("status", ["entry_open", "active"])
+    .maybeSingle();
+
+  if (existingTrade) {
+    revalidatePath("/dashboard/chat");
+    redirect(`/dashboard/chat?error=${encodeURIComponent(`Позиція по ${existingTrade.symbol} вже відкрита та активна на терміналі`)}`);
+  }
+
+  // Transition signal to confirmed if in preview
+  if (signalRow.status === "preview") {
+    await supabase.rpc("confirm_signal", { target_signal_id: signalId }).catch(() => null);
   }
 
   const signal = z.object({
