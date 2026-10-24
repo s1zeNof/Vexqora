@@ -10,3 +10,4 @@ export * from "./paper-engine";
 export * from "./ai-learning";
 export * from "./microstructure";
 export * from "./ml-bridge";
+export * from "./backtester";

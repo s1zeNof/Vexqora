@@ -14,6 +14,7 @@
     "data:trades": "tsx packages/data-lake/src/cli.ts trades",
     "data:derivatives": "tsx packages/data-lake/src/cli.ts derivatives",
     "data:status": "tsx packages/data-lake/src/cli.ts status",
+    "data:backtest": "tsx packages/data-lake/src/backtest-runner.ts",
     "ml:train": "npm run train --workspace=@crypto-bot/ml-engine",
     "ml:serve": "npm run serve --workspace=@crypto-bot/ml-engine"
   },
