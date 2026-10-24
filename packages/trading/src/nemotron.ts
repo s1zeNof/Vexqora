@@ -6,6 +6,7 @@ import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
 import { calculateAdaptiveConfidence } from "./ai-learning";
 import type { MarketMicrostructure } from "./microstructure";
+import { queryMLModelPrediction } from "./ml-bridge";
 
 export interface NemotronResponse {
   content: string;
@@ -394,6 +395,40 @@ Rules:
             klines: options?.klines
           });
 
+          // Real Machine Learning & Expected Value check (CatBoost / Bayesian)
+          const mlPrediction = await queryMLModelPrediction({
+            symbol: normSymbol,
+            side,
+            entryPrice: currentPrice,
+            stopLoss: sl,
+            tp1,
+            klines: options?.klines ?? []
+          });
+
+          if (mlPrediction.decision === "NO_TRADE") {
+            return {
+              symbol: normSymbol,
+              side: "no_trade",
+              currentPrice,
+              qualityScore: 4.0,
+              qualityTier: "High Risk",
+              strategy: `${parsedJSON.strategy || "SMC Setup"} (CatBoost ML Risk Filter)`,
+              rationale: `Вхід відхилено квантовою моделлю: ${mlPrediction.rejectionReason}`,
+              riskReward: 0,
+              winProbabilityPct: mlPrediction.winProbabilityPct,
+              decision: "NO_TRADE",
+              rejectionReason: mlPrediction.rejectionReason ?? "Negative EV or low win probability",
+              rawSignal: `${normSymbol} NO_TRADE\nreason: ${mlPrediction.rejectionReason}`,
+              parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
+              entryPrice: currentPrice,
+              stopLoss: currentPrice,
+              takeProfits: [],
+              trailingDistancePct: 0,
+              suggestedLeverage: 1,
+              historicalMatch: hist
+            };
+          }
+
           // Check if quantitative engine overrides to NO_TRADE
           if (adaptive.decision === "NO_TRADE") {
             return {
@@ -440,7 +475,7 @@ risk ${risk}%`;
             : 8.5;
 
           const finalScore = Number(Math.min(rawScore, adaptive.qualityScore).toFixed(1));
-          const finalWinProb = Math.min(parsedJSON.winProbabilityPct ?? 65, adaptive.confidencePct);
+          const finalWinProb = Math.min(parsedJSON.winProbabilityPct ?? 65, mlPrediction.winProbabilityPct, adaptive.confidencePct);
 
           const smcAnalysis: SMCAnalysis = {
             timeframe1D: parsedJSON.smc1D || (side === "long" ? "Bullish Institutional Accumulation" : "Bearish Distribution"),

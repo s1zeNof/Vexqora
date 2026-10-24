@@ -1,0 +1,14 @@
+{
+  "name": "@crypto-bot/ml-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vexqora Real Machine Learning Engine: Feature Engineering, Triple-Barrier Labeling, and CatBoost Pipeline",
+  "scripts": {
+    "bootstrap": "powershell -ExecutionPolicy Bypass -File ../../scripts/setup-ml-env.ps1",
+    "train": "python train_catboost.py",
+    "serve": "uvicorn server:app --host 127.0.0.1 --port 8000",
+    "typecheck": "node -e \"console.log('@crypto-bot/ml-engine: Python workspace (typecheck skipped)')\"",
+    "lint": "node -e \"console.log('@crypto-bot/ml-engine: Python workspace (lint skipped)')\"",
+    "test": "node -e \"console.log('@crypto-bot/ml-engine: Python workspace (use pytest for tests)')\""
+  }
+}

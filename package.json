@@ -13,7 +13,9 @@
     "data:download": "tsx packages/data-lake/src/cli.ts download",
     "data:trades": "tsx packages/data-lake/src/cli.ts trades",
     "data:derivatives": "tsx packages/data-lake/src/cli.ts derivatives",
-    "data:status": "tsx packages/data-lake/src/cli.ts status"
+    "data:status": "tsx packages/data-lake/src/cli.ts status",
+    "ml:train": "npm run train --workspace=@crypto-bot/ml-engine",
+    "ml:serve": "npm run serve --workspace=@crypto-bot/ml-engine"
   },
   "devDependencies": {
     "@eslint/js": "latest",

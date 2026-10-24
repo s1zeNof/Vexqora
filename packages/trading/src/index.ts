@@ -9,3 +9,4 @@ export * from "./signal-outcome";
 export * from "./paper-engine";
 export * from "./ai-learning";
 export * from "./microstructure";
+export * from "./ml-bridge";
