@@ -5,6 +5,7 @@ import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memor
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
 import { calculateAdaptiveConfidence } from "./ai-learning";
+import type { MarketMicrostructure } from "./microstructure";
 
 export interface NemotronResponse {
   content: string;
@@ -268,6 +269,7 @@ export async function generateNemotronOpportunity(
     leverage?: number;
     historicalContext?: HistoricalPatternMatch;
     klines?: Kline[] | undefined;
+    microstructure?: MarketMicrostructure | undefined;
   }
 ): Promise<AISignalOpportunity> {
   const normSymbol = symbol.toUpperCase();
@@ -294,15 +296,27 @@ Recent Bars:
 ${klinesSummary}`;
   }
 
+  let msContext = "";
+  if (options?.microstructure) {
+    const ms = options.microstructure;
+    msContext = `\nReal Market Microstructure & Whale Tape:
+- Order Book Imbalance (OBI): ${ms.orderBook.weightedImbalance >= 0 ? "+" : ""}${(ms.orderBook.weightedImbalance * 100).toFixed(1)}% (Bids: $${ms.orderBook.totalBidVolumeUsd.toLocaleString()}, Asks: $${ms.orderBook.totalAskVolumeUsd.toLocaleString()}, Spread: ${ms.orderBook.spreadPct}%)
+- Tape CVD: ${ms.tape.cvdUsd >= 0 ? "+" : ""}$${ms.tape.cvdUsd.toLocaleString()} (Buyer aggression: ${ms.tape.buyerAggressionPct}%)
+- Whale Activity: ${ms.tape.whaleTradesCount} block trades ($${ms.tape.whaleBuyVolumeUsd.toLocaleString()} buys vs $${ms.tape.whaleSellVolumeUsd.toLocaleString()} sells)
+- Liquidity Sweep State: ${ms.liquiditySweep.isSweep ? ms.liquiditySweep.description : "No active sweep"}
+- Derivatives: ${ms.derivatives.description}
+- Microstructure Regime: ${ms.regime.toUpperCase()} (Dominant Bias: ${ms.dominantBias.toUpperCase()})`;
+  }
+
   try {
     const res = await callNemotron([
       {
         role: "system",
         content: `You are Vexqora AI Copilot powered by Nvidia Nemotron 3 Ultra 550B, an elite institutional cryptocurrency futures trader and quantitative risk manager.
-Market Structure Context: Pattern "${hist.patternName}" (${hist.marketRegime}). ${hist.historicalContext}${klinesContext}
+Market Structure Context: Pattern "${hist.patternName}" (${hist.marketRegime}). ${hist.historicalContext}${klinesContext}${msContext}
 
-Analyze the real market structure (BOS, CHOCH, FVG, Order Blocks, Liquidity Sweeps, Overextension).
-CRITICAL RISK POLICY: You are an institutional fiduciary. If market structure is chaotic, overextended (+30%+ pump/dump), or does not present a clean minimum 1:1.8 Risk:Reward setup, you MUST output "decision": "NO_TRADE" and "side": "neutral". DO NOT FORCE BAD TRADES.
+Analyze the real market structure and order book/tape microstructure (BOS, CHOCH, FVG, Order Blocks, Liquidity Sweeps, Order Book Imbalance, CVD flow).
+CRITICAL RISK POLICY: You are an institutional fiduciary. If market structure is chaotic, overextended (+30%+ pump/dump), if order book walls or CVD strongly oppose the setup, or if conditions do not present a clean minimum 1:1.8 Risk:Reward setup, you MUST output "decision": "NO_TRADE" and "side": "neutral". DO NOT FORCE BAD TRADES.
 
 Output ONLY valid JSON matching this exact structure:
 {

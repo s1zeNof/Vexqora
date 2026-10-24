@@ -1,9 +1,16 @@
 import {
   generateNemotronOpportunity,
   VexqoraPulseScanner,
+  evaluateMarketMicrostructure,
   type BybitTickerItem
 } from "@crypto-bot/trading";
-import { fetchRecentKlines } from "@crypto-bot/exchange";
+import {
+  fetchRecentKlines,
+  fetchOrderBook,
+  fetchRecentTrades,
+  fetchOpenInterest
+} from "@crypto-bot/exchange";
+import type { Kline } from "@crypto-bot/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
 
@@ -38,13 +45,60 @@ export function startPulseScanner(
 
         if (accounts && accounts.length > 0) {
           for (const anomaly of anomalies.slice(0, 3)) {
+            // Level 2: Microstructure deep dive (Order Book + Recent Trades + OI)
+            let microstructure;
+            let klines: Kline[] = [];
+            try {
+              const [ob, trades, klinesRes, oiPoints] = await Promise.all([
+                fetchOrderBook(anomaly.symbol, 50).catch(() => null),
+                fetchRecentTrades(anomaly.symbol, 100).catch(() => []),
+                fetchRecentKlines(anomaly.symbol, "15", 25).catch(() => []),
+                fetchOpenInterest(anomaly.symbol, 12).catch(() => [])
+              ]);
+              klines = klinesRes;
+              microstructure = evaluateMarketMicrostructure({
+                symbol: anomaly.symbol,
+                orderBook: ob,
+                trades,
+                klines,
+                oiPoints,
+                priceChangePct: anomaly.changePct
+              });
+              anomaly.microstructure = microstructure;
+
+              // Refine eventType if specific microstructure pattern detected
+              if (microstructure.liquiditySweep.isSweep) {
+                anomaly.eventType = "liquidity_sweep";
+              } else if (microstructure.regime === "short_squeeze") {
+                anomaly.eventType = "short_squeeze";
+              } else if (microstructure.regime === "long_flush") {
+                anomaly.eventType = "long_flush";
+              } else if (
+                microstructure.regime === "absorption_long" ||
+                (microstructure.tape.whaleBuyVolumeUsd > 100_000 && microstructure.orderBook.weightedImbalance > 0.2)
+              ) {
+                anomaly.eventType = "whale_accumulation";
+              } else if (
+                microstructure.regime === "absorption_short" ||
+                (microstructure.tape.whaleSellVolumeUsd > 100_000 && microstructure.orderBook.weightedImbalance < -0.2)
+              ) {
+                anomaly.eventType = "whale_distribution";
+              }
+            } catch (msErr) {
+              logger.warn({ symbol: anomaly.symbol, err: msErr }, "Failed to fetch microstructure for anomaly");
+            }
+
             for (const account of accounts) {
-              // Publish pulse event
+              const msTag = microstructure
+                ? ` · OBI: ${microstructure.orderBook.weightedImbalance >= 0 ? "+" : ""}${Math.round(microstructure.orderBook.weightedImbalance * 100)}% · CVD: ${microstructure.tape.cvdUsd >= 0 ? "+" : ""}$${microstructure.tape.cvdUsd.toLocaleString()}`
+                : "";
+
+              // Publish pulse event with microstructure facts
               await supabase.from("chat_messages").insert({
                 account_id: account.id,
                 role: "system",
                 kind: "market_pulse",
-                content: `${anomaly.symbol} ${anomaly.changePct > 0 ? "+" : ""}${anomaly.changePct}% in ${anomaly.timeframeSec}s · ${anomaly.eventType.replace("_", " ").toUpperCase()}`,
+                content: `${anomaly.symbol} ${anomaly.changePct > 0 ? "+" : ""}${anomaly.changePct}% in ${anomaly.timeframeSec}s · ${anomaly.eventType.replace("_", " ").toUpperCase()}${msTag}`,
                 payload: {
                   pulse: anomaly,
                   symbol: anomaly.symbol,
@@ -53,17 +107,18 @@ export function startPulseScanner(
                   price: anomaly.price,
                   turnover24h: anomaly.turnover24h,
                   eventType: anomaly.eventType,
-                  historicalMatch: anomaly.historicalMatch
+                  historicalMatch: anomaly.historicalMatch,
+                  microstructure
                 }
               });
 
-              // If anomaly detected (>=1.2% rapid momentum, sweep or breakout), evaluate for AI Signal with real klines
-              if (Math.abs(anomaly.changePct) >= 1.2 || anomaly.eventType === "volume_spike") {
+              // Level 3: Evaluate for AI Signal with verified klines and microstructure
+              if (Math.abs(anomaly.changePct) >= 1.2 || anomaly.eventType === "volume_spike" || anomaly.eventType === "whale_accumulation") {
                 try {
-                  const klines = await fetchRecentKlines(anomaly.symbol, "15", 25).catch(() => []);
                   const opp = await generateNemotronOpportunity(anomaly.symbol, anomaly.price, {
                     historicalContext: anomaly.historicalMatch,
-                    klines
+                    klines,
+                    microstructure
                   });
 
                   if (opp.decision !== "NO_TRADE" && opp.side !== "no_trade" && opp.qualityScore >= 8.5 && opp.winProbabilityPct >= 58) {
@@ -76,6 +131,7 @@ export function startPulseScanner(
                         opportunity: opp,
                         rawSignal: opp.rawSignal,
                         historicalMatch: anomaly.historicalMatch,
+                        microstructure,
                         triggeredByPulse: anomaly.id
                       }
                     });

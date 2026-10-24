@@ -1,4 +1,5 @@
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
+import type { MarketMicrostructure } from "./microstructure";
 
 export interface BybitTickerItem {
   symbol: string;
@@ -12,7 +13,16 @@ export interface MarketPulseAnomaly {
   id: string;
   symbol: string;
   exchange: "bybit" | "binance";
-  eventType: "price_spike" | "price_dump" | "volume_spike" | "liquidity_sweep";
+  eventType:
+    | "price_spike"
+    | "price_dump"
+    | "volume_spike"
+    | "liquidity_sweep"
+    | "whale_accumulation"
+    | "whale_distribution"
+    | "short_squeeze"
+    | "long_flush"
+    | "orderbook_imbalance";
   changePct: number;
   timeframeSec: number;
   price: number;
@@ -20,6 +30,7 @@ export interface MarketPulseAnomaly {
   aiStatus: "monitoring" | "evaluating" | "signal_generated" | "no_trade";
   rationale: string;
   historicalMatch: HistoricalPatternMatch;
+  microstructure?: MarketMicrostructure | undefined;
   timestamp: number;
 }
 

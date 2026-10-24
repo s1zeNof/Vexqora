@@ -13,7 +13,8 @@ export interface PulseSignalItem {
   market: "linear";
   side: "long" | "short";
   trigger: string;
-  triggerType: "spike" | "volume" | "breakout" | "rejection";
+  triggerType: "spike" | "volume" | "breakout" | "rejection" | "whale" | "sweep";
+  microstructureTag?: string | undefined;
   entry: number;
   stopLoss: number;
   tp1: number;
@@ -26,7 +27,7 @@ export interface PulseSignalItem {
 
 export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSignalItem[] }) {
   const router = useRouter();
-  const [filter, setFilter] = useState<"all" | "long" | "short" | "spike" | "volume">("all");
+  const [filter, setFilter] = useState<"all" | "long" | "short" | "whale" | "sweep" | "spike" | "volume">("all");
   const [minConfidence, setMinConfidence] = useState<number>(0);
   const [sortBy, setSortBy] = useState<"newest" | "confidence" | "rr">("newest");
   const [lastRefreshed, setLastRefreshed] = useState<number>(Date.now());
@@ -53,6 +54,8 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
   let filtered = initialSignals.filter((s) => {
     if (filter === "long" && s.side !== "long") return false;
     if (filter === "short" && s.side !== "short") return false;
+    if (filter === "whale" && s.triggerType !== "whale") return false;
+    if (filter === "sweep" && s.triggerType !== "sweep") return false;
     if (filter === "spike" && s.triggerType !== "spike") return false;
     if (filter === "volume" && s.triggerType !== "volume") return false;
     if (minConfidence > 0 && s.confidence < minConfidence) return false;
@@ -101,6 +104,20 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
         </button>
         <button
           type="button"
+          onClick={() => setFilter("whale")}
+          className={`tab ${filter === "whale" ? "on" : ""}`}
+        >
+          🐋 Whale
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("sweep")}
+          className={`tab ${filter === "sweep" ? "on" : ""}`}
+        >
+          🎯 Sweep
+        </button>
+        <button
+          type="button"
           onClick={() => setFilter("long")}
           className={`tab ${filter === "long" ? "on" : ""}`}
         >
@@ -115,17 +132,17 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
         </button>
         <button
           type="button"
-          onClick={() => setFilter("spike")}
-          className={`tab ${filter === "spike" ? "on" : ""}`}
-        >
-          Spike
-        </button>
-        <button
-          type="button"
           onClick={() => setFilter("volume")}
           className={`tab ${filter === "volume" ? "on" : ""}`}
         >
           Volume
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("spike")}
+          className={`tab ${filter === "spike" ? "on" : ""}`}
+        >
+          Spike
         </button>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
@@ -174,9 +191,28 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
                 </span>
               </div>
 
-              {/* Row 2: Trigger */}
-              <div style={{ font: "500 14px Inter, sans-serif", color: "#9A9A9A" }}>
-                {item.trigger}
+              {/* Row 2: Trigger & Microstructure Badge */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div style={{ font: "500 14px Inter, sans-serif", color: "#9A9A9A" }}>
+                  {item.trigger}
+                </div>
+                {item.microstructureTag && (
+                  <div style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "11px",
+                    fontFamily: "JetBrains Mono, monospace",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    background: "rgba(66, 245, 185, 0.08)",
+                    border: "1px solid rgba(66, 245, 185, 0.25)",
+                    color: "#42F5B9",
+                    width: "fit-content"
+                  }}>
+                    {item.microstructureTag}
+                  </div>
+                )}
               </div>
 
               {/* Row 3: Entry, Stop loss, TP1, R:R */}

@@ -1,5 +1,9 @@
 import { redirect } from "next/navigation";
-import { fetchTopUniverseOpportunities, parseSignalText } from "@crypto-bot/trading";
+import {
+  fetchTopUniverseOpportunities,
+  parseSignalText,
+  calculateAdaptiveConfidence
+} from "@crypto-bot/trading";
 import { formatTimeAgo } from "../../../lib/date";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { PulseFeedClient, type PulseSignalItem } from "./pulse-feed-client";
@@ -14,29 +18,46 @@ interface CanonicalPulsePayload {
     confidence: number;
     riskReward: number;
     qualityScore: number;
-    qualityTier: "A+" | "A" | "B+";
+    qualityTier: "A+" | "A" | "B+" | "B" | "C" | "Tier A" | "Tier B" | "High Risk";
     winProbabilityPct: number;
     strategy: string;
     rationale: string;
+    microstructureTag?: string | undefined;
   };
 }
 
 function toCard(id: string, createdAt: string, payload: CanonicalPulsePayload): PulseSignalItem {
   const { signal, opportunity } = payload;
   const absChange = Math.abs(opportunity.change24hPct);
+
+  const isWhale = opportunity.turnover24h >= 40_000_000 || opportunity.anomalyType === "volume_breakout";
+  const isSweep = opportunity.anomalyType === "liquidity_hunt";
+
   const triggerType: PulseSignalItem["triggerType"] =
-    opportunity.anomalyType === "volatility_expansion" || absChange >= 10
-      ? "spike"
-      : opportunity.anomalyType === "volume_breakout"
-        ? "volume"
-        : signal.side === "short" ? "rejection" : "breakout";
-  const trigger = triggerType === "spike"
-    ? `Price spike · ${opportunity.change24hPct >= 0 ? "+" : "−"}${absChange}% / 10m`
-    : triggerType === "volume"
-      ? `Volume · ×${(opportunity.turnover24h / 15_000_000).toFixed(1)} / 15m`
-      : triggerType === "rejection"
-        ? `Rejection · −${absChange}% / 5m`
-        : `Breakout · +${absChange}% / 15m`;
+    isSweep
+      ? "sweep"
+      : isWhale
+        ? "whale"
+        : opportunity.anomalyType === "volatility_expansion" || absChange >= 10
+          ? "spike"
+          : "volume";
+
+  const trigger =
+    triggerType === "sweep"
+      ? `Liquidity hunt · ${signal.side === "long" ? "Swept low" : "Swept high"} · 15m`
+      : triggerType === "whale"
+        ? `Whale tape · $${(opportunity.turnover24h / 1_000_000).toFixed(1)}M 24h vol`
+        : triggerType === "spike"
+          ? `Price spike · ${opportunity.change24hPct >= 0 ? "+" : "−"}${absChange}% / 10m`
+          : `Volume · ×${(opportunity.turnover24h / 15_000_000).toFixed(1)} / 15m`;
+
+  const microstructureTag =
+    opportunity.microstructureTag ??
+    (triggerType === "whale"
+      ? `🐋 Tape Vol $${(opportunity.turnover24h / 1_000_000).toFixed(0)}M`
+      : triggerType === "sweep"
+        ? `🎯 Turtle Soup (${signal.side.toUpperCase()})`
+        : undefined);
 
   return {
     id,
@@ -46,6 +67,7 @@ function toCard(id: string, createdAt: string, payload: CanonicalPulsePayload): 
     side: signal.side,
     trigger,
     triggerType,
+    microstructureTag,
     entry: payload.entryPrice,
     stopLoss: signal.stopLoss,
     tp1: signal.takeProfits[0]?.price ?? payload.entryPrice,
@@ -74,7 +96,7 @@ export default async function PulsePage() {
   const topOpps = await fetchTopUniverseOpportunities(12).catch(() => []);
   const bucket = Math.floor(Date.now() / (10 * 60 * 1000));
 
-  const signals = await Promise.all(topOpps.map(async (opp, idx): Promise<PulseSignalItem> => {
+  const signals = await Promise.all(topOpps.map(async (opp): Promise<PulseSignalItem> => {
     const side = opp.change24hPct >= 0 ? ("long" as const) : ("short" as const);
     const entry = opp.lastPrice;
     const slDistance = entry * 0.025;
@@ -82,7 +104,16 @@ export default async function PulsePage() {
     const tp1 = side === "long" ? entry + slDistance * 1.8 : entry - slDistance * 1.8;
     const tp2 = side === "long" ? entry + slDistance * 2.6 : entry - slDistance * 2.6;
     const tp3 = side === "long" ? entry + slDistance * 3.5 : entry - slDistance * 3.5;
-    const confidence = Math.min(82, 62 + Math.min(8, Math.round(opp.turnover24h / 50_000_000)) + Math.min(8, Math.round(Math.abs(opp.change24hPct) / 2)) - (idx % 3));
+
+    // Statistically calibrated adaptive confidence
+    const adaptive = calculateAdaptiveConfidence({
+      symbol: opp.symbol,
+      side,
+      change24hPct: opp.change24hPct,
+      baseWinRate: 70
+    });
+    const confidence = adaptive.confidencePct;
+
     const rawText = `${opp.symbol} ${side.toUpperCase()}\nentry ${entry}\ntp ${tp1} 40%, ${tp2} 30%, ${tp3} 30%\nsl ${stopLoss}\ntrail 2% after tp1\nlev 5\nrisk 1%`;
     const payload: CanonicalPulsePayload = {
       entryPrice: entry,
@@ -93,8 +124,8 @@ export default async function PulsePage() {
         anomalyType: opp.anomalyType,
         confidence,
         riskReward: 1.8,
-        qualityScore: Number((confidence / 10).toFixed(1)),
-        qualityTier: confidence >= 75 ? "A" : "B+",
+        qualityScore: adaptive.qualityScore,
+        qualityTier: adaptive.qualityTier,
         winProbabilityPct: confidence,
         strategy: opp.anomalyType === "volatility_expansion" ? "Momentum Expansion" : opp.anomalyType === "volume_breakout" ? "Volume Breakout" : "Liquidity Hunt",
         rationale: `Canonical ${side.toUpperCase()} setup captured at ${entry}. Levels are immutable and will be monitored for 48 hours.`
