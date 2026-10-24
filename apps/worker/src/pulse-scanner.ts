@@ -3,6 +3,7 @@ import {
   VexqoraPulseScanner,
   type BybitTickerItem
 } from "@crypto-bot/trading";
+import { fetchRecentKlines } from "@crypto-bot/exchange";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
 
@@ -56,14 +57,16 @@ export function startPulseScanner(
                 }
               });
 
-              // If anomaly detected (>=1.2% rapid momentum, sweep or breakout), evaluate for AI Signal
+              // If anomaly detected (>=1.2% rapid momentum, sweep or breakout), evaluate for AI Signal with real klines
               if (Math.abs(anomaly.changePct) >= 1.2 || anomaly.eventType === "volume_spike") {
                 try {
+                  const klines = await fetchRecentKlines(anomaly.symbol, "15", 25).catch(() => []);
                   const opp = await generateNemotronOpportunity(anomaly.symbol, anomaly.price, {
-                    historicalContext: anomaly.historicalMatch
+                    historicalContext: anomaly.historicalMatch,
+                    klines
                   });
 
-                  if (opp.qualityScore >= 8.5) {
+                  if (opp.decision !== "NO_TRADE" && opp.side !== "no_trade" && opp.qualityScore >= 8.5 && opp.winProbabilityPct >= 58) {
                     await supabase.from("chat_messages").insert({
                       account_id: account.id,
                       role: "assistant",
@@ -76,6 +79,11 @@ export function startPulseScanner(
                         triggeredByPulse: anomaly.id
                       }
                     });
+                  } else {
+                    logger.info(
+                      { symbol: anomaly.symbol, decision: opp.decision, qualityScore: opp.qualityScore, reason: opp.rejectionReason },
+                      "Pulse anomaly evaluated by Nemotron: signal discarded or NO_TRADE (capital protected)"
+                    );
                   }
                 } catch (nemotronErr) {
                   logger.warn({ symbol: anomaly.symbol, err: nemotronErr }, "Nemotron pulse evaluation error");

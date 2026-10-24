@@ -9,6 +9,7 @@ export interface HistoricalPatternMatch {
   avgRewardRisk: number;
   typicalDurationMin: number;
   historicalContext: string;
+  isEmpirical: boolean;
 }
 
 export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
@@ -20,6 +21,7 @@ export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
     winRatePct: 73.0,
     avgRewardRisk: 2.8,
     typicalDurationMin: 35,
+    isEmpirical: false,
     historicalContext: "Price swept liquidity below local low, returned into value range and triggered structural shift. In 27 of 37 historical episodes, price achieved TP2 prior to invalidation."
   },
   {
@@ -30,6 +32,7 @@ export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
     winRatePct: 71.4,
     avgRewardRisk: 2.6,
     typicalDurationMin: 45,
+    isEmpirical: false,
     historicalContext: "Sharp volume surge exceeding 3.5x baseline during Bollinger Band expansion. 30 of 42 historical episodes sustained trend to second target."
   },
   {
@@ -40,6 +43,7 @@ export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
     winRatePct: 75.8,
     avgRewardRisk: 3.1,
     typicalDurationMin: 28,
+    isEmpirical: false,
     historicalContext: "Institutional limit absorption confirmed by positive delta divergence against falling price. 22 of 29 historical episodes produced clean continuation."
   },
   {
@@ -50,6 +54,7 @@ export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
     winRatePct: 70.6,
     avgRewardRisk: 2.4,
     typicalDurationMin: 20,
+    isEmpirical: false,
     historicalContext: "Parabolic exhaustion spike (>4% in 30s) followed by immediate bid exhaustion. 24 of 34 historical cases reverted back to VWAP."
   }
 ];
@@ -105,7 +110,16 @@ export function findHistoricalPatternMatch(
     return HISTORICAL_PATTERNS[1]!;
   }
 
-  // Dynamic selection based on symbol hash to prevent identical patterns across all symbols
-  const hash = symbol.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return HISTORICAL_PATTERNS[hash % HISTORICAL_PATTERNS.length]!;
+  // Honest unconfirmed discretionary structure instead of random symbol hash selection
+  return {
+    patternId: "pat-discretionary",
+    patternName: "Discretionary Market Structure",
+    marketRegime: "Range Consolidation",
+    sampleCount: 0,
+    winRatePct: 50.0,
+    avgRewardRisk: 2.0,
+    typicalDurationMin: 30,
+    isEmpirical: false,
+    historicalContext: "No validated SMC liquidity sweep or volume breakout pattern identified. Market structure is discretionary."
+  };
 }

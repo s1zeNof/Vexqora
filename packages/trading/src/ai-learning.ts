@@ -18,6 +18,8 @@ export interface AdaptiveConfidenceResult {
   bonuses: Array<{ reason: string; deltaPct: number }>;
   learningContext: string;
   isHighRisk: boolean;
+  decision: "TRADE" | "NO_TRADE" | "WAIT_FOR_CONFIRMATION";
+  rejectionReason?: string | undefined;
 }
 
 /**
@@ -140,6 +142,17 @@ export function calculateAdaptiveConfidence(
 
   const isHighRisk = calculatedConfidence < 58 || penalties.length >= 2;
 
+  let decision: "TRADE" | "NO_TRADE" | "WAIT_FOR_CONFIRMATION" = "TRADE";
+  let rejectionReason: string | undefined = undefined;
+
+  if (calculatedConfidence < 48 || totalPenalty >= 22) {
+    decision = "NO_TRADE";
+    rejectionReason = `Математичне очікування від'ємне (впевненість ${calculatedConfidence}%). Критичний ризик пастки або розвороту: ${penalties.map(p => p.reason).join("; ")}.`;
+  } else if (calculatedConfidence < 58 || penalties.length >= 2 || losses >= 1) {
+    decision = "WAIT_FOR_CONFIRMATION";
+    rejectionReason = `Підвищена невизначеність структури (впевненість ${calculatedConfidence}%). Рекомендовано дочекатись додаткового свічкового підтвердження.`;
+  }
+
   let learningContext = "Vexqora Memory & ML: параметри в нормі.";
   if (penalties.length > 0) {
     learningContext = `ML Адаптація: Впевненість знижено на -${totalPenalty}% через ${penalties.map(p => p.reason).join("; ")}.`;
@@ -154,6 +167,8 @@ export function calculateAdaptiveConfidence(
     penalties,
     bonuses,
     learningContext,
-    isHighRisk
+    isHighRisk,
+    decision,
+    rejectionReason
   };
 }

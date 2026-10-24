@@ -4,6 +4,7 @@ import { generateOpportunityFromTicker, getSensibleTickSize } from "./ai-copilot
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
+import { calculateAdaptiveConfidence } from "./ai-learning";
 
 export interface NemotronResponse {
   content: string;
@@ -221,15 +222,16 @@ Output a concise summary followed by structured bullet points:
 
 interface NemotronParsedJSON {
   symbol: string;
-  side: "long" | "short";
-  strategy: string;
+  decision?: "TRADE" | "NO_TRADE" | undefined;
+  side: "long" | "short" | "neutral" | "no_trade";
+  strategy?: string;
   reasoning: string;
-  stopLoss: number;
-  tp1: number;
-  tp2: number;
-  tp3: number;
-  qualityScore: number;
-  winProbabilityPct: number;
+  stopLoss?: number | null;
+  tp1?: number | null;
+  tp2?: number | null;
+  tp3?: number | null;
+  qualityScore?: number;
+  winProbabilityPct?: number;
   smc1D?: string;
   smc4H?: string;
   smc15M?: string;
@@ -296,54 +298,117 @@ ${klinesSummary}`;
     const res = await callNemotron([
       {
         role: "system",
-        content: `You are Vexqora AI Copilot powered by Nvidia Nemotron 3 Ultra 550B, an elite institutional cryptocurrency futures trader.
-Vexqora Memory: Pattern "${hist.patternName}". Sample Count: ${hist.sampleCount} episodes, ${hist.winRatePct}% historical win rate.${klinesContext}
+        content: `You are Vexqora AI Copilot powered by Nvidia Nemotron 3 Ultra 550B, an elite institutional cryptocurrency futures trader and quantitative risk manager.
+Market Structure Context: Pattern "${hist.patternName}" (${hist.marketRegime}). ${hist.historicalContext}${klinesContext}
 
-Analyze the real market structure (BOS, CHOCH, FVG, Order Blocks, Liquidity Sweeps) and output ONLY valid JSON matching this exact structure:
+Analyze the real market structure (BOS, CHOCH, FVG, Order Blocks, Liquidity Sweeps, Overextension).
+CRITICAL RISK POLICY: You are an institutional fiduciary. If market structure is chaotic, overextended (+30%+ pump/dump), or does not present a clean minimum 1:1.8 Risk:Reward setup, you MUST output "decision": "NO_TRADE" and "side": "neutral". DO NOT FORCE BAD TRADES.
+
+Output ONLY valid JSON matching this exact structure:
 {
   "symbol": "${normSymbol}",
-  "side": "long" or "short",
+  "decision": "TRADE" or "NO_TRADE",
+  "side": "long" or "short" or "neutral",
   "strategy": "institutional SMC strategy name (e.g. Liquidity Sweep + Bullish CHOCH)",
-  "reasoning": "2-3 deep sentences of SMC reasoning referencing swing points, liquidity pools, and volume absorption",
-  "stopLoss": number,
-  "tp1": number,
-  "tp2": number,
-  "tp3": number,
-  "qualityScore": number between 8.8 and 9.8,
-  "winProbabilityPct": number between 68 and 78,
+  "reasoning": "2-3 deep sentences of SMC reasoning referencing swing points, liquidity pools, and volume absorption (or specific reasons why NO_TRADE was decided)",
+  "stopLoss": number or null,
+  "tp1": number or null,
+  "tp2": number or null,
+  "tp3": number or null,
+  "qualityScore": number between 1.0 and 10.0 representing honest setup quality,
+  "winProbabilityPct": estimated probability between 30 and 85 based on technical structure,
   "smc1D": "Macro 1D trend bias",
   "smc4H": "4H Market structure & FVG zone",
   "smc15M": "15m Entry trigger (BOS or CHOCH)"
 }
 Rules:
-- Minimum Risk:Reward for TP1 MUST be at least 1:1.8.
-- For 'long', stopLoss MUST be < currentPrice, and tp1 < tp2 < tp3 MUST be > currentPrice.
-- For 'short', stopLoss MUST be > currentPrice, and tp1 > tp2 > tp3 MUST be < currentPrice.
-- Stop Loss must be anchored logically at structural swing invalidation.
+- If decision is NO_TRADE or side is neutral, explain clearly in reasoning.
+- If decision is TRADE:
+  - Minimum Risk:Reward for TP1 MUST be at least 1:1.8.
+  - For 'long', stopLoss MUST be < currentPrice, and tp1 < tp2 < tp3 MUST be > currentPrice.
+  - For 'short', stopLoss MUST be > currentPrice, and tp1 > tp2 > tp3 MUST be < currentPrice.
+  - Stop Loss must be anchored logically at structural swing invalidation.
 - Return pure JSON only.`
       },
       {
         role: "user",
-        content: `Asset: ${normSymbol}, Price: ${currentPrice} USDT. Pattern: ${hist.patternName}. Formulate the institutional trade setup.`
+        content: `Asset: ${normSymbol}, Price: ${currentPrice} USDT. Pattern: ${hist.patternName}. Formulate the institutional trade setup or declare NO_TRADE if conditions are unfavorable.`
       }
     ]);
 
     const parsedJSON = extractJSON(res.content);
-    if (parsedJSON && parsedJSON.stopLoss && parsedJSON.tp1) {
-      const side = parsedJSON.side === "short" ? "short" : "long";
-      const sl = roundToStep(parsedJSON.stopLoss, tickSize);
-      const tp1 = roundToStep(parsedJSON.tp1, tickSize);
-      const tp2 = roundToStep(parsedJSON.tp2, tickSize);
-      const tp3 = roundToStep(parsedJSON.tp3, tickSize);
+    if (parsedJSON) {
+      if (parsedJSON.decision === "NO_TRADE" || parsedJSON.side === "neutral" || parsedJSON.side === "no_trade") {
+        return {
+          symbol: normSymbol,
+          side: "no_trade",
+          currentPrice,
+          qualityScore: parsedJSON.qualityScore ? Math.min(parsedJSON.qualityScore, 5.0) : 4.0,
+          qualityTier: "High Risk",
+          strategy: `${parsedJSON.strategy || "Market Structure Invalidation"} (Nemotron AI)`,
+          rationale: parsedJSON.reasoning || "ШІ Nemotron відхилив вхід: ринок перебуває в зоні підвищеного ризику або відсутності чистих свічкових підтверджень.",
+          riskReward: 0,
+          winProbabilityPct: parsedJSON.winProbabilityPct ? Math.min(parsedJSON.winProbabilityPct, 45) : 38,
+          decision: "NO_TRADE",
+          rejectionReason: parsedJSON.reasoning || "Ризик пастки або розвороту занадто високий для відкриття позиції.",
+          rawSignal: `${normSymbol} NO_TRADE\nreason: ${parsedJSON.reasoning || "High risk"}`,
+          parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
+          entryPrice: currentPrice,
+          stopLoss: currentPrice,
+          takeProfits: [],
+          trailingDistancePct: 0,
+          suggestedLeverage: 1,
+          historicalMatch: hist
+        };
+      }
 
-      const isValidLong = side === "long" && sl < currentPrice && tp1 > currentPrice;
-      const isValidShort = side === "short" && sl > currentPrice && tp1 < currentPrice;
+      if (typeof parsedJSON.stopLoss === "number" && typeof parsedJSON.tp1 === "number") {
+        const side = parsedJSON.side === "short" ? "short" : "long";
+        const sl = roundToStep(parsedJSON.stopLoss, tickSize);
+        const tp1 = roundToStep(parsedJSON.tp1, tickSize);
+        const tp2 = roundToStep(parsedJSON.tp2 ?? (side === "long" ? tp1 * 1.02 : tp1 * 0.98), tickSize);
+        const tp3 = roundToStep(parsedJSON.tp3 ?? (side === "long" ? tp2 * 1.02 : tp2 * 0.98), tickSize);
 
-      if (isValidLong || isValidShort) {
-        const lev = options?.leverage ?? 5;
-        const risk = options?.riskPct ?? 1;
+        const isValidLong = side === "long" && sl < currentPrice && tp1 > currentPrice;
+        const isValidShort = side === "short" && sl > currentPrice && tp1 < currentPrice;
 
-        const rawSignal = `${normSymbol} ${side.toUpperCase()}
+        if (isValidLong || isValidShort) {
+          const adaptive = calculateAdaptiveConfidence({
+            symbol: normSymbol,
+            side,
+            baseWinRate: parsedJSON.winProbabilityPct ?? 65,
+            klines: options?.klines
+          });
+
+          // Check if quantitative engine overrides to NO_TRADE
+          if (adaptive.decision === "NO_TRADE") {
+            return {
+              symbol: normSymbol,
+              side: "no_trade",
+              currentPrice,
+              qualityScore: adaptive.qualityScore,
+              qualityTier: adaptive.qualityTier,
+              strategy: `${parsedJSON.strategy || "SMC Setup"} (Vexqora ML Risk Filter)`,
+              rationale: `Сетап скасовано захисним ML-фільтром: ${adaptive.rejectionReason}`,
+              riskReward: 0,
+              winProbabilityPct: adaptive.confidencePct,
+              decision: "NO_TRADE",
+              rejectionReason: adaptive.rejectionReason,
+              rawSignal: `${normSymbol} NO_TRADE\nreason: ${adaptive.rejectionReason}`,
+              parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
+              entryPrice: currentPrice,
+              stopLoss: currentPrice,
+              takeProfits: [],
+              trailingDistancePct: 0,
+              suggestedLeverage: 1,
+              historicalMatch: hist
+            };
+          }
+
+          const lev = options?.leverage ?? 5;
+          const risk = options?.riskPct ?? 1;
+
+          const rawSignal = `${normSymbol} ${side.toUpperCase()}
 entry market
 tp ${tp1} 40%, ${tp2} 35%, ${tp3} 25%
 sl ${sl}
@@ -351,47 +416,55 @@ trail 1% after tp1
 lev ${lev}
 risk ${risk}%`;
 
-        const parsedSignal = parseSignalText(rawSignal, "chat");
-        const slDist = Math.abs(currentPrice - sl);
-        const tpAvg = Math.abs((tp1 * 0.4 + tp2 * 0.35 + tp3 * 0.25) - currentPrice);
-        const rr = Number((tpAvg / slDist).toFixed(2));
+          const parsedSignal = parseSignalText(rawSignal, "chat");
+          const slDist = Math.abs(currentPrice - sl);
+          const tpAvg = Math.abs((tp1 * 0.4 + tp2 * 0.35 + tp3 * 0.25) - currentPrice);
+          const rr = Number((tpAvg / slDist).toFixed(2));
 
-        const score = typeof parsedJSON.qualityScore === "number"
-          ? (parsedJSON.qualityScore > 10 ? parsedJSON.qualityScore / 10 : parsedJSON.qualityScore)
-          : 9.3;
+          const rawScore = typeof parsedJSON.qualityScore === "number"
+            ? (parsedJSON.qualityScore > 10 ? parsedJSON.qualityScore / 10 : parsedJSON.qualityScore)
+            : 8.5;
 
-        const smcAnalysis: SMCAnalysis = {
-          timeframe1D: parsedJSON.smc1D || (side === "long" ? "Bullish Institutional Accumulation" : "Bearish Distribution"),
-          timeframe4H: parsedJSON.smc4H || `4H Liquidity pool target at $${formatCryptoPrice(tp2)}`,
-          timeframe15M: parsedJSON.smc15M || `15m ${side === "long" ? "Bullish CHOCH Reclaim" : "Bearish BOS Continuation"}`,
-          invalidationPrice: sl,
-          orderBlockZone: `$${formatCryptoPrice(Math.min(sl, currentPrice))} - $${formatCryptoPrice(Math.max(sl, currentPrice))}`
-        };
+          const finalScore = Number(Math.min(rawScore, adaptive.qualityScore).toFixed(1));
+          const finalWinProb = Math.min(parsedJSON.winProbabilityPct ?? 65, adaptive.confidencePct);
 
-        return {
-          symbol: normSymbol,
-          side,
-          currentPrice,
-          qualityScore: Number(score.toFixed(1)),
-          qualityTier: score >= 9.2 ? "A+" : "A",
-          strategy: `${parsedJSON.strategy || "Institutional SMC Setup"} (Nemotron 3 Ultra)`,
-          rationale: parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep and volume absorption.`,
-          riskReward: rr >= 1 ? rr : 2.2,
-          winProbabilityPct: parsedJSON.winProbabilityPct || (side === "long" ? 73 : 70),
-          rawSignal,
-          parsedSignal,
-          entryPrice: currentPrice,
-          stopLoss: sl,
-          takeProfits: [
-            { price: tp1, sharePct: 40 },
-            { price: tp2, sharePct: 35 },
-            { price: tp3, sharePct: 25 }
-          ],
-          trailingDistancePct: 1,
-          suggestedLeverage: lev,
-          historicalMatch: hist,
-          smcAnalysis
-        };
+          const smcAnalysis: SMCAnalysis = {
+            timeframe1D: parsedJSON.smc1D || (side === "long" ? "Bullish Institutional Accumulation" : "Bearish Distribution"),
+            timeframe4H: parsedJSON.smc4H || `4H Liquidity pool target at $${formatCryptoPrice(tp2)}`,
+            timeframe15M: parsedJSON.smc15M || `15m ${side === "long" ? "Bullish CHOCH Reclaim" : "Bearish BOS Continuation"}`,
+            invalidationPrice: sl,
+            orderBlockZone: `$${formatCryptoPrice(Math.min(sl, currentPrice))} - $${formatCryptoPrice(Math.max(sl, currentPrice))}`
+          };
+
+          return {
+            symbol: normSymbol,
+            side,
+            currentPrice,
+            qualityScore: finalScore,
+            qualityTier: adaptive.qualityTier,
+            strategy: `${parsedJSON.strategy || "Institutional SMC Setup"} (Nemotron 3 Ultra)`,
+            rationale: adaptive.penalties.length > 0
+              ? `${parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep.`} [ML: ${adaptive.learningContext}]`
+              : (parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep and volume absorption.`),
+            riskReward: rr >= 1 ? rr : 2.2,
+            winProbabilityPct: finalWinProb,
+            decision: adaptive.decision,
+            rejectionReason: adaptive.rejectionReason,
+            rawSignal,
+            parsedSignal,
+            entryPrice: currentPrice,
+            stopLoss: sl,
+            takeProfits: [
+              { price: tp1, sharePct: 40 },
+              { price: tp2, sharePct: 35 },
+              { price: tp3, sharePct: 25 }
+            ],
+            trailingDistancePct: 1,
+            suggestedLeverage: lev,
+            historicalMatch: hist,
+            smcAnalysis
+          };
+        }
       }
     }
   } catch (error) {

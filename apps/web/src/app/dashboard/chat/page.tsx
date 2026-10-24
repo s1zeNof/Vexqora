@@ -92,46 +92,63 @@ export default async function ChatPage({
         fetchRecentKlines(activeSymbol, "15", 15).catch(() => [])
       ]);
       const opp = await generateNemotronOpportunity(activeSymbol, ticker.lastPrice, { tickSize: instrument.tickSize, klines });
-      const riskRow = riskResult.data as { risk_per_trade_pct?: number; max_leverage?: number; max_open_positions?: number; max_daily_loss_pct?: number; kill_switch?: boolean } | null;
-      const preview = createTradePreview(opp.parsedSignal, instrument, {
-        riskPerTradePct: Number(riskRow?.risk_per_trade_pct ?? 1),
-        maxLeverage: Number(riskRow?.max_leverage ?? 5),
-        maxOpenPositions: Number(riskRow?.max_open_positions ?? 3),
-        maxDailyLossPct: Number(riskRow?.max_daily_loss_pct ?? 5),
-        killSwitch: Boolean(riskRow?.kill_switch)
-      }, {
-        balance: balance ?? 20000,
-        marketPrice: ticker.lastPrice,
-        openPositions: 0,
-        dailyPnl: 0
-      });
 
-      const { data: storedSignal } = await supabase.from("signals").insert({
-        account_id: account.id,
-        raw_text: opp.rawSignal,
-        parsed: preview,
-        source: "nemotron_autonomous",
-        status: "preview"
-      }).select("id").maybeSingle();
+      if (opp.side === "no_trade" || opp.decision === "NO_TRADE") {
+        const { data: newMsg } = await supabase.from("chat_messages").insert({
+          account_id: account.id,
+          role: "assistant",
+          kind: "system_alert",
+          content: `🛡️ Nemotron AI: Аналіз ${opp.symbol} — Вхід відхилено (NO_TRADE). ${opp.rationale}`,
+          payload: {
+            opportunity: opp
+          }
+        }).select("id, role, kind, content, payload, created_at").maybeSingle();
 
-      const parsedSignalId = z.object({ id: z.string() }).safeParse(storedSignal);
-      const signalId: string | null = parsedSignalId.success ? parsedSignalId.data.id : null;
-
-      const { data: newMsg } = await supabase.from("chat_messages").insert({
-        account_id: account.id,
-        role: "assistant",
-        kind: "ai_signal",
-        content: `Nemotron AI Setup: ${opp.symbol} ${opp.side.toUpperCase()} · ${opp.strategy}`,
-        payload: {
-          opportunity: opp,
-          preview,
-          signalId,
-          rawSignal: opp.rawSignal
+        if (newMsg) {
+          messages = [messageSchema.parse(newMsg), ...messages];
         }
-      }).select("id, role, kind, content, payload, created_at").maybeSingle();
+      } else {
+        const riskRow = riskResult.data as { risk_per_trade_pct?: number; max_leverage?: number; max_open_positions?: number; max_daily_loss_pct?: number; kill_switch?: boolean } | null;
+        const preview = createTradePreview(opp.parsedSignal, instrument, {
+          riskPerTradePct: Number(riskRow?.risk_per_trade_pct ?? 1),
+          maxLeverage: Number(riskRow?.max_leverage ?? 5),
+          maxOpenPositions: Number(riskRow?.max_open_positions ?? 3),
+          maxDailyLossPct: Number(riskRow?.max_daily_loss_pct ?? 5),
+          killSwitch: Boolean(riskRow?.kill_switch)
+        }, {
+          balance: balance ?? 20000,
+          marketPrice: ticker.lastPrice,
+          openPositions: 0,
+          dailyPnl: 0
+        });
 
-      if (newMsg) {
-        messages = [messageSchema.parse(newMsg), ...messages];
+        const { data: storedSignal } = await supabase.from("signals").insert({
+          account_id: account.id,
+          raw_text: opp.rawSignal,
+          parsed: preview,
+          source: "nemotron_autonomous",
+          status: "preview"
+        }).select("id").maybeSingle();
+
+        const parsedSignalId = z.object({ id: z.string() }).safeParse(storedSignal);
+        const signalId: string | null = parsedSignalId.success ? parsedSignalId.data.id : null;
+
+        const { data: newMsg } = await supabase.from("chat_messages").insert({
+          account_id: account.id,
+          role: "assistant",
+          kind: "ai_signal",
+          content: `Nemotron AI Setup: ${opp.symbol} ${opp.side.toUpperCase()} · ${opp.strategy}`,
+          payload: {
+            opportunity: opp,
+            preview,
+            signalId,
+            rawSignal: opp.rawSignal
+          }
+        }).select("id, role, kind, content, payload, created_at").maybeSingle();
+
+        if (newMsg) {
+          messages = [messageSchema.parse(newMsg), ...messages];
+        }
       }
     } catch {
       // Continue without auto-seeding

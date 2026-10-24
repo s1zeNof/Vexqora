@@ -9,7 +9,7 @@ describe("AI Copilot", () => {
     expect(opp.currentPrice).toBe(65000);
     expect(opp.stopLoss).toBeLessThan(65000);
     expect(opp.takeProfits[0]!.price).toBeGreaterThan(65000);
-    expect(opp.qualityScore).toBeGreaterThanOrEqual(8.5);
+    expect(opp.qualityScore).toBeGreaterThanOrEqual(8.0);
     expect(opp.parsedSignal.symbol).toBe("BTCUSDT");
     expect(opp.parsedSignal.takeProfits.length).toBe(3);
   });

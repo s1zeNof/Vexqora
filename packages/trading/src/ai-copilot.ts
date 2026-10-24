@@ -2,6 +2,7 @@ import { formatCryptoPrice, type Kline, type Signal } from "@crypto-bot/shared";
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
+import { calculateAdaptiveConfidence } from "./ai-learning";
 
 export interface SMCAnalysis {
   timeframe1D?: string | undefined;
@@ -15,10 +16,10 @@ export interface SMCAnalysis {
 
 export interface AISignalOpportunity {
   symbol: string;
-  side: "long" | "short";
+  side: "long" | "short" | "no_trade";
   currentPrice: number;
   qualityScore: number;
-  qualityTier: "A+" | "A" | "B+";
+  qualityTier: "A+" | "A" | "B+" | "B" | "C" | "High Risk";
   strategy: string;
   rationale: string;
   riskReward: number;
@@ -30,6 +31,8 @@ export interface AISignalOpportunity {
   takeProfits: Array<{ price: number; sharePct: number }>;
   trailingDistancePct: number;
   suggestedLeverage: number;
+  decision?: "TRADE" | "NO_TRADE" | "WAIT_FOR_CONFIRMATION" | undefined;
+  rejectionReason?: string | undefined;
   historicalMatch?: HistoricalPatternMatch;
   smcAnalysis?: SMCAnalysis;
 }
@@ -262,18 +265,25 @@ risk ${risk}%`;
     orderBlockZone: side === "long" ? `$${formatCryptoPrice(stopLoss)} - $${formatCryptoPrice(lastPrice)}` : `$${formatCryptoPrice(lastPrice)} - $${formatCryptoPrice(stopLoss)}`
   };
 
-  const qualityScore = rr >= 2.5 ? 9.5 : rr >= 2.0 ? 9.2 : 8.8;
+  const adaptive = calculateAdaptiveConfidence({
+    symbol: normSymbol,
+    side,
+    baseWinRate: rr >= 2.5 ? 68 : rr >= 2.0 ? 63 : 58,
+    klines: options?.klines
+  });
 
   return {
     symbol: normSymbol,
     side,
     currentPrice: lastPrice,
-    qualityScore,
-    qualityTier: qualityScore >= 9.2 ? "A+" : "A",
+    qualityScore: adaptive.qualityScore,
+    qualityTier: adaptive.qualityTier,
     strategy: strategyName,
-    rationale,
+    rationale: adaptive.penalties.length > 0 ? `${rationale} [ML: ${adaptive.learningContext}]` : rationale,
     riskReward: rr,
-    winProbabilityPct: side === "long" ? 73 : 71,
+    winProbabilityPct: adaptive.confidencePct,
+    decision: adaptive.decision,
+    rejectionReason: adaptive.rejectionReason,
     rawSignal,
     parsedSignal,
     entryPrice: lastPrice,

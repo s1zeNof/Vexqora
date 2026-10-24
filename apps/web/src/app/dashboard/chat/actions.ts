@@ -113,6 +113,20 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
           klines
         });
 
+        if (opp.side === "no_trade" || opp.decision === "NO_TRADE") {
+          await supabase.from("chat_messages").insert({
+            account_id: account.id,
+            role: "assistant",
+            kind: "system_alert",
+            content: `🛡️ Nemotron AI: Вхід по ${opp.symbol} відхилено (NO_TRADE). ${opp.rationale}`,
+            payload: {
+              opportunity: opp,
+              historicalMatch: hist
+            }
+          });
+          continue;
+        }
+
         const preview = createTradePreview(opp.parsedSignal, instrument, {
           riskPerTradePct: settings.risk_per_trade_pct,
           maxLeverage: settings.max_leverage,
@@ -207,6 +221,21 @@ export async function analyzePulseAction(formData: FormData): Promise<void> {
       historicalContext: hist,
       klines
     });
+
+    if (opp.side === "no_trade" || opp.decision === "NO_TRADE") {
+      await supabase.from("chat_messages").insert({
+        account_id: account.id,
+        role: "assistant",
+        kind: "system_alert",
+        content: `🛡️ Nemotron AI: Вхід по ${opp.symbol} відхилено (NO_TRADE). ${opp.rationale}`,
+        payload: {
+          opportunity: opp,
+          historicalMatch: hist
+        }
+      });
+      revalidatePath("/dashboard/chat");
+      redirect("/dashboard/chat?tab=feed");
+    }
 
     const balance = await client.getBalance();
     const preview = createTradePreview(opp.parsedSignal, instrument, {
@@ -385,6 +414,24 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
         historicalContext: hist,
         klines
       });
+
+      if (opp.side === "no_trade" || opp.decision === "NO_TRADE") {
+        await supabase.from("chat_messages").insert([
+          { account_id: account.id, role: "user", kind: "user_signal", content: rawText },
+          {
+            account_id: account.id,
+            role: "assistant",
+            kind: "system_alert",
+            content: `🛡️ Nemotron AI: Вхід по ${opp.symbol} не рекомендовано (NO_TRADE).\n${opp.rationale}`,
+            payload: {
+              opportunity: opp,
+              historicalMatch: hist
+            }
+          }
+        ]);
+        revalidatePath("/dashboard/chat");
+        return { error: `Nemotron AI: Вхід по ${opp.symbol} не рекомендовано (NO_TRADE). ${opp.rejectionReason || opp.rationale}` };
+      }
 
       const { data: rawSettings } = await supabase.from("risk_settings")
         .select("risk_per_trade_pct, max_leverage, max_open_positions, max_daily_loss_pct, allowed_symbols, kill_switch")

@@ -16,4 +16,11 @@ describe("Vexqora Memory", () => {
     expect(match.sampleCount).toBe(34);
     expect(match.winRatePct).toBe(70.6);
   });
+
+  it("returns discretionary unconfirmed fallback when no SMC pattern matches instead of random hash", () => {
+    const match = findHistoricalPatternMatch("RANDOMCOIN", "normal_tick", 0.2);
+    expect(match.patternId).toBe("pat-discretionary");
+    expect(match.isEmpirical).toBe(false);
+    expect(match.winRatePct).toBe(50.0);
+  });
 });
