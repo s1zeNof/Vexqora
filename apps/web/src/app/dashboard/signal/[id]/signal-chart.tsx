@@ -49,7 +49,7 @@ export function SignalChart({
   livePrice,
   position
 }: SignalChartProps) {
-  const [chartMode, setChartMode] = useState<"tradingview" | "terminal">("tradingview");
+  const [chartMode, setChartMode] = useState<"tradingview" | "terminal">("terminal");
   const [showLevels, setShowLevels] = useState(false);
   const [timeframe, setTimeframe] = useState<TimeframeOption>("15m");
   const [klines, setKlines] = useState<Kline[]>(initialKlines);
@@ -302,8 +302,14 @@ export function SignalChart({
 
       {/* Main Chart Body */}
       {chartMode === "tradingview" ? (
-        <div style={{ position: "relative", width: "100%", height: "540px", background: "#000000" }}>
-          <TradingViewChart symbol={symbol} height="540px" interval="15" showToolbar={true} />
+        <div style={{ position: "relative", width: "100%", height: "540px", background: "#07050F" }}>
+          <TradingViewChart
+            symbol={symbol}
+            height="540px"
+            interval="15"
+            showToolbar={true}
+            onSwitchToTerminal={() => setChartMode("terminal")}
+          />
         </div>
       ) : (
         <div

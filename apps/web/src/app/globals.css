@@ -944,3 +944,16 @@ input:focus, select:focus, textarea:focus {
     padding: 14px;
   }
 }
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin-anim {
+  animation: spin 0.85s linear infinite;
+}
