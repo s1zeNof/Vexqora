@@ -9,4 +9,7 @@ coverage/
 *.tsbuildinfo
 .turbo/
 supabase/.temp/
+data/
+.venv/
+*.parquet
 

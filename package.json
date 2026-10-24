@@ -9,7 +9,11 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "data:download": "tsx packages/data-lake/src/cli.ts download",
+    "data:trades": "tsx packages/data-lake/src/cli.ts trades",
+    "data:derivatives": "tsx packages/data-lake/src/cli.ts derivatives",
+    "data:status": "tsx packages/data-lake/src/cli.ts status"
   },
   "devDependencies": {
     "@eslint/js": "latest",
