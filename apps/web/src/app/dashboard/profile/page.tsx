@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { signOut } from "../../login/actions";
 import { addPaperDepositAction, removePaperDepositAction, updateProfile } from "../actions";
+import { SoundSettingsCard } from "../../../components/sound-settings-card";
 
 const profileAccountSchema = z.object({
   id: z.string().uuid(),
@@ -180,6 +181,9 @@ export default async function ProfilePage({
             </div>
           </div>
         </div>
+
+        {/* Audio & Pop-up Notification Settings */}
+        <SoundSettingsCard />
 
         {/* User Details & Name Form */}
         <div className="cd" style={{ padding: "20px" }}>

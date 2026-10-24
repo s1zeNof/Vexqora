@@ -86,8 +86,9 @@ begin
     raise exception 'Not authorized to update this trade';
   end if;
 
-  if current_qty is distinct from expected_qty
-     or current_realized_pnl is distinct from coalesce(expected_realized_pnl, 0) then
+  -- Use epsilon tolerance for float-to-numeric comparisons from JavaScript
+  if abs(coalesce(current_qty, 0) - coalesce(expected_qty, 0)) > 0.0001
+     or abs(coalesce(current_realized_pnl, 0) - coalesce(expected_realized_pnl, 0)) > 0.0001 then
     return false;
   end if;
 

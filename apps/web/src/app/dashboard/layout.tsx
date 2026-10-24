@@ -4,6 +4,8 @@ import { z } from "zod";
 import { accountConnectionSchema, createAccountClient } from "../../lib/account-client";
 import { TopNav } from "./top-nav";
 
+import { TradeToastContainer } from "../../components/trade-toast";
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -42,6 +44,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         userEmail={user.email ?? ""}
         displayName={profile?.display_name ?? null}
       />
+      <TradeToastContainer />
       <main className="main-shell">
         {children}
       </main>

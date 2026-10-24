@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { fetchRecentKlines } from "@crypto-bot/exchange";
+import { calculateAdaptiveConfidence } from "@crypto-bot/trading";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
@@ -172,9 +173,6 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
   const strategy = parsedPreview?.opportunity?.strategy ?? "Fair Value Gap (FVG) Mitigation & Expansion";
   const rationale = parsedPreview?.opportunity?.rationale ?? "Structural liquidity sweep followed by market structure shift (MSS) into discount value gap.";
-  const qualityScore = parsedPreview?.opportunity?.qualityScore ? parsedPreview.opportunity.qualityScore.toFixed(1) : "9.5";
-  const qualityTier = parsedPreview?.opportunity?.qualityTier ?? "A+";
-  const winProbabilityPct = parsedPreview?.opportunity?.winProbabilityPct ?? 73;
   const riskReward = parsedPreview?.opportunity?.riskReward ?? 2.4;
 
   // 6. Fetch active trade and trade history from DB (Де ми входили по Live/Paper)
@@ -247,6 +245,34 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   const activePosition = tradesList[0] || null;
   const recentHistoricalTrade = historyTrades[0] || null;
 
+  // 7. Calculate Machine Learning & Adaptive Confidence based on 24h change, wick action & historical memory
+  const symbolHistory = historyTrades.filter(
+    (t) => t.symbol === formattedSymbol || t.symbol === formattedSymbol.replace("USDT", "")
+  );
+  const recentLossesCount = symbolHistory.filter(
+    (t) => (t.pnlUsdt ?? 0) < 0 || t.exitReason === "sl" || t.exitReason === "stop_loss"
+  ).length;
+  const recentWinsCount = symbolHistory.filter(
+    (t) => (t.pnlUsdt ?? 0) > 0 || (t.exitReason && t.exitReason.startsWith("tp"))
+  ).length;
+
+  const adaptiveAi = calculateAdaptiveConfidence({
+    symbol: formattedSymbol,
+    side,
+    change24hPct: changeNum,
+    baseWinRate: parsedPreview?.opportunity?.winProbabilityPct ?? 73,
+    recentLossesCount,
+    recentWinsCount,
+    klines
+  });
+
+  const displayQualityScore = adaptiveAi.qualityScore.toFixed(1);
+  const displayQualityTier = adaptiveAi.qualityTier;
+  const displayWinProbability = adaptiveAi.confidencePct;
+  const displayRationale = adaptiveAi.penalties.length > 0 || adaptiveAi.bonuses.length > 0
+    ? `${rationale} — ${adaptiveAi.learningContext}`
+    : rationale;
+
   const isPaperTrading = account?.exchange === "paper" || account?.environment === "demo";
   const tradingModeLabel = isPaperTrading ? "Paper Trading (Віртуальний рахунок)" : "Bybit Live (Реальний рахунок)";
 
@@ -307,13 +333,13 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
         ageHours={ageHours}
         remainingHours={remainingHours}
         targetSignalId={targetSignalId}
-        qualityScore={qualityScore}
-        qualityTier={qualityTier}
+        qualityScore={displayQualityScore}
+        qualityTier={displayQualityTier}
         strategy={strategy}
-        rationale={rationale}
+        rationale={displayRationale}
         createdAtTime={createdAtTime}
         riskReward={riskReward}
-        winProbabilityPct={winProbabilityPct}
+        winProbabilityPct={displayWinProbability}
         availableBalance={availableBalance}
         onExecute={handleExecuteAction}
         onDeleteFromArchive={handleDeleteFromArchive}

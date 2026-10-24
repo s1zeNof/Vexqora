@@ -11,6 +11,8 @@ import { SignalChart } from "./signal-chart";
 import { SignalPositionsTable, type SignalTradeItem } from "./signal-positions-table";
 import { SignalExecutionPanel } from "./signal-execution-panel";
 import { toggleTradeControlMode } from "./actions";
+import { playTradeNotification } from "../../../../lib/sound-service";
+import { dispatchTradeToast } from "../../../../components/trade-toast";
 
 interface SignalLiveStageProps {
   symbol: string;
@@ -124,13 +126,21 @@ export function SignalLiveStage({
 
   // Automated Paper matching execution on live price ticks (Autopilot mode)
   const lastTickTimeRef = useRef<number>(0);
+  const notifiedTradesRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!isPaperTrading || !activePosition || controlMode !== "auto" || !currentPrice || currentPrice <= 0) {
       return;
     }
 
+    const isLongPos = activePosition.side === "long";
+    const isSlBreached = activePosition.sl
+      ? (isLongPos ? currentPrice <= activePosition.sl : currentPrice >= activePosition.sl)
+      : false;
+
+    // Instant Stop Loss: bypass 1.5s throttle immediately when SL level is breached
     const now = Date.now();
-    if (now - lastTickTimeRef.current < 1500) {
+    if (!isSlBreached && now - lastTickTimeRef.current < 1500) {
       return;
     }
     lastTickTimeRef.current = now;
@@ -145,8 +155,38 @@ export function SignalLiveStage({
       })
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { actionsCount?: number; isClosed?: boolean; tradeStatus?: string; success?: boolean } | null) => {
-        if (isMounted && data && (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0)) {
+      .then((data: {
+        actionsCount?: number;
+        isClosed?: boolean;
+        tradeStatus?: string;
+        success?: boolean;
+        realizedPnl?: number;
+        totalRealizedPnlDelta?: number;
+        exitReason?: string;
+      } | null) => {
+        if (!isMounted || !data) return;
+
+        if (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0) {
+          const tradeKey = `${activePosition.id}-${data.isClosed || data.tradeStatus === "closed" ? "closed" : data.actionsCount}`;
+          if (!notifiedTradesRef.current.has(tradeKey)) {
+            notifiedTradesRef.current.add(tradeKey);
+            const dir = activePosition.side === "long" ? 1 : -1;
+            const diff = (currentPrice - activePosition.entryPrice) * dir;
+            const finalPnl = data.realizedPnl ?? (data.totalRealizedPnlDelta ? data.totalRealizedPnlDelta : diff * activePosition.qty);
+            const finalPct = activePosition.entryPrice > 0
+              ? (finalPnl / ((activePosition.entryPrice * activePosition.qty) / activePosition.leverage)) * 100
+              : 0;
+
+            playTradeNotification(finalPnl);
+            dispatchTradeToast({
+              type: finalPnl >= 0 ? "profit" : "loss",
+              title: finalPnl >= 0 ? "Фіксація прибутку 🎯" : "Спрацював Stop Loss 🛑",
+              symbol,
+              pnlUsdt: finalPnl,
+              pnlPct: finalPct,
+              reason: data.exitReason ?? (finalPnl >= 0 ? "Take Profit" : "Stop Loss")
+            });
+          }
           router.refresh();
         }
       })
@@ -157,7 +197,7 @@ export function SignalLiveStage({
     return () => {
       isMounted = false;
     };
-  }, [isPaperTrading, activePosition, controlMode, currentPrice, router]);
+  }, [isPaperTrading, activePosition, controlMode, currentPrice, router, symbol]);
 
   // Continuous trade status reconciliation: immediately reloads if trade is closed in DB by background worker
   useEffect(() => {
@@ -175,8 +215,35 @@ export function SignalLiveStage({
             })
           });
           if (res.ok && isMounted) {
-            const data = (await res.json()) as { actionsCount?: number; isClosed?: boolean; tradeStatus?: string };
+            const data = (await res.json()) as {
+              actionsCount?: number;
+              isClosed?: boolean;
+              tradeStatus?: string;
+              realizedPnl?: number;
+              totalRealizedPnlDelta?: number;
+              exitReason?: string;
+            };
             if (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0) {
+              const tradeKey = `${activePosition.id}-${data.isClosed || data.tradeStatus === "closed" ? "closed" : data.actionsCount}`;
+              if (!notifiedTradesRef.current.has(tradeKey)) {
+                notifiedTradesRef.current.add(tradeKey);
+                const dir = activePosition.side === "long" ? 1 : -1;
+                const diff = (currentPrice - activePosition.entryPrice) * dir;
+                const finalPnl = data.realizedPnl ?? (data.totalRealizedPnlDelta ? data.totalRealizedPnlDelta : diff * activePosition.qty);
+                const finalPct = activePosition.entryPrice > 0
+                  ? (finalPnl / ((activePosition.entryPrice * activePosition.qty) / activePosition.leverage)) * 100
+                  : 0;
+
+                playTradeNotification(finalPnl);
+                dispatchTradeToast({
+                  type: finalPnl >= 0 ? "profit" : "loss",
+                  title: finalPnl >= 0 ? "Фіксація прибутку 🎯" : "Спрацював Stop Loss 🛑",
+                  symbol,
+                  pnlUsdt: finalPnl,
+                  pnlPct: finalPct,
+                  reason: data.exitReason ?? (finalPnl >= 0 ? "Take Profit" : "Stop Loss")
+                });
+              }
               router.refresh();
             }
           }
@@ -190,7 +257,7 @@ export function SignalLiveStage({
       isMounted = false;
       clearInterval(interval);
     };
-  }, [isPaperTrading, activePosition, currentPrice, router]);
+  }, [isPaperTrading, activePosition, currentPrice, router, symbol]);
 
   const handleModeChange = async (newMode: "auto" | "manual") => {
     if (!activePosition || isUpdatingMode || newMode === controlMode) return;
@@ -566,12 +633,25 @@ export function SignalLiveStage({
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <b style={{ font: "700 15px Inter, sans-serif", color: "#FFFFFF" }}>Аналіз сетапу від Nemotron AI</b>
-                <span className="tg gy" style={{ color: "#F5C451" }}>
+                <span
+                  className="tg gy"
+                  style={{
+                    color: qualityTier === "High Risk" ? "#FF4F9A" : qualityTier === "C" ? "#FFC24B" : "#42F5B9",
+                    borderColor: qualityTier === "High Risk" ? "#FF4F9A" : undefined
+                  }}
+                >
                   ★ {qualityScore}/10 {qualityTier}
                 </span>
               </div>
-              <span className="lb" style={{ fontSize: "12px" }}>
-                Vexqora Memory: 73.0% Win Rate (37 збігів)
+              <span
+                className="lb"
+                style={{
+                  fontSize: "12px",
+                  color: (winProbabilityPct ?? 73) < 55 ? "#FF4F9A" : "var(--muted)",
+                  fontWeight: (winProbabilityPct ?? 73) < 55 ? 600 : 400
+                }}
+              >
+                Vexqora Memory & ML: {winProbabilityPct ?? 73}% Win Rate
               </span>
             </div>
 

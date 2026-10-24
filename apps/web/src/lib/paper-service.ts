@@ -18,7 +18,7 @@ const trailingStopSchema = z.object({
   activated: z.boolean().optional(),
   controlMode: z.enum(["auto", "manual"]).optional(),
   initialQty: z.number().optional()
-}).nullable().optional();
+}).passthrough().nullable().optional();
 
 const dbTradeSchema = z.object({
   id: z.string(),
@@ -32,13 +32,13 @@ const dbTradeSchema = z.object({
   sl: z.union([z.number(), z.string(), z.null()]).optional(),
   trailing_stop: trailingStopSchema,
   realized_pnl: z.union([z.number(), z.string(), z.null()]).optional()
-});
+}).passthrough();
 
 const dbAccountSchema = z.object({
   id: z.string(),
   exchange: z.string(),
   paper_balance: z.union([z.number(), z.string(), z.null()]).optional()
-});
+}).passthrough();
 
 const dbTargetSchema = z.object({
   id: z.string(),
@@ -69,7 +69,10 @@ export async function processPaperTradeTick(
 
   if (tradeErr || !rawTradeData) return null;
   const tradeParsed = dbTradeSchema.safeParse(rawTradeData);
-  if (!tradeParsed.success) return null;
+  if (!tradeParsed.success) {
+    console.error("[PaperService] dbTradeSchema parse error:", tradeParsed.error.issues);
+    return null;
+  }
   const trade = tradeParsed.data;
 
   if (trade.status !== "active" && trade.status !== "entry_open") {
@@ -85,7 +88,10 @@ export async function processPaperTradeTick(
 
   if (accErr || !rawAccData) return null;
   const accParsed = dbAccountSchema.safeParse(rawAccData);
-  if (!accParsed.success) return null;
+  if (!accParsed.success) {
+    console.error("[PaperService] dbAccountSchema parse error:", accParsed.error.issues);
+    return null;
+  }
   const account = accParsed.data;
 
   if (account.exchange !== "paper") {
