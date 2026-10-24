@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { fetchTopUniverseOpportunities, parseSignalText } from "@crypto-bot/trading";
+import { formatTimeAgo } from "../../../lib/date";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { PulseFeedClient, type PulseSignalItem } from "./pulse-feed-client";
 
@@ -51,7 +52,7 @@ function toCard(id: string, createdAt: string, payload: CanonicalPulsePayload): 
     rr: opportunity.riskReward,
     confidence: opportunity.confidence,
     createdAt,
-    age: "just now",
+    age: formatTimeAgo(createdAt),
     status: "active"
   };
 }

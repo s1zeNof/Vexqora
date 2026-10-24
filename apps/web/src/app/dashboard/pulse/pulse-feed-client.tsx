@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { formatPrice } from "../../../lib/format";
+import { formatTimeAgo } from "../../../lib/date";
 
 export interface PulseSignalItem {
   id: string;
@@ -23,9 +25,30 @@ export interface PulseSignalItem {
 }
 
 export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSignalItem[] }) {
+  const router = useRouter();
   const [filter, setFilter] = useState<"all" | "long" | "short" | "spike" | "volume">("all");
   const [minConfidence, setMinConfidence] = useState<number>(0);
   const [sortBy, setSortBy] = useState<"newest" | "confidence" | "rr">("newest");
+  const [lastRefreshed, setLastRefreshed] = useState<number>(Date.now());
+  const [secondsAgo, setSecondsAgo] = useState<number>(0);
+  const [, setTick] = useState<number>(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsAgo(Math.floor((Date.now() - lastRefreshed) / 1000));
+      setTick((t) => t + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lastRefreshed]);
+
+  // Periodic soft refresh of scanner feed every 30s
+  useEffect(() => {
+    const timer = setInterval(() => {
+      router.refresh();
+      setLastRefreshed(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [router]);
 
   let filtered = initialSignals.filter((s) => {
     if (filter === "long" && s.side !== "long") return false;
@@ -47,9 +70,23 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
       {/* Status Bar */}
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
         <h1 style={{ margin: 0, font: "700 28px Inter, sans-serif" }}>Pulse</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", font: "500 13px Inter, sans-serif", color: "#9A9A9A" }}>
-          <i style={{ width: "8px", height: "8px", borderRadius: "4px", background: "#42F5B9", display: "inline-block" }} />
-          916 pairs · Bybit linear · updated 3s ago
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", font: "500 13px Inter, sans-serif", color: "#9A9A9A" }}>
+            <i style={{ width: "8px", height: "8px", borderRadius: "4px", background: "#42F5B9", display: "inline-block" }} />
+            916 pairs · Bybit linear · updated {secondsAgo < 5 ? "just now" : `${secondsAgo}s ago`}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              router.refresh();
+              setLastRefreshed(Date.now());
+            }}
+            className="bt sm"
+            style={{ padding: "4px 8px", fontSize: "12px", color: "#A59CC4" }}
+            title="Оновити зараз"
+          >
+            ↻ Оновити
+          </button>
         </div>
       </div>
 
@@ -132,7 +169,9 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
                 <span className={`tg ${item.side === "long" ? "lg" : "sh"}`}>
                   {item.side.toUpperCase()}
                 </span>
-                <span className="lb" style={{ marginLeft: "auto" }}>{item.age}</span>
+                <span className="lb" style={{ marginLeft: "auto" }}>
+                  {item.createdAt ? formatTimeAgo(item.createdAt) : item.age}
+                </span>
               </div>
 
               {/* Row 2: Trigger */}
