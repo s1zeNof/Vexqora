@@ -85,12 +85,12 @@ export function DayTradesModal({ dateStr, trades, onClose }: DayTradesModalProps
           flexDirection: "column",
           background: "#0E0B1A",
           border: isProfit
-            ? "1px solid #7C4DFF"
+            ? "1px solid #42f5b9"
             : isLoss
             ? "1px solid #FF4F9A"
             : "1px solid #2A2145",
           boxShadow: isProfit
-            ? "0 0 24px rgba(124, 77, 255, 0.25)"
+            ? "0 0 24px rgba(66, 245, 185, 0.25)"
             : isLoss
             ? "0 0 24px rgba(255, 79, 154, 0.25)"
             : "0 12px 36px rgba(0, 0, 0, 0.6)",
@@ -123,18 +123,18 @@ export function DayTradesModal({ dateStr, trades, onClose }: DayTradesModalProps
                   fontWeight: 700,
                   fontVariantNumeric: "tabular-nums",
                   border: isProfit
-                    ? "1px solid #7C4DFF"
+                    ? "1px solid #42f5b9"
                     : isLoss
                     ? "1px solid #FF4F9A"
                     : "1px solid #2A2145",
                   background: isProfit
-                    ? "rgba(124, 77, 255, 0.15)"
+                    ? "rgba(66, 245, 185, 0.15)"
                     : isLoss
                     ? "rgba(255, 79, 154, 0.15)"
                     : "#171229",
-                  color: isProfit ? "#B9A2FF" : isLoss ? "#FF4F9A" : "#F1EEFF",
+                  color: isProfit ? "#42f5b9" : isLoss ? "#FF4F9A" : "#F1EEFF",
                   boxShadow: isProfit
-                    ? "0 0 10px rgba(124, 77, 255, 0.3)"
+                    ? "0 0 10px rgba(66, 245, 185, 0.3)"
                     : isLoss
                     ? "0 0 10px rgba(255, 79, 154, 0.3)"
                     : "none"

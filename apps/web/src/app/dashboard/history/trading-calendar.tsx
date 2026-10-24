@@ -278,7 +278,7 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
               style={{
                 font: "700 15px JetBrains Mono, monospace",
                 margin: "2px 0 0",
-                color: monthStats.bestDayPnl > 0 ? "#B9A2FF" : "#A59CC4"
+                color: monthStats.bestDayPnl > 0 ? "#42f5b9" : "#A59CC4"
               }}
             >
               {monthStats.bestDayPnl > 0 ? `+$${monthStats.bestDayPnl.toFixed(2)}` : "—"}
@@ -376,14 +376,14 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
                     userSelect: "none",
                     // Custom Neon Accent Styling
                     background: isProfit
-                      ? "radial-gradient(circle at 50% 15%, rgba(124, 77, 255, 0.18) 0%, #110D24 100%)"
+                      ? "radial-gradient(circle at 50% 15%, rgba(66, 245, 185, 0.18) 0%, #0c1815 100%)"
                       : isLoss
                       ? "radial-gradient(circle at 50% 15%, rgba(255, 79, 154, 0.18) 0%, #1A0F1D 100%)"
                       : isEven
                       ? "radial-gradient(circle at 50% 15%, rgba(255, 194, 75, 0.12) 0%, #141026 100%)"
                       : "#0E0B1A",
                     border: isProfit
-                      ? "1px solid #7C4DFF"
+                      ? "1px solid #42f5b9"
                       : isLoss
                       ? "1px solid #FF4F9A"
                       : isEven
@@ -392,7 +392,7 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
                       ? "1px solid #35F2D066"
                       : "1px solid #1F1932",
                     boxShadow: isProfit
-                      ? "0 0 16px rgba(124, 77, 255, 0.32)"
+                      ? "0 0 16px rgba(66, 245, 185, 0.32)"
                       : isLoss
                       ? "0 0 16px rgba(255, 79, 154, 0.32)"
                       : isEven
@@ -402,14 +402,14 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
                   onMouseEnter={(e) => {
                     if (hasTrades) {
                       e.currentTarget.style.transform = "translateY(-2px)";
-                      if (isProfit) e.currentTarget.style.boxShadow = "0 0 22px rgba(124, 77, 255, 0.55)";
+                      if (isProfit) e.currentTarget.style.boxShadow = "0 0 22px rgba(66, 245, 185, 0.55)";
                       else if (isLoss) e.currentTarget.style.boxShadow = "0 0 22px rgba(255, 79, 154, 0.55)";
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (hasTrades) {
                       e.currentTarget.style.transform = "none";
-                      if (isProfit) e.currentTarget.style.boxShadow = "0 0 16px rgba(124, 77, 255, 0.32)";
+                      if (isProfit) e.currentTarget.style.boxShadow = "0 0 16px rgba(66, 245, 185, 0.32)";
                       else if (isLoss) e.currentTarget.style.boxShadow = "0 0 16px rgba(255, 79, 154, 0.32)";
                     }
                   }}
@@ -445,7 +445,7 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
                       <div
                         style={{
                           font: "700 13px JetBrains Mono, monospace",
-                          color: isProfit ? "#B9A2FF" : isLoss ? "#FF4F9A" : "#FFC24B",
+                          color: isProfit ? "#42f5b9" : isLoss ? "#FF4F9A" : "#FFC24B",
                           lineHeight: 1.2
                         }}
                       >
@@ -495,12 +495,12 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
               width: "14px",
               height: "14px",
               borderRadius: "3px",
-              background: "#110D24",
-              border: "1px solid #7C4DFF",
-              boxShadow: "0 0 8px rgba(124, 77, 255, 0.4)"
+              background: "#0c1815",
+              border: "1px solid #42f5b9",
+              boxShadow: "0 0 8px rgba(66, 245, 185, 0.4)"
             }}
           />
-          <span>Прибутковий день (фірмовий акцентний неон)</span>
+          <span>Прибутковий день</span>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -514,7 +514,7 @@ export function TradingCalendar({ trades }: TradingCalendarProps) {
               boxShadow: "0 0 8px rgba(255, 79, 154, 0.4)"
             }}
           />
-          <span>Збитковий день (рожевий неон)</span>
+          <span>Збитковий день</span>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
