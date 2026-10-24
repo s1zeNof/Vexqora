@@ -1,11 +1,11 @@
 import { PnlShareButton } from "./pnl-share-button";
+import { LivePositionsTable } from "./live-positions-table";
 import Link from "next/link";
 import type { TradeRow } from "@crypto-bot/shared";
 import { formatCryptoPrice } from "../../../lib/format";
 import { formatTimeAgo } from "../../../lib/date";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
-import { VexqoraLogo } from "../../../components/logo";
-import { closeAllPositions, closeTradePosition } from "../actions";
+import { closeAllPositions } from "../actions";
 
 async function getMarketPrices(symbols: string[]): Promise<Record<string, number>> {
   if (symbols.length === 0) return {};
@@ -190,145 +190,11 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
 
       {/* Content for Current Tab */}
       {currentTab === "active" ? (
-        /* Active Open Positions Table */
-        <div className="cd" style={{ overflow: "hidden" }}>
-          <div className="table-responsive">
-          <table className="dt-table">
-            <thead>
-              <tr>
-                <th>Символ</th>
-                <th>Напрямок</th>
-                <th>Розмір</th>
-                <th>Вхід (Entry)</th>
-                <th>Mark Ціна</th>
-                <th>Stop Loss</th>
-                <th>Trailing</th>
-                <th>Live PnL</th>
-                <th>Час відкриття</th>
-                <th>Дії</th>
-              </tr>
-            </thead>
-            <tbody>
-              {openTrades.length > 0 ? (
-                openTrades.map((trade) => {
-                  const markPrice = prices[trade.symbol.toUpperCase()] ?? (trade.entry_avg ? Number(trade.entry_avg) : null);
-                  const entryPrice = trade.entry_avg ? Number(trade.entry_avg) : 0;
-                  const qty = Number(trade.qty) || 0;
-                  const leverage = Number(trade.leverage) || 1;
-                  const direction = trade.side === "long" ? 1 : -1;
-
-                  let pnlDisplay = "—";
-                  let isProfit = true;
-                  let unrealizedPnl = 0;
-                  let pnlPct = 0;
-
-                  if (markPrice !== null && entryPrice > 0 && qty > 0) {
-                    const diff = markPrice - entryPrice;
-                    unrealizedPnl = diff * qty * direction;
-                    pnlPct = (diff / entryPrice) * leverage * 100 * direction;
-                    isProfit = unrealizedPnl >= 0;
-                    pnlDisplay = `${isProfit ? "+" : ""}${unrealizedPnl.toFixed(2)} USDT (${isProfit ? "+" : ""}${pnlPct.toFixed(2)}%)`;
-                  }
-
-                  return (
-                    <tr key={trade.id}>
-                      <td>
-                        <Link
-                          href={`/dashboard/signal/${trade.symbol}`}
-                          style={{ fontWeight: 600, color: "#FFFFFF", textDecoration: "underline", textUnderlineOffset: "3px" }}
-                        >
-                          {trade.symbol}
-                        </Link>
-                      </td>
-                      <td>
-                        <span className={`tg ${trade.side === "long" ? "lg" : "sh"}`}>
-                          {trade.side.toUpperCase()} {trade.leverage}x
-                        </span>
-                      </td>
-                      <td style={{ fontVariantNumeric: "tabular-nums" }}>{trade.qty}</td>
-                      <td style={{ fontVariantNumeric: "tabular-nums" }}>{trade.entry_avg ? `$${formatCryptoPrice(Number(trade.entry_avg))}` : "—"}</td>
-                      <td style={{ fontVariantNumeric: "tabular-nums" }}>{markPrice !== null ? `$${formatCryptoPrice(markPrice)}` : "—"}</td>
-                      <td style={{ color: "#FF5A6E", fontVariantNumeric: "tabular-nums" }}>{trade.sl ? `$${formatCryptoPrice(Number(trade.sl))}` : "—"}</td>
-                      <td>
-                        {(() => {
-                          const trailingObj = trade.trailing_stop as { controlMode?: "auto" | "manual"; activated?: boolean } | null;
-                          if (trailingObj?.controlMode === "manual") {
-                            return <span className="tg gy" style={{ color: "#FFC24B", border: "1px solid #FFC24B44", fontSize: "11px" }}>👤 Ручний</span>;
-                          }
-                          if (trailingObj?.activated) {
-                            return <span className="tg lg" style={{ fontSize: "11px" }}>⚡ Трейлінг</span>;
-                          }
-                          if (trade.trailing_stop) {
-                            return <span className="tg gy" style={{ color: "#B24BFF", border: "1px solid #7C4DFF44", fontSize: "11px" }}>🤖 Автопілот</span>;
-                          }
-                          return <span style={{ color: "#9A9A9A" }}>—</span>;
-                        })()}
-                      </td>
-                      <td style={{ color: pnlDisplay === "—" ? "#9A9A9A" : isProfit ? "#42F5B9" : "#FF5A6E", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                        {pnlDisplay}
-                      </td>
-                      <td style={{ fontSize: "12px", color: "#9A9A9A" }}>
-                        {trade.opened_at ? formatTimeAgo(trade.opened_at) : "Щойно"}
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                          <PnlShareButton
-                            data={{
-                              symbol: trade.symbol,
-                              side: trade.side,
-                              leverage,
-                              entryPrice,
-                              currentOrExitPrice: markPrice ?? entryPrice,
-                              pnlUsdt: unrealizedPnl,
-                              pnlPct,
-                              isClosed: false,
-                              openedAt: trade.opened_at,
-                              isPaper: active?.environment !== "live"
-                            }}
-                          />
-                          <Link
-                            href={`/dashboard/signal/${trade.symbol}`}
-                            className="bt sm"
-                            title="Відкрити біржовий термінал та графік"
-                          >
-                            Графік
-                          </Link>
-                          <form action={closeTradePosition}>
-                            <input type="hidden" name="tradeId" value={trade.id} />
-                            <input type="hidden" name="qtyPct" value="50" />
-                            <button type="submit" className="bt sm" title="Закрити 50% позиції">
-                              50%
-                            </button>
-                          </form>
-                          <form action={closeTradePosition}>
-                            <input type="hidden" name="tradeId" value={trade.id} />
-                            <input type="hidden" name="qtyPct" value="100" />
-                            <button type="submit" className="bt dn sm" title="Ринкове закриття">
-                              Close
-                            </button>
-                          </form>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={10} style={{ textAlign: "center", padding: "48px 16px", color: "#9A9A9A" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-                      <VexqoraLogo size={32} />
-                      <p style={{ fontSize: "15px", fontWeight: 600, color: "#FFFFFF" }}>Немає активних відкритих позицій</p>
-                      <p className="lb">
-                        Відкрийте ордер на сторінці сигналу або в Pulse, і він миттєво з'явиться тут.
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          </div>
-        </div>
+        <LivePositionsTable
+          openTrades={openTrades}
+          initialPrices={prices}
+          activeAccount={active}
+        />
       ) : (
         /* Archived / Closed Positions Table */
         <div className="cd" style={{ overflow: "hidden" }}>
