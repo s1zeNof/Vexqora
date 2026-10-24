@@ -83,7 +83,7 @@ export default async function PulsePage() {
     const tp2 = side === "long" ? entry + slDistance * 2.6 : entry - slDistance * 2.6;
     const tp3 = side === "long" ? entry + slDistance * 3.5 : entry - slDistance * 3.5;
     const confidence = Math.min(82, 62 + Math.min(8, Math.round(opp.turnover24h / 50_000_000)) + Math.min(8, Math.round(Math.abs(opp.change24hPct) / 2)) - (idx % 3));
-    const rawText = `${opp.symbol} ${side.toUpperCase()}\nentry ${entry}\ntp ${tp1} 40%, ${tp2} 30%, ${tp3} 30%\nsl ${stopLoss}\ntrail 1% after tp1\nlev 5\nrisk 1%`;
+    const rawText = `${opp.symbol} ${side.toUpperCase()}\nentry ${entry}\ntp ${tp1} 40%, ${tp2} 30%, ${tp3} 30%\nsl ${stopLoss}\ntrail 2% after tp1\nlev 5\nrisk 1%`;
     const payload: CanonicalPulsePayload = {
       entryPrice: entry,
       signal: parseSignalText(rawText, "api"),

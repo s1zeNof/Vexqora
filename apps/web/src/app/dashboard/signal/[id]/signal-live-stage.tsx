@@ -145,8 +145,8 @@ export function SignalLiveStage({
       })
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { actionsCount?: number; success?: boolean } | null) => {
-        if (isMounted && data && (data.actionsCount ?? 0) > 0) {
+      .then((data: { actionsCount?: number; isClosed?: boolean; tradeStatus?: string; success?: boolean } | null) => {
+        if (isMounted && data && (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0)) {
           router.refresh();
         }
       })
@@ -158,6 +158,39 @@ export function SignalLiveStage({
       isMounted = false;
     };
   }, [isPaperTrading, activePosition, controlMode, currentPrice, router]);
+
+  // Continuous trade status reconciliation: immediately reloads if trade is closed in DB by background worker
+  useEffect(() => {
+    if (!isPaperTrading || !activePosition) return;
+    let isMounted = true;
+    const interval = setInterval(() => {
+      void (async () => {
+        try {
+          const res = await fetch("/api/trading/paper-tick", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tradeId: activePosition.id,
+              currentPrice: currentPrice > 0 ? currentPrice : activePosition.entryPrice
+            })
+          });
+          if (res.ok && isMounted) {
+            const data = (await res.json()) as { actionsCount?: number; isClosed?: boolean; tradeStatus?: string };
+            if (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0) {
+              router.refresh();
+            }
+          }
+        } catch {
+          // network fallback
+        }
+      })();
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [isPaperTrading, activePosition, currentPrice, router]);
 
   const handleModeChange = async (newMode: "auto" | "manual") => {
     if (!activePosition || isUpdatingMode || newMode === controlMode) return;
