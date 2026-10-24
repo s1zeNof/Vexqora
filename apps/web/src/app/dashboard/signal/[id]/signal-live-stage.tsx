@@ -10,6 +10,8 @@ import { useLiveTicker } from "../../../../hooks/use-live-ticker";
 import { SignalChart } from "./signal-chart";
 import { SignalPositionsTable, type SignalTradeItem } from "./signal-positions-table";
 import { SignalExecutionPanel } from "./signal-execution-panel";
+import { AiEnsembleCard } from "./ai-ensemble-card";
+import type { MarketMicrostructure, MLPredictionResponse, AdaptiveConfidenceResult } from "@crypto-bot/trading";
 import { toggleTradeControlMode } from "./actions";
 import { playTradeNotification } from "../../../../lib/sound-service";
 import { dispatchTradeToast } from "../../../../components/trade-toast";
@@ -47,6 +49,9 @@ interface SignalLiveStageProps {
   riskReward?: number | undefined;
   winProbabilityPct?: number | undefined;
   availableBalance?: number | undefined;
+  mlPrediction?: MLPredictionResponse | null | undefined;
+  microstructure?: MarketMicrostructure | null | undefined;
+  adaptiveAi?: AdaptiveConfidenceResult | null | undefined;
   onExecute?: ((data: {
     orderType: "Market" | "Limit";
     margin: number;
@@ -96,6 +101,9 @@ export function SignalLiveStage({
   riskReward,
   winProbabilityPct,
   availableBalance,
+  mlPrediction,
+  microstructure,
+  adaptiveAi,
   onExecute,
   onDeleteFromArchive,
   children
@@ -628,41 +636,28 @@ export function SignalLiveStage({
             livePrice={currentPrice}
           />
 
-          {/* AI Smart Money & Nemotron Setup Card */}
-          <div className="cd" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <b style={{ font: "700 15px Inter, sans-serif", color: "#FFFFFF" }}>Аналіз сетапу від Nemotron AI</b>
-                <span
-                  className="tg gy"
-                  style={{
-                    color: qualityTier === "High Risk" ? "#FF4F9A" : qualityTier === "C" ? "#FFC24B" : "#42F5B9",
-                    borderColor: qualityTier === "High Risk" ? "#FF4F9A" : undefined
-                  }}
-                >
-                  ★ {qualityScore}/10 {qualityTier}
-                </span>
-              </div>
-              <span
-                className="lb"
-                style={{
-                  fontSize: "12px",
-                  color: (winProbabilityPct ?? 73) < 55 ? "#FF4F9A" : "var(--muted)",
-                  fontWeight: (winProbabilityPct ?? 73) < 55 ? 600 : 400
-                }}
-              >
-                Vexqora Memory & ML: {winProbabilityPct ?? 73}% Win Rate
-              </span>
-            </div>
-
-            <div style={{ font: "600 14px Inter, sans-serif", color: "#FFFFFF" }}>
-              {strategy}
-            </div>
-
-            <div style={{ font: "400 13px Inter, sans-serif", color: "#9A9A9A", lineHeight: 1.5 }}>
-              {rationale}
-            </div>
-          </div>
+          {/* Vexqora AI Decision Ensemble 4-Gate Card */}
+          <AiEnsembleCard
+            symbol={symbol}
+            side={side}
+            strategy={strategy}
+            rationale={rationale}
+            qualityScore={qualityScore}
+            qualityTier={qualityTier}
+            winProbabilityPct={winProbabilityPct ?? 73}
+            mlPrediction={mlPrediction ?? null}
+            microstructure={microstructure ?? null}
+            adaptiveAi={adaptiveAi ?? {
+              confidencePct: winProbabilityPct ?? 73,
+              qualityScore: parseFloat(qualityScore) || 7.0,
+              qualityTier: (qualityTier as "A+" | "A" | "B" | "C" | "High Risk") || "B",
+              penalties: [],
+              bonuses: [],
+              learningContext: "",
+              isHighRisk: qualityTier === "High Risk",
+              decision: qualityTier === "High Risk" ? "NO_TRADE" : "TRADE"
+            }}
+          />
         </div>
 
         {/* Right Column (360px): Signal Specs + Execution Panel */}

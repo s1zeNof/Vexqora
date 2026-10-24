@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { fetchRecentKlines } from "@crypto-bot/exchange";
-import { calculateAdaptiveConfidence } from "@crypto-bot/trading";
+import { fetchRecentKlines, fetchOrderBook, fetchRecentTrades, fetchOpenInterest } from "@crypto-bot/exchange";
+import { calculateAdaptiveConfidence, evaluateMarketMicrostructure, queryMLModelPrediction } from "@crypto-bot/trading";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
@@ -273,6 +273,36 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     ? `${rationale} — ${adaptiveAi.learningContext}`
     : rationale;
 
+  const [mlPrediction, microstructure] = await Promise.all([
+    queryMLModelPrediction({
+      symbol: formattedSymbol,
+      side,
+      entryPrice: entry > 0 ? entry : currentPrice,
+      stopLoss,
+      tp1,
+      klines
+    }).catch(() => null),
+    (async () => {
+      try {
+        const [ob, trades, oiPoints] = await Promise.all([
+          fetchOrderBook(formattedSymbol, 50).catch(() => null),
+          fetchRecentTrades(formattedSymbol, 50).catch(() => []),
+          fetchOpenInterest(formattedSymbol, 6).catch(() => [])
+        ]);
+        return evaluateMarketMicrostructure({
+          symbol: formattedSymbol,
+          orderBook: ob,
+          trades,
+          klines,
+          oiPoints,
+          priceChangePct: changeNum
+        });
+      } catch {
+        return null;
+      }
+    })()
+  ]);
+
   const isPaperTrading = account?.exchange === "paper" || account?.environment === "demo";
   const tradingModeLabel = isPaperTrading ? "Paper Trading (Віртуальний рахунок)" : "Bybit Live (Реальний рахунок)";
 
@@ -341,6 +371,9 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
         riskReward={riskReward}
         winProbabilityPct={displayWinProbability}
         availableBalance={availableBalance}
+        mlPrediction={mlPrediction}
+        microstructure={microstructure}
+        adaptiveAi={adaptiveAi}
         onExecute={handleExecuteAction}
         onDeleteFromArchive={handleDeleteFromArchive}
       />
