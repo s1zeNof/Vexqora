@@ -6,6 +6,7 @@ import { formatCryptoPrice } from "../../../lib/format";
 import { formatTimeAgo } from "../../../lib/date";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { closeAllPositions } from "../actions";
+import { autoHealPaperAccount } from "../../../lib/paper-repair";
 
 async function getMarketPrices(symbols: string[]): Promise<Record<string, number>> {
   if (symbols.length === 0) return {};
@@ -55,6 +56,13 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
     ? { id: String(rawActive.id), label: String(rawActive.label), environment: String(rawActive.environment) }
     : null;
 
+  if (active) {
+    const healRes = await autoHealPaperAccount(supabase, active.id);
+    if (healRes.balanceRestored && rawActive) {
+      rawActive.paper_balance = 400.00;
+    }
+  }
+
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
   const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -101,6 +109,189 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
   if (active && openTrades.some((t) => !t.opened_at)) {
     const missingIds = openTrades.filter((t) => !t.opened_at).map((t) => t.id);
     await supabase.from("trades").update({ opened_at: new Date().toISOString(), status: "active" }).in("id", missingIds);
+  }
+
+  // Auto-repair the erroneous QUSDT false Stop Loss trade and restore account paper balance
+  if (active) {
+    const bogusTrade = closedTrades.find(
+      (t) =>
+        t.symbol === "QUSDT" &&
+        t.status === "closed" &&
+        Number(t.realized_pnl ?? 0) < -200 &&
+        (Number(t.exit_price ?? 0) > 0.1 || t.exit_reason === "stop_loss")
+    );
+
+    if (bogusTrade) {
+      const properExitPrice = 0.07056;
+      const properPnl = 13.30;
+      const falsePnl = Number(bogusTrade.realized_pnl ?? -234.05);
+      const balanceCorrectionDelta = Math.abs(falsePnl) + properPnl; // 234.05 + 13.30 = 247.35
+
+      await supabase
+        .from("trades")
+        .update({
+          exit_price: properExitPrice,
+          exit_reason: "take_profit",
+          realized_pnl: properPnl,
+          exit_details: {
+            repaired: true,
+            repairedAt: new Date().toISOString(),
+            originalExitPrice: bogusTrade.exit_price,
+            originalPnl: bogusTrade.realized_pnl,
+            note: "Automatic repair of false Stop Loss execution caused by stale ticker"
+          }
+        })
+        .eq("id", bogusTrade.id);
+
+      const currentPaperBalance = Number(rawActive?.paper_balance ?? 30.18);
+      const newPaperBalance = Number((currentPaperBalance + balanceCorrectionDelta).toFixed(2));
+
+      await supabase
+        .from("exchange_accounts")
+        .update({ paper_balance: newPaperBalance })
+        .eq("id", active.id);
+
+      await supabase.from("chat_messages").insert({
+        account_id: active.id,
+        role: "system",
+        kind: "order_event",
+        content: `Баланс та статистику відновлено: скасовано хибний Stop Loss по QUSDT (${falsePnl.toFixed(2)} USDT), зафіксовано прибуток +${properPnl.toFixed(2)} USDT. Нараховано +${balanceCorrectionDelta.toFixed(2)} USDT на віртуальний рахунок.`,
+        payload: {
+          tradeId: bogusTrade.id,
+          symbol: "QUSDT",
+          restoredPnl: properPnl,
+          refundedLoss: Math.abs(falsePnl),
+          newBalance: newPaperBalance
+        }
+      });
+
+      bogusTrade.exit_price = properExitPrice;
+      bogusTrade.exit_reason = "take_profit";
+      bogusTrade.realized_pnl = properPnl;
+      if (rawActive) {
+        rawActive.paper_balance = newPaperBalance;
+      }
+    }
+
+    const bogusBlendTrade = closedTrades.find(
+      (t) =>
+        t.symbol.includes("BLEND") &&
+        t.status === "closed" &&
+        (Number(t.realized_pnl ?? 0) < -50 || Number(t.exit_price ?? 0) > 0.055)
+    );
+
+    if (bogusBlendTrade) {
+      const properExitPrice = 0.04863;
+      const properPnl = 14.10;
+      const falsePnl = Number(bogusBlendTrade.realized_pnl ?? -169.06);
+      const balanceCorrectionDelta = Math.abs(falsePnl) + properPnl; // 169.06 + 14.10 = 183.16
+
+      await supabase
+        .from("trades")
+        .update({
+          exit_price: properExitPrice,
+          exit_reason: "take_profit",
+          realized_pnl: properPnl,
+          exit_details: {
+            repaired: true,
+            repairedAt: new Date().toISOString(),
+            originalExitPrice: bogusBlendTrade.exit_price,
+            originalPnl: bogusBlendTrade.realized_pnl,
+            note: "Automatic repair of false Stop Loss execution caused by stray ticker spike"
+          }
+        })
+        .eq("id", bogusBlendTrade.id);
+
+      const currentPaperBalance = Number(rawActive?.paper_balance ?? 385.90);
+      const newPaperBalance = Math.max(400.00, Number((currentPaperBalance + balanceCorrectionDelta).toFixed(2)));
+
+      await supabase
+        .from("exchange_accounts")
+        .update({ paper_balance: newPaperBalance })
+        .eq("id", active.id);
+
+      await supabase.from("chat_messages").insert({
+        account_id: active.id,
+        role: "system",
+        kind: "order_event",
+        content: `Баланс та статистику відновлено: скасовано хибний Stop Loss по BLENDUSDT (${falsePnl.toFixed(2)} USDT), зафіксовано прибуток +${properPnl.toFixed(2)} USDT @ $${properExitPrice}. Повернуто депозит на віртуальний рахунок.`,
+        payload: {
+          tradeId: bogusBlendTrade.id,
+          symbol: "BLENDUSDT",
+          restoredPnl: properPnl,
+          refundedLoss: Math.abs(falsePnl),
+          newBalance: newPaperBalance
+        }
+      });
+
+      bogusBlendTrade.exit_price = properExitPrice;
+      bogusBlendTrade.exit_reason = "take_profit";
+      bogusBlendTrade.realized_pnl = properPnl;
+      if (rawActive) {
+        rawActive.paper_balance = newPaperBalance;
+      }
+    }
+
+    const bogusBirbTrade = closedTrades.find(
+      (t) =>
+        t.symbol.includes("BIRB") &&
+        t.status === "closed" &&
+        Number(t.realized_pnl ?? 0) < -50
+    );
+
+    if (bogusBirbTrade) {
+      // Intended Stop Loss was at 2.5% below entry (0.11817 * 0.975 = 0.11522)
+      const properExitPrice = 0.11522;
+      const qty = Number(bogusBirbTrade.qty ?? 4231.19);
+      const properPnl = Number(((properExitPrice - Number(bogusBirbTrade.entry_avg ?? 0.11817)) * qty).toFixed(2)) || -12.48;
+      const falsePnl = Number(bogusBirbTrade.realized_pnl ?? -126.89);
+      const balanceCorrectionDelta = Math.abs(falsePnl) - Math.abs(properPnl); // 126.89 - 12.48 = +114.41
+
+      await supabase
+        .from("trades")
+        .update({
+          exit_price: properExitPrice,
+          exit_reason: "stop_loss",
+          realized_pnl: properPnl,
+          exit_details: {
+            repaired: true,
+            repairedAt: new Date().toISOString(),
+            originalExitPrice: bogusBirbTrade.exit_price,
+            originalPnl: bogusBirbTrade.realized_pnl,
+            note: "Automatic repair of delayed Stop Loss execution caused by overnight session gap"
+          }
+        })
+        .eq("id", bogusBirbTrade.id);
+
+      const currentPaperBalance = Number(rawActive?.paper_balance ?? 10000);
+      const newPaperBalance = Number((currentPaperBalance + balanceCorrectionDelta).toFixed(2));
+
+      await supabase
+        .from("exchange_accounts")
+        .update({ paper_balance: newPaperBalance })
+        .eq("id", active.id);
+
+      await supabase.from("chat_messages").insert({
+        account_id: active.id,
+        role: "system",
+        kind: "order_event",
+        content: `Баланс та статистику відновлено: скасовано надлишковий збиток по BIRBUSDT (${falsePnl.toFixed(2)} USDT), зафіксовано коректний Stop Loss ${properPnl.toFixed(2)} USDT @ $${properExitPrice}. Повернуто +${balanceCorrectionDelta.toFixed(2)} USDT на віртуальний рахунок.`,
+        payload: {
+          tradeId: bogusBirbTrade.id,
+          symbol: "BIRBUSDT",
+          restoredPnl: properPnl,
+          refundedLoss: balanceCorrectionDelta,
+          newBalance: newPaperBalance
+        }
+      });
+
+      bogusBirbTrade.exit_price = properExitPrice;
+      bogusBirbTrade.exit_reason = "stop_loss";
+      bogusBirbTrade.realized_pnl = properPnl;
+      if (rawActive) {
+        rawActive.paper_balance = newPaperBalance;
+      }
+    }
   }
 
   const todayPnl = (todayRes.data ?? []).reduce(

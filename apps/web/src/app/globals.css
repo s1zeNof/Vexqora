@@ -874,19 +874,16 @@ input:focus, select:focus, textarea:focus {
 .chart-svg {
   display: block;
   width: 100%;
-  height: 500px;
+  height: 100%;
 }
 
-@media (max-width: 768px) {
-  .chart-svg {
-    height: 360px !important;
-  }
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
-@media (max-width: 480px) {
-  .chart-svg {
-    height: 310px !important;
-  }
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .tradingview-container-box {

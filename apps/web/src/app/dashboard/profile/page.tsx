@@ -5,6 +5,8 @@ import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { signOut } from "../../login/actions";
 import { addPaperDepositAction, removePaperDepositAction, updateProfile } from "../actions";
 import { SoundSettingsCard } from "../../../components/sound-settings-card";
+import { EquityCurveChart } from "./equity-curve-chart";
+import { autoHealPaperAccount } from "../../../lib/paper-repair";
 
 const profileAccountSchema = z.object({
   id: z.string().uuid(),
@@ -38,13 +40,19 @@ export default async function ProfilePage({
   const profile = profileRes.data as ProfileRow | null;
   const activeAccount = accountRes.data ? profileAccountSchema.safeParse(accountRes.data).data ?? null : null;
 
+  if (activeAccount) {
+    const healRes = await autoHealPaperAccount(supabase, activeAccount.id);
+    if (healRes.balanceRestored) {
+      activeAccount.paper_balance = 400.00;
+    }
+  }
+
   const tradesRes = activeAccount
     ? await supabase.from("trades").select("*").eq("account_id", activeAccount.id).order("opened_at", { ascending: false }).limit(100)
     : { data: [] };
 
   const trades = (tradesRes.data ?? []) as TradeRow[];
   const closedTrades = trades.filter(t => t.status === "closed");
-
 
   const winningTrades = closedTrades.filter(t => Number(t.realized_pnl) > 0);
   const losingTrades = closedTrades.filter(t => Number(t.realized_pnl) < 0);
@@ -181,6 +189,12 @@ export default async function ProfilePage({
             </div>
           </div>
         </div>
+
+        {/* Equity Curve Chart (Bybit / OKX Style) */}
+        <EquityCurveChart
+          currentBalance={currentEquity ?? 10000}
+          trades={closedTrades}
+        />
 
         {/* Audio & Pop-up Notification Settings */}
         <SoundSettingsCard />

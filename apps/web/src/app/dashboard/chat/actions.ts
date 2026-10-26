@@ -11,7 +11,8 @@ import {
   parseSignalText,
   protectFilledPosition,
   submitEntry,
-  type TradePreview
+  type TradePreview,
+  type UniverseScanFilter
 } from "@crypto-bot/trading";
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { revalidatePath } from "next/cache";
@@ -43,10 +44,21 @@ const riskRow = z.object({
 export async function scanMarketOpportunityAction(formData: FormData): Promise<void> {
   try {
     const rawSymbol = (textField(formData, "symbol") || "UNIVERSE").toUpperCase().trim();
+    const rawFilter = (textField(formData, "filter") || textField(formData, "mode") || "balanced").toLowerCase();
+    const scanFilter: UniverseScanFilter =
+      rawFilter === "moderate" || rawFilter === "помірні" || rawFilter === "steady"
+        ? "moderate"
+        : rawFilter === "momentum"
+          ? "momentum"
+          : rawFilter === "volatile"
+            ? "volatile"
+            : "balanced";
+
     let symbolsToScan: string[] = [];
 
-    if (rawSymbol === "ALL" || rawSymbol === "UNIVERSE" || rawSymbol === "ВСЕ" || rawSymbol === "РИНОК") {
-      const topOpps = await fetchTopUniverseOpportunities(3);
+    if (rawSymbol === "ALL" || rawSymbol === "UNIVERSE" || rawSymbol === "ВСЕ" || rawSymbol === "РИНОК" || rawSymbol === "MODERATE" || rawSymbol === "ПОМІРНІ") {
+      const effectiveFilter = (rawSymbol === "MODERATE" || rawSymbol === "ПОМІРНІ") ? "moderate" : scanFilter;
+      const topOpps = await fetchTopUniverseOpportunities(3, fetch, effectiveFilter);
       symbolsToScan = topOpps.map(o => o.symbol);
     } else {
       let clean = rawSymbol.replace(/[^A-Z0-9]/g, "");
@@ -136,10 +148,16 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
           killSwitch: settings.kill_switch
         }, { balance: balance.equity, marketPrice: ticker.lastPrice, openPositions: openPositions ?? 0, dailyPnl });
 
+        const fullParsed = {
+          ...preview,
+          signal: preview.signal,
+          opportunity: opp
+        };
+
         const { data: stored } = await supabase.from("signals").insert({
           account_id: account.id,
           raw_text: opp.rawSignal,
-          parsed: preview,
+          parsed: fullParsed,
           source: "chat",
           status: "preview"
         }).select("id").limit(1).maybeSingle();
@@ -165,8 +183,15 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
       }
     }
 
+    revalidatePath("/dashboard/signals");
+    revalidatePath("/dashboard/signals?tab=active");
     revalidatePath("/dashboard/chat");
-    redirect("/dashboard/chat?tab=signals");
+    const redirectTo = textField(formData, "redirectTo");
+    if (redirectTo) {
+      redirect(redirectTo);
+    } else {
+      redirect("/dashboard/chat?tab=signals");
+    }
   } catch (error) {
     if (isRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Failed to scan market opportunity";
@@ -390,10 +415,11 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
     const isScanRequest = rawText.toLowerCase().includes("scan") || (!rawText.includes("LONG") && !rawText.includes("SHORT"));
     if (isScanRequest) {
       const isUniverse = rawText.toUpperCase().includes("ALL") || rawText.toUpperCase().includes("UNIVERSE") || rawText.toUpperCase().includes("ВСЕ") || rawText.toUpperCase().includes("РИНОК");
+      const isModerateScan = rawText.toLowerCase().includes("помірн") || rawText.toLowerCase().includes("стабільн") || rawText.toLowerCase().includes("moderate");
       let targetSymbol: string;
-      if (isUniverse) {
-        const topOpps = await fetchTopUniverseOpportunities(1);
-        targetSymbol = topOpps[0]?.symbol ?? "BTCUSDT";
+      if (isUniverse || isModerateScan) {
+        const topOpps = await fetchTopUniverseOpportunities(1, fetch, isModerateScan ? "moderate" : "balanced");
+        targetSymbol = topOpps[0]?.symbol ?? "SOLUSDT";
       } else {
         const cleanWords = words
           .map(w => w.replace(/[^A-Z0-9]/g, ""))

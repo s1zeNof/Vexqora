@@ -129,15 +129,41 @@ export function SignalLiveStage({
     initialFundingRate
   });
 
-  const currentPrice = ticker.price > 0 ? ticker.price : initialPrice;
+  // Extract numeric 24h high/low bounds to reject any stray anomalous ticks (e.g. cross-symbol lags)
+  const numHigh24h = parseFloat(ticker.high24h.replace(/[^0-9.]/g, "")) || 0;
+  const numLow24h = parseFloat(ticker.low24h.replace(/[^0-9.]/g, "")) || 0;
+
+  // Sanitize currentPrice: reject if it wildly exceeds verified 24h bounds of the coin
+  const rawPrice = ticker.price > 0 ? ticker.price : initialPrice;
+  const isPriceWithin24hBounds =
+    numHigh24h > 0 && numLow24h > 0
+      ? rawPrice >= numLow24h * 0.95 && rawPrice <= numHigh24h * 1.05
+      : true;
+
+  const currentPrice = isPriceWithin24hBounds ? rawPrice : (initialPrice > 0 ? initialPrice : rawPrice);
   const isLong = side === "long";
 
   // Automated Paper matching execution on live price ticks (Autopilot mode)
   const lastTickTimeRef = useRef<number>(0);
   const notifiedTradesRef = useRef<Set<string>>(new Set());
+  const hasReceivedLivePriceRef = useRef<boolean>(false);
 
   useEffect(() => {
-    if (!isPaperTrading || !activePosition || controlMode !== "auto" || !currentPrice || currentPrice <= 0) {
+    if (ticker.price > 0 && ticker.lastUpdated > 0 && isPriceWithin24hBounds) {
+      hasReceivedLivePriceRef.current = true;
+    }
+  }, [ticker.price, ticker.lastUpdated, isPriceWithin24hBounds]);
+
+  useEffect(() => {
+    // Only execute paper ticks once a real verified live price has arrived, not on stale initial SSR props
+    if (
+      !isPaperTrading ||
+      !activePosition ||
+      controlMode !== "auto" ||
+      !currentPrice ||
+      currentPrice <= 0 ||
+      !hasReceivedLivePriceRef.current
+    ) {
       return;
     }
 
@@ -174,16 +200,23 @@ export function SignalLiveStage({
       } | null) => {
         if (!isMounted || !data) return;
 
-        if (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0) {
-          const tradeKey = `${activePosition.id}-${data.isClosed || data.tradeStatus === "closed" ? "closed" : data.actionsCount}`;
+        const isClosed = Boolean(data.isClosed || data.tradeStatus === "closed");
+        const hasRealizedDelta = typeof data.totalRealizedPnlDelta === "number" && Math.abs(data.totalRealizedPnlDelta) > 0.0001;
+
+        if (isClosed || hasRealizedDelta) {
+          const tradeKey = `${activePosition.id}-${isClosed ? "closed" : (data.actionsCount ?? 1)}`;
           if (!notifiedTradesRef.current.has(tradeKey)) {
             notifiedTradesRef.current.add(tradeKey);
-            const dir = activePosition.side === "long" ? 1 : -1;
-            const diff = (currentPrice - activePosition.entryPrice) * dir;
-            const finalPnl = data.realizedPnl ?? (data.totalRealizedPnlDelta ? data.totalRealizedPnlDelta : diff * activePosition.qty);
-            const finalPct = activePosition.entryPrice > 0
-              ? (finalPnl / ((activePosition.entryPrice * activePosition.qty) / activePosition.leverage)) * 100
-              : 0;
+            const positionMargin = activePosition.entryPrice > 0 && activePosition.qty > 0 && activePosition.leverage > 0
+              ? (activePosition.entryPrice * activePosition.qty) / activePosition.leverage
+              : 100;
+            let finalPnl = typeof data.realizedPnl === "number"
+              ? data.realizedPnl
+              : (typeof data.totalRealizedPnlDelta === "number" ? data.totalRealizedPnlDelta : 0);
+
+            // Strict isolated margin clamp: loss cannot exceed 100% of position margin
+            finalPnl = Math.max(finalPnl, -positionMargin);
+            const finalPct = Math.max(-100, Math.min(1000, (finalPnl / positionMargin) * 100));
 
             playTradeNotification(finalPnl);
             dispatchTradeToast({
@@ -195,7 +228,9 @@ export function SignalLiveStage({
               reason: data.exitReason ?? (finalPnl >= 0 ? "Take Profit" : "Stop Loss")
             });
           }
-          router.refresh();
+          if (isClosed) {
+            router.refresh();
+          }
         }
       })
       .catch(() => {
@@ -209,7 +244,7 @@ export function SignalLiveStage({
 
   // Continuous trade status reconciliation: immediately reloads if trade is closed in DB by background worker
   useEffect(() => {
-    if (!isPaperTrading || !activePosition) return;
+    if (!isPaperTrading || !activePosition || controlMode !== "auto" || !hasReceivedLivePriceRef.current || !isPriceWithin24hBounds) return;
     let isMounted = true;
     const interval = setInterval(() => {
       void (async () => {
@@ -231,16 +266,23 @@ export function SignalLiveStage({
               totalRealizedPnlDelta?: number;
               exitReason?: string;
             };
-            if (data.isClosed || data.tradeStatus === "closed" || (data.actionsCount ?? 0) > 0) {
-              const tradeKey = `${activePosition.id}-${data.isClosed || data.tradeStatus === "closed" ? "closed" : data.actionsCount}`;
+            const isClosed = Boolean(data.isClosed || data.tradeStatus === "closed");
+            const hasRealizedDelta = typeof data.totalRealizedPnlDelta === "number" && Math.abs(data.totalRealizedPnlDelta) > 0.0001;
+
+            if (isClosed || hasRealizedDelta) {
+              const tradeKey = `${activePosition.id}-${isClosed ? "closed" : (data.actionsCount ?? 1)}`;
               if (!notifiedTradesRef.current.has(tradeKey)) {
                 notifiedTradesRef.current.add(tradeKey);
-                const dir = activePosition.side === "long" ? 1 : -1;
-                const diff = (currentPrice - activePosition.entryPrice) * dir;
-                const finalPnl = data.realizedPnl ?? (data.totalRealizedPnlDelta ? data.totalRealizedPnlDelta : diff * activePosition.qty);
-                const finalPct = activePosition.entryPrice > 0
-                  ? (finalPnl / ((activePosition.entryPrice * activePosition.qty) / activePosition.leverage)) * 100
-                  : 0;
+                const positionMargin = activePosition.entryPrice > 0 && activePosition.qty > 0 && activePosition.leverage > 0
+                  ? (activePosition.entryPrice * activePosition.qty) / activePosition.leverage
+                  : 100;
+                let finalPnl = typeof data.realizedPnl === "number"
+                  ? data.realizedPnl
+                  : (typeof data.totalRealizedPnlDelta === "number" ? data.totalRealizedPnlDelta : 0);
+
+                // Strict isolated margin clamp: loss cannot exceed 100% of position margin
+                finalPnl = Math.max(finalPnl, -positionMargin);
+                const finalPct = Math.max(-100, Math.min(1000, (finalPnl / positionMargin) * 100));
 
                 playTradeNotification(finalPnl);
                 dispatchTradeToast({
@@ -252,7 +294,9 @@ export function SignalLiveStage({
                   reason: data.exitReason ?? (finalPnl >= 0 ? "Take Profit" : "Stop Loss")
                 });
               }
-              router.refresh();
+              if (isClosed) {
+                router.refresh();
+              }
             }
           }
         } catch {
@@ -265,7 +309,7 @@ export function SignalLiveStage({
       isMounted = false;
       clearInterval(interval);
     };
-  }, [isPaperTrading, activePosition, currentPrice, router, symbol]);
+  }, [isPaperTrading, activePosition, controlMode, isPriceWithin24hBounds, currentPrice, router, symbol]);
 
   const handleModeChange = async (newMode: "auto" | "manual") => {
     if (!activePosition || isUpdatingMode || newMode === controlMode) return;
@@ -293,6 +337,19 @@ export function SignalLiveStage({
   const displayPnlUsdt = activePosition ? livePnlUsdt : (recentHistoricalTrade?.pnlUsdt ?? 0);
   const displayPnlPct = activePosition ? livePnlPct : (recentHistoricalTrade?.pnlPct ?? 0);
 
+  const slDistancePct = entry > 0 && stopLoss > 0 ? Math.abs(entry - stopLoss) / entry : 0;
+  const change24hVal = Math.abs(Number(initialPriceChangePct) || 0);
+  const isHighVolatility = Boolean(
+    slDistancePct >= 0.035 ||
+    change24hVal >= 10 ||
+    strategy?.toLowerCase().includes("volatility") ||
+    strategy?.toLowerCase().includes("expansion") ||
+    strategy?.toLowerCase().includes("squeeze") ||
+    strategy?.toLowerCase().includes("імпульс") ||
+    rationale?.toLowerCase().includes("volatility") ||
+    symbol.toUpperCase() === "QUSDT"
+  );
+
   return (
     <>
       {/* Top Breadcrumb & Status Pill */}
@@ -316,6 +373,23 @@ export function SignalLiveStage({
               🟢 Актуальний сигнал (ще {remainingHours}г)
             </span>
           )}
+
+          {isHighVolatility ? (
+            <span
+              className="tg"
+              style={{
+                background: "rgba(255, 194, 75, 0.15)",
+                color: "#FFC24B",
+                border: "1px solid rgba(255, 194, 75, 0.4)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px"
+              }}
+              title="Підвищена волатильність: швидкі коливання ціни за 1 секунду"
+            >
+              ⚡ Висока волатильність
+            </span>
+          ) : null}
 
           {activePosition ? (
             <span
@@ -565,24 +639,26 @@ export function SignalLiveStage({
       ) : null}
 
       {/* Symbol Header & 24h Stats in OKX Ticker Bar with Live Ticks */}
-      <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap", margin: "4px 0 8px" }}>
-        <b style={{ font: "700 26px Inter, sans-serif", color: "#FFFFFF" }}>{symbol}</b>
-        <span className="tg gy">Perp</span>
-        <span className="tg gy">Bybit</span>
-        <span
-          className="v"
-          style={{
-            margin: 0,
-            fontSize: "28px",
-            color: ticker.tickDirection === "up" ? "#42F5B9" : ticker.tickDirection === "down" ? "#FF5A6E" : (isLong ? "#42F5B9" : "#FF5A6E"),
-            transition: "color 0.3s"
-          }}
-        >
-          {formatPrice(currentPrice)}
-        </span>
-        <span style={{ font: "600 14px Inter, sans-serif", color: isLong ? "#42F5B9" : "#FF5A6E" }}>
-          {ticker.price24hPcnt}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap", margin: "4px 0 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <b style={{ font: "700 clamp(20px, 5.5vw, 26px) Inter, sans-serif", color: "#FFFFFF" }}>{symbol}</b>
+          <span className="tg gy" style={{ padding: "2px 6px", fontSize: "11px" }}>Perp</span>
+          <span className="tg gy" style={{ padding: "2px 6px", fontSize: "11px" }}>Bybit</span>
+          <span
+            className="v"
+            style={{
+              margin: 0,
+              fontSize: "clamp(20px, 5.5vw, 26px)",
+              color: ticker.tickDirection === "up" ? "#42F5B9" : ticker.tickDirection === "down" ? "#FF5A6E" : (isLong ? "#42F5B9" : "#FF5A6E"),
+              transition: "color 0.3s"
+            }}
+          >
+            {formatPrice(currentPrice)}
+          </span>
+          <span style={{ font: "600 13px Inter, sans-serif", color: isLong ? "#42F5B9" : "#FF5A6E" }}>
+            {ticker.price24hPcnt}
+          </span>
+        </div>
 
         <div className="ticker-stats-row">
           <div>
@@ -626,6 +702,17 @@ export function SignalLiveStage({
               pnlPct: livePnlPct,
               isPaper: isPaperTrading,
               openedAt: activePosition.opened_at
+            } : null}
+            closedPosition={!activePosition && recentHistoricalTrade && recentHistoricalTrade.exitPrice ? {
+              side: recentHistoricalTrade.side,
+              leverage: recentHistoricalTrade.leverage,
+              entryPrice: recentHistoricalTrade.entryPrice,
+              exitPrice: recentHistoricalTrade.exitPrice,
+              exitReason: recentHistoricalTrade.exitReason,
+              pnlUsdt: recentHistoricalTrade.pnlUsdt,
+              pnlPct: recentHistoricalTrade.pnlPct,
+              openedAt: recentHistoricalTrade.opened_at,
+              closedAt: recentHistoricalTrade.closed_at
             } : null}
           />
 

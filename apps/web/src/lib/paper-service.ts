@@ -149,19 +149,26 @@ export async function processPaperTradeTick(
     return result;
   }
 
-  // 5. Atomically persist the trade, targets and balance. The expected values
-  // prevent the browser tick and background worker from settling the same event twice.
+  // 5. Atomically persist the trade, targets and balance.
+  // Isolated Margin Guard: A paper position loss can NEVER exceed the allocated position margin
+  const allocatedMargin = tradeSnapshot.leverage > 0 && tradeSnapshot.entry_avg > 0
+    ? (tradeSnapshot.entry_avg * Number(trade.qty ?? 0)) / tradeSnapshot.leverage
+    : Number(trade.qty ?? 0) * tradeSnapshot.entry_avg;
+
+  const safePnlDelta = Math.max(result.totalRealizedPnlDelta, -allocatedMargin);
+  const safeNewRealizedPnl = Number(trade.realized_pnl ?? 0) + safePnlDelta;
+
   const exit = result.updatedTrade.exit;
   const applyResult = await supabase.rpc("apply_paper_trade_result", {
     target_trade_id: trade.id,
     expected_qty: Number(trade.qty ?? 0),
     expected_realized_pnl: Number(trade.realized_pnl ?? 0),
     new_qty: result.updatedTrade.qty,
-    new_realized_pnl: result.updatedTrade.realized_pnl,
+    new_realized_pnl: safeNewRealizedPnl,
     new_status: result.updatedTrade.status,
     new_trailing_stop: result.updatedTrade.trailing_stop,
     result_closed_at: result.updatedTrade.closed_at ?? null,
-    realized_pnl_delta: result.totalRealizedPnlDelta,
+    realized_pnl_delta: safePnlDelta,
     target_updates: result.updatedTargets,
     result_exit_reason: exit?.reason ?? null,
     result_exit_price: exit?.price ?? null,

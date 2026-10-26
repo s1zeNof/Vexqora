@@ -192,6 +192,7 @@ interface TradeWithAccount {
   side: "long" | "short";
   qty: number;
   entry_avg: number | null;
+  leverage?: number | null;
   realized_pnl: number | null;
   exchange_accounts: AccountInfo;
 }
@@ -205,7 +206,7 @@ export async function closeTradePosition(formData: FormData) {
 
   const tradeRes = await supabase
     .from("trades")
-    .select("id, symbol, side, qty, entry_avg, realized_pnl, exchange_accounts!inner(id, user_id, exchange, environment, api_key_enc, api_secret_enc, paper_balance)")
+    .select("id, symbol, side, qty, entry_avg, leverage, realized_pnl, exchange_accounts!inner(id, user_id, exchange, environment, api_key_enc, api_secret_enc, paper_balance)")
     .eq("id", tradeId)
     .eq("status", "active")
     .single();
@@ -252,7 +253,11 @@ export async function closeTradePosition(formData: FormData) {
       // non-fatal if orders already cancelled
     }
 
-    const pnl = (ticker.lastPrice - Number(trade.entry_avg)) * totalQty * (trade.side === "long" ? 1 : -1);
+    const rawPnl = (ticker.lastPrice - Number(trade.entry_avg)) * totalQty * (trade.side === "long" ? 1 : -1);
+    const positionMargin = Number(trade.entry_avg) > 0 && totalQty > 0
+      ? (Number(trade.entry_avg) * totalQty) / (Number(trade.leverage) || 5)
+      : 100;
+    const pnl = Math.max(rawPnl, -positionMargin);
     const totalRealizedPnl = Number(trade.realized_pnl ?? 0) + pnl;
 
     await supabase.from("trades").update({
@@ -280,7 +285,11 @@ export async function closeTradePosition(formData: FormData) {
     });
   } else {
     const remainingQty = totalQty - closeQty;
-    const partialPnl = (ticker.lastPrice - Number(trade.entry_avg)) * closeQty * (trade.side === "long" ? 1 : -1);
+    const rawPartialPnl = (ticker.lastPrice - Number(trade.entry_avg)) * closeQty * (trade.side === "long" ? 1 : -1);
+    const partialMargin = Number(trade.entry_avg) > 0 && closeQty > 0
+      ? (Number(trade.entry_avg) * closeQty) / (Number(trade.leverage) || 5)
+      : 50;
+    const partialPnl = Math.max(rawPartialPnl, -partialMargin);
     const totalRealizedPnl = Number(trade.realized_pnl ?? 0) + partialPnl;
     await supabase.from("trades").update({
       qty: remainingQty,
@@ -321,7 +330,7 @@ export async function closeAllPositions(formData: FormData) {
 
   const tradesRes = await supabase
     .from("trades")
-    .select("id, symbol, side, qty, entry_avg, realized_pnl")
+    .select("id, symbol, side, qty, entry_avg, leverage, realized_pnl")
     .eq("account_id", account.id)
     .eq("status", "active");
 
@@ -330,6 +339,7 @@ export async function closeAllPositions(formData: FormData) {
     symbol: string;
     side: "long" | "short";
     qty: number;
+    leverage?: number;
     entry_avg: number | null;
     realized_pnl: number | null;
   }>;
@@ -361,7 +371,11 @@ export async function closeAllPositions(formData: FormData) {
         // ignore
       }
 
-      const pnl = (ticker.lastPrice - Number(trade.entry_avg)) * Number(trade.qty) * (trade.side === "long" ? 1 : -1);
+      const rawPnl = (ticker.lastPrice - Number(trade.entry_avg)) * Number(trade.qty) * (trade.side === "long" ? 1 : -1);
+      const positionMargin = Number(trade.entry_avg) > 0 && Number(trade.qty) > 0
+        ? (Number(trade.entry_avg) * Number(trade.qty)) / (Number(trade.leverage) || 5)
+        : 100;
+      const pnl = Math.max(rawPnl, -positionMargin);
       const totalRealizedPnl = Number(trade.realized_pnl ?? 0) + pnl;
 
       await supabase.from("trades").update({

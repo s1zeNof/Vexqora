@@ -218,6 +218,12 @@ export function LivePositionsTable({
       const currentPrice = prices[trade.symbol.toUpperCase()];
       if (!currentPrice || currentPrice <= 0) continue;
 
+      const entryPrice = trade.entry_avg ? Number(trade.entry_avg) : 0;
+      if (entryPrice > 0 && Math.abs(currentPrice - entryPrice) / entryPrice > 0.12) {
+        // Stray anomaly or unverified cross-symbol price: protect position
+        continue;
+      }
+
       fetch("/api/trading/paper-tick", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

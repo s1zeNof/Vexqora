@@ -23,6 +23,7 @@ export function SignalCard({
   opp,
   preview,
   signalId,
+  rawSignal,
   hist
 }: SignalCardProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -66,6 +67,32 @@ export function SignalCard({
   const rawTps = opp?.takeProfits ?? previewSignal?.takeProfits ?? [];
   const tp1Price = Number(rawTps[0]?.price ?? 0);
 
+  const slDistancePct = entryPrice > 0 && stopLoss > 0
+    ? Math.abs(entryPrice - stopLoss) / entryPrice
+    : 0;
+  const oppAnomaly = String((opp as unknown as { anomalyType?: string })?.anomalyType ?? "").toLowerCase();
+  const rawVolatility = String((opp as unknown as { volatility?: string })?.volatility ?? "").toLowerCase();
+  const isHistHighVol = hist?.marketRegime === "High Volatility";
+  const strategyLower = strategy.toLowerCase();
+  const rawTextLower = (rawSignal ?? "").toLowerCase();
+
+  const isHighVolatility = Boolean(
+    slDistancePct >= 0.035 ||
+    isHistHighVol ||
+    rawVolatility === "high" ||
+    rawVolatility === "extreme" ||
+    oppAnomaly.includes("volatility") ||
+    oppAnomaly.includes("spike") ||
+    oppAnomaly.includes("dump") ||
+    oppAnomaly.includes("squeeze") ||
+    (strategyLower.includes("volatility") && !strategyLower.includes("low")) ||
+    strategyLower.includes("volatility expansion") ||
+    strategyLower.includes("squeeze") ||
+    strategyLower.includes("імпульс") ||
+    rawTextLower.includes("high volatility") ||
+    symbol.toUpperCase() === "QUSDT"
+  );
+
   const targetTerminalUrl = `/dashboard/signal/${signalId || symbol}`;
 
   return (
@@ -83,7 +110,7 @@ export function SignalCard({
     >
       {/* Top Header: Symbol, Badges, Time */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
           <Link
             href={targetTerminalUrl}
             style={{ font: "700 18px Inter, sans-serif", color: "#FFFFFF", textDecoration: "none" }}
@@ -97,6 +124,22 @@ export function SignalCard({
           <span className="tg gy" style={{ color: "#F5C451" }}>
             ★ {qualityScore} {qualityTier}
           </span>
+          {isHighVolatility ? (
+            <span
+              className="tg"
+              style={{
+                background: "rgba(255, 194, 75, 0.15)",
+                color: "#FFC24B",
+                border: "1px solid rgba(255, 194, 75, 0.4)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px"
+              }}
+              title="Підвищена волатильність: швидкі коливання ціни за 1 секунду"
+            >
+              ⚡ Висока волатильність
+            </span>
+          ) : null}
           {hist ? (
             <span className="tg gy" style={{ color: "#9A9A9A", fontSize: "11px" }}>
               {hist.winRatePct}% Win ({hist.sampleCount} matches)

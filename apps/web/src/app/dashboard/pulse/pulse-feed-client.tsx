@@ -23,11 +23,13 @@ export interface PulseSignalItem {
   createdAt: string;
   age: string;
   status: "active" | "expired" | "taken";
+  change24hPct?: number | undefined;
+  category?: "moderate" | "momentum" | "volatile" | undefined;
 }
 
 export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSignalItem[] }) {
   const router = useRouter();
-  const [filter, setFilter] = useState<"all" | "long" | "short" | "whale" | "sweep" | "spike" | "volume">("all");
+  const [filter, setFilter] = useState<"all" | "moderate" | "trending" | "long" | "short" | "whale" | "sweep" | "spike" | "volume">("all");
   const [minConfidence, setMinConfidence] = useState<number>(0);
   const [sortBy, setSortBy] = useState<"newest" | "confidence" | "rr">("newest");
   const [lastRefreshed, setLastRefreshed] = useState<number>(Date.now());
@@ -52,6 +54,8 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
   }, [router]);
 
   let filtered = initialSignals.filter((s) => {
+    if (filter === "moderate" && Math.abs(s.change24hPct ?? 0) > 5.0) return false;
+    if (filter === "trending" && Math.abs(s.change24hPct ?? 0) <= 5.0) return false;
     if (filter === "long" && s.side !== "long") return false;
     if (filter === "short" && s.side !== "short") return false;
     if (filter === "whale" && s.triggerType !== "whale") return false;
@@ -101,6 +105,32 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
           className={`tab ${filter === "all" ? "on" : ""}`}
         >
           All
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("moderate")}
+          className={`tab ${filter === "moderate" ? "on" : ""}`}
+          style={{
+            background: filter === "moderate" ? "rgba(53, 242, 208, 0.15)" : undefined,
+            color: filter === "moderate" ? "#35F2D0" : undefined,
+            borderColor: filter === "moderate" ? "rgba(53, 242, 208, 0.4)" : undefined
+          }}
+          title="Монети зі спокійною динамікою в межах -5%..+5%"
+        >
+          🛡️ Помірні
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilter("trending")}
+          className={`tab ${filter === "trending" ? "on" : ""}`}
+          style={{
+            background: filter === "trending" ? "rgba(185, 162, 255, 0.15)" : undefined,
+            color: filter === "trending" ? "#B9A2FF" : undefined,
+            borderColor: filter === "trending" ? "rgba(185, 162, 255, 0.4)" : undefined
+          }}
+          title="Трендові монети з високим процентом зміни (>5% памп/дамп)"
+        >
+          🚀 Трендові
         </button>
         <button
           type="button"
@@ -180,12 +210,38 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
         <div className="pulse-grid">
           {filtered.map((item) => (
             <div key={item.id} className="cd" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
-              {/* Row 1: Symbol, Tag, Age */}
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {/* Row 1: Symbol, Tag, 24h Badge, Age */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <b style={{ font: "700 18px Inter, sans-serif", color: "#FFFFFF" }}>{item.symbol}</b>
                 <span className={`tg ${item.side === "long" ? "lg" : "sh"}`}>
                   {item.side.toUpperCase()}
                 </span>
+                {item.change24hPct !== undefined && (
+                  <span
+                    style={{
+                      font: "600 11px 'JetBrains Mono', monospace",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      background: Math.abs(item.change24hPct) <= 5.0
+                        ? "rgba(53, 242, 208, 0.1)"
+                        : item.change24hPct > 0
+                          ? "rgba(53, 242, 208, 0.15)"
+                          : "rgba(255, 79, 154, 0.15)",
+                      color: Math.abs(item.change24hPct) <= 5.0
+                        ? "#35F2D0"
+                        : item.change24hPct > 0
+                          ? "#35F2D0"
+                          : "#FF4F9A",
+                      border: Math.abs(item.change24hPct) <= 5.0
+                        ? "1px solid rgba(53, 242, 208, 0.3)"
+                        : "none"
+                    }}
+                    title={Math.abs(item.change24hPct) <= 5.0 ? "Помірна волатильність (-5%..+5%)" : "24h зміна ціни"}
+                  >
+                    {Math.abs(item.change24hPct) <= 5.0 ? "🛡️ " : ""}
+                    {item.change24hPct >= 0 ? "+" : ""}{item.change24hPct.toFixed(1)}%
+                  </span>
+                )}
                 <span className="lb" style={{ marginLeft: "auto" }}>
                   {item.createdAt ? formatTimeAgo(item.createdAt) : item.age}
                 </span>

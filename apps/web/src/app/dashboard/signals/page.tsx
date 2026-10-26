@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
 import { accountConnectionSchema } from "../../../lib/account-client";
-import { scanMarketOpportunityAction } from "../chat/actions";
+import { ScanModalButton } from "./scan-modal";
 import { SignalsClientList } from "./signals-client-list";
 
 interface SignalsPageProps {
@@ -20,14 +20,17 @@ const signalRowSchema = z.object({
 
 const tradeRowSchema = z.object({
   id: z.string(),
-  signal_id: z.string().nullable(),
+  signal_id: z.string().nullable().optional(),
   symbol: z.string(),
   side: z.string(),
   status: z.string(),
-  entry_avg: z.coerce.number().nullable(),
-  realized_pnl: z.coerce.number().nullable(),
-  leverage: z.coerce.number().nullable(),
-  opened_at: z.string().nullable()
+  entry_avg: z.coerce.number().nullable().optional(),
+  exit_price: z.coerce.number().nullable().optional(),
+  exit_reason: z.string().nullable().optional(),
+  realized_pnl: z.coerce.number().nullable().optional(),
+  leverage: z.coerce.number().nullable().optional(),
+  opened_at: z.string().nullable().optional(),
+  closed_at: z.string().nullable().optional()
 });
 
 const outcomeRowSchema = z.object({
@@ -64,14 +67,14 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
     .select("id, raw_text, parsed, status, created_at")
     .eq("account_id", account.id)
     .order("created_at", { ascending: false })
-    .limit(60) : { data: [] };
+    .limit(300) : { data: [] };
 
   const parsedSignals = z.array(signalRowSchema).safeParse(rawSignals ?? []).data ?? [];
 
   // 2. Fetch all trades to correlate who we entered
   const { data: rawTrades } = account ? await supabase
     .from("trades")
-    .select("id, signal_id, symbol, side, status, entry_avg, realized_pnl, leverage, opened_at")
+    .select("id, signal_id, symbol, side, status, entry_avg, exit_price, exit_reason, realized_pnl, leverage, opened_at, closed_at")
     .eq("account_id", account.id)
     .order("opened_at", { ascending: false }) : { data: [] };
 
@@ -90,21 +93,56 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
     side: string;
     status: string;
     entry_avg: number;
+    exit_price: number | null;
+    exit_reason: string | null;
     realized_pnl: number;
     leverage: number;
+    opened_at: string | null;
+    closed_at: string | null;
   }>();
 
   for (const t of parsedTrades) {
-    if (t.signal_id) {
+    if (t.signal_id && !tradesMap.has(t.signal_id)) {
       tradesMap.set(t.signal_id, {
         id: t.id,
         symbol: t.symbol,
         side: t.side,
         status: t.status,
         entry_avg: Number(t.entry_avg ?? 0),
+        exit_price: t.exit_price != null ? Number(t.exit_price) : null,
+        exit_reason: t.exit_reason ?? null,
         realized_pnl: Number(t.realized_pnl ?? 0),
-        leverage: Number(t.leverage ?? 5)
+        leverage: Number(t.leverage ?? 5),
+        opened_at: t.opened_at ?? null,
+        closed_at: t.closed_at ?? null
       });
+    }
+  }
+
+  // Fallback correlation for older trades where signal_id was not populated
+  for (const t of parsedTrades) {
+    if (!t.signal_id) {
+      const tradeOpenedMs = t.opened_at ? new Date(t.opened_at).getTime() : 0;
+      const matchedSig = parsedSignals.find((s) => {
+        const sigCreatedMs = new Date(s.created_at).getTime();
+        const diffMs = tradeOpenedMs - sigCreatedMs;
+        return s.raw_text?.includes(t.symbol) && diffMs >= 0 && diffMs <= 48 * 60 * 60 * 1000;
+      });
+      if (matchedSig && !tradesMap.has(matchedSig.id)) {
+        tradesMap.set(matchedSig.id, {
+          id: t.id,
+          symbol: t.symbol,
+          side: t.side,
+          status: t.status,
+          entry_avg: Number(t.entry_avg ?? 0),
+          exit_price: t.exit_price != null ? Number(t.exit_price) : null,
+          exit_reason: t.exit_reason ?? null,
+          realized_pnl: Number(t.realized_pnl ?? 0),
+          leverage: Number(t.leverage ?? 5),
+          opened_at: t.opened_at ?? null,
+          closed_at: t.closed_at ?? null
+        });
+      }
     }
   }
 
@@ -137,21 +175,68 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
         qualityTier?: string;
         winProbabilityPct?: number;
         riskReward?: number;
+        change24hPct?: number;
+        turnover24h?: number;
+        anomalyType?: string;
+        category?: "moderate" | "momentum" | "volatile" | undefined;
+        volatility?: string;
       };
     } | null;
 
     const rawMatches = row.raw_text ? /([A-Z0-9]+USDT)/.exec(row.raw_text) : null;
-    const symbol: string = parsed?.signal?.symbol ?? parsed?.opportunity?.symbol ?? rawMatches?.[1] ?? "BTCUSDT";
-    const side: "long" | "short" = (parsed?.signal?.side ?? parsed?.opportunity?.side ?? "long") === "short" ? "short" : "long";
-    const entryPrice = Number(parsed?.entryPrice ?? 0);
-    const stopLoss = Number(parsed?.signal?.stopLoss ?? 0);
-    const tp1Price = Number(parsed?.signal?.takeProfits?.[0]?.price ?? 0);
-    const leverage = Number(parsed?.signal?.leverage ?? 5);
+    const parsedAny = parsed as Record<string, unknown> | null;
+    const symbol: string = parsed?.signal?.symbol ?? parsed?.opportunity?.symbol ?? (parsedAny?.symbol as string) ?? rawMatches?.[1] ?? "BTCUSDT";
+    const side: "long" | "short" = (parsed?.signal?.side ?? parsed?.opportunity?.side ?? (parsedAny?.side as string) ?? "long") === "short" ? "short" : "long";
+    const entryPrice = Number(parsed?.entryPrice ?? (parsedAny?.entryPrice as number) ?? 0);
+    const stopLoss = Number(parsed?.signal?.stopLoss ?? (parsedAny?.stopLoss as number) ?? 0);
+    const tp1Price = Number(
+      parsed?.signal?.takeProfits?.[0]?.price ??
+      ((parsedAny?.takeProfits as Array<{ price: number }>) || [])[0]?.price ??
+      0
+    );
+    const leverage = Number(parsed?.signal?.leverage ?? (parsedAny?.leverage as number) ?? 5);
     const qualityScore = parsed?.opportunity?.qualityScore ? parsed.opportunity.qualityScore.toFixed(1) : "9.5";
     const qualityTier = parsed?.opportunity?.qualityTier ?? "A+";
     const strategy = parsed?.opportunity?.strategy ?? "Fair Value Gap (FVG) Mitigation & Expansion";
     const winProb = parsed?.opportunity?.winProbabilityPct ?? 73;
     const rr = parsed?.opportunity?.riskReward ? parsed.opportunity.riskReward.toFixed(2) : "2.40";
+
+    const slDistancePct = entryPrice > 0 && stopLoss > 0
+      ? Math.abs(entryPrice - stopLoss) / entryPrice
+      : 0;
+    const change24h = Number(parsed?.opportunity?.change24hPct ?? 0);
+    const anomalyType = String(parsed?.opportunity?.anomalyType ?? "").toLowerCase();
+    const strategyLower = strategy.toLowerCase();
+    const rawTextLower = (row.raw_text ?? "").toLowerCase();
+
+    const isHighVolatility = Boolean(
+      slDistancePct >= 0.035 ||
+      Math.abs(change24h) >= 10 ||
+      anomalyType.includes("volatility") ||
+      anomalyType.includes("spike") ||
+      anomalyType.includes("dump") ||
+      anomalyType.includes("squeeze") ||
+      (strategyLower.includes("volatility") && !strategyLower.includes("low")) ||
+      strategyLower.includes("volatility expansion") ||
+      strategyLower.includes("squeeze") ||
+      strategyLower.includes("імпульс") ||
+      rawTextLower.includes("high volatility") ||
+      symbol.toUpperCase() === "QUSDT" ||
+      parsed?.opportunity?.volatility === "high" ||
+      parsed?.opportunity?.volatility === "extreme"
+    );
+
+    // Coin 24h category: "moderate" (-5%..+5%) vs "trending" (>5% momentum/pump/dump)
+    const absChange = Math.abs(change24h);
+    const rawCategory = parsed?.opportunity?.category;
+    const marketCategory: "moderate" | "trending" =
+      rawCategory === "moderate" || (absChange > 0 && absChange <= 5.0)
+        ? "moderate"
+        : rawCategory === "momentum" || rawCategory === "volatile" || absChange > 5.0
+          ? "trending"
+          : (anomalyType.includes("breakout") || anomalyType.includes("volatility") || anomalyType.includes("spike") || anomalyType.includes("dump"))
+            ? "trending"
+            : "moderate";
 
     const correlatedTrade = tradesMap.get(id) ?? null;
 
@@ -171,6 +256,9 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
       isArchived,
       remainingHours,
       createdAt: row.created_at,
+      isHighVolatility,
+      change24hPct: change24h !== 0 ? change24h : undefined,
+      marketCategory,
       trade: correlatedTrade,
       outcome: outcomesMap.get(id) ?? null
     };
@@ -178,11 +266,7 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
 
   const activeSignals = allProcessed.filter((s) => !s.isArchived);
   const archivedSignals = allProcessed.filter((s) => s.isArchived);
-
-  const displayedSignals = (currentTab === "archive" ? archivedSignals : activeSignals).filter((s) => {
-    if (!searchQuery) return true;
-    return s.symbol.toUpperCase().includes(searchQuery) || s.strategy.toUpperCase().includes(searchQuery);
-  });
+  const displayedSignals = currentTab === "archive" ? archivedSignals : activeSignals;
 
   const isPaperTrading = account?.exchange === "paper" || account?.environment === "demo";
 
@@ -199,17 +283,8 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
           </div>
         </div>
 
-        {/* Scan fresh market button */}
-        <form action={scanMarketOpportunityAction}>
-          <input type="hidden" name="symbol" value="UNIVERSE" />
-          <button
-            type="submit"
-            className="bt pr"
-            style={{ height: "40px", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px" }}
-          >
-            <span>⚡ Сканувати Bybit 916 пар</span>
-          </button>
-        </form>
+        {/* Scan fresh market button with animated modal & progress */}
+        <ScanModalButton />
       </div>
 
       {/* Tabs: Active vs Archive */}
@@ -230,36 +305,12 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
         </Link>
       </div>
 
-      {/* Search Bar & Quick Filters */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-        <form method="GET" style={{ display: "flex", alignItems: "center", gap: "8px", flex: "1 1 300px" }}>
-          <input type="hidden" name="tab" value={currentTab} />
-          <input
-            type="text"
-            name="q"
-            defaultValue={searchQuery}
-            placeholder="Пошук пари (напр. IRYS, BTC, ETH)..."
-            style={{
-              height: "38px",
-              width: "100%",
-              maxWidth: "360px",
-              padding: "0 12px",
-              fontSize: "14px",
-              background: "#1A1A1A",
-              border: "1px solid #262626",
-              borderRadius: "6px",
-              color: "#FFFFFF"
-            }}
-          />
-          <button type="submit" className="bt sm" style={{ height: "38px" }}>
-            Знайти
-          </button>
-        </form>
-
-        <span className="lb" style={{ fontSize: "12px" }}>
+      {/* Informative Lifecycle Bar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", fontSize: "12px", color: "#8E88A8" }}>
+        <span>
           {currentTab === "active"
-            ? "Сигнали активні протягом 48 годин з моменту створення"
-            : "Архів зберігається безстроково, доки ви самі не видалите запис"}
+            ? "⚡ Сигнали активні протягом 48 годин з моменту генерації та переходять в архів автоматично"
+            : "📁 Архів зберігає історичні сетапи безстроково для аналітики та бектестингу"}
         </span>
       </div>
 
@@ -268,6 +319,7 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
         signals={displayedSignals}
         isArchive={currentTab === "archive"}
         isPaperTrading={isPaperTrading}
+        initialSearchQuery={searchQuery}
       />
     </div>
   );

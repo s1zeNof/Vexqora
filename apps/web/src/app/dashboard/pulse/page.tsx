@@ -15,6 +15,7 @@ interface CanonicalPulsePayload {
     change24hPct: number;
     turnover24h: number;
     anomalyType: "volume_breakout" | "volatility_expansion" | "liquidity_hunt";
+    category?: "moderate" | "momentum" | "volatile" | undefined;
     confidence: number;
     riskReward: number;
     qualityScore: number;
@@ -75,7 +76,9 @@ function toCard(id: string, createdAt: string, payload: CanonicalPulsePayload): 
     confidence: opportunity.confidence,
     createdAt,
     age: formatTimeAgo(createdAt),
-    status: "active"
+    status: "active",
+    change24hPct: opportunity.change24hPct,
+    category: opportunity.category
   };
 }
 
@@ -122,6 +125,7 @@ export default async function PulsePage() {
         change24hPct: opp.change24hPct,
         turnover24h: opp.turnover24h,
         anomalyType: opp.anomalyType,
+        category: opp.category,
         confidence,
         riskReward: 1.8,
         qualityScore: adaptive.qualityScore,

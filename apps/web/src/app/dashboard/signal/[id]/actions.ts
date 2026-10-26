@@ -113,12 +113,40 @@ export async function executeSignalAction(
     effectiveTP3 = canonicalTP3;
   }
 
-  let rawSignalText: string;
-  let isImmediatelyFilled = true;
   let effectiveEntryPrice: number;
+  let isImmediatelyFilled = true;
 
   if (orderType === "Market") {
     effectiveEntryPrice = liveMarketPrice;
+  } else {
+    const targetLimitPrice = options?.limitPrice ?? (canonicalSignal?.entry.type === "limit" ? canonicalSignal.entry.price : (canonicalSignal?.entry.type === "range" ? (canonicalSignal.entry.from + canonicalSignal.entry.to) / 2 : liveMarketPrice));
+    effectiveEntryPrice = targetLimitPrice;
+    isImmediatelyFilled = isLong ? liveMarketPrice <= targetLimitPrice : liveMarketPrice >= targetLimitPrice;
+  }
+
+  // Strict sanitization of effectiveSL against effectiveEntryPrice:
+  // 1. SL must be on the protective side (below entry for LONG, above entry for SHORT)
+  // 2. SL distance must not exceed 10% of entry price (or max allowable risk)
+  const isSlInvalidSide = isLong ? effectiveSL >= effectiveEntryPrice : effectiveSL <= effectiveEntryPrice;
+  const slDistPct = Math.abs(effectiveSL - effectiveEntryPrice) / effectiveEntryPrice;
+  if (isSlInvalidSide || slDistPct > 0.10 || isNaN(effectiveSL) || effectiveSL <= 0) {
+    effectiveSL = isLong ? effectiveEntryPrice * 0.975 : effectiveEntryPrice * 1.025;
+  }
+
+  // Also ensure TP levels are strictly on the profit side
+  if (isLong) {
+    if (effectiveTP1 <= effectiveEntryPrice) effectiveTP1 = effectiveEntryPrice * 1.045;
+    if (effectiveTP2 <= effectiveTP1) effectiveTP2 = effectiveTP1 * 1.02;
+    if (effectiveTP3 <= effectiveTP2) effectiveTP3 = effectiveTP2 * 1.02;
+  } else {
+    if (effectiveTP1 >= effectiveEntryPrice) effectiveTP1 = effectiveEntryPrice * 0.955;
+    if (effectiveTP2 >= effectiveTP1) effectiveTP2 = effectiveTP1 * 0.98;
+    if (effectiveTP3 >= effectiveTP2) effectiveTP3 = effectiveTP2 * 0.98;
+  }
+
+  let rawSignalText: string;
+
+  if (orderType === "Market") {
     rawSignalText = `${executionSymbol} ${executionSide.toUpperCase()}
 entry market
 sl ${effectiveSL}
@@ -126,12 +154,8 @@ tp ${effectiveTP1} 40%, ${effectiveTP2} 30%, ${effectiveTP3} 30%
 trail 1% after tp1
 lev ${leverage}`;
   } else {
-    // Limit order
-    const targetLimitPrice = options?.limitPrice ?? (canonicalSignal?.entry.type === "limit" ? canonicalSignal.entry.price : (canonicalSignal?.entry.type === "range" ? (canonicalSignal.entry.from + canonicalSignal.entry.to) / 2 : liveMarketPrice));
-    effectiveEntryPrice = targetLimitPrice;
-    isImmediatelyFilled = isLong ? liveMarketPrice <= targetLimitPrice : liveMarketPrice >= targetLimitPrice;
     rawSignalText = `${executionSymbol} ${executionSide.toUpperCase()}
-entry ${targetLimitPrice}
+entry ${effectiveEntryPrice}
 sl ${effectiveSL}
 tp ${effectiveTP1} 40%, ${effectiveTP2} 30%, ${effectiveTP3} 30%
 trail 1% after tp1

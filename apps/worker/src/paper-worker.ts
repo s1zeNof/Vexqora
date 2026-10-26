@@ -77,10 +77,13 @@ export function startPaperWorker(
               headers: { "User-Agent": "Vexqora-Paper-Worker", "Accept": "application/json" }
             });
             if (res.ok) {
-              const json = await res.json() as { result?: { list?: Array<{ lastPrice?: string }> } };
-              const last = json.result?.list?.[0]?.lastPrice;
-              if (last) {
-                priceMap.set(symbol, Number(last));
+              const json = await res.json() as { result?: { list?: Array<{ symbol?: string; lastPrice?: string }> } };
+              const item = json.result?.list?.find((x) => x.symbol === symbol) ?? json.result?.list?.[0];
+              if (item && (!item.symbol || item.symbol === symbol) && item.lastPrice) {
+                const parsedPrice = Number(item.lastPrice);
+                if (parsedPrice > 0) {
+                  priceMap.set(symbol, parsedPrice);
+                }
               }
             }
           } catch {
@@ -93,6 +96,13 @@ export function startPaperWorker(
       for (const trade of paperTrades) {
         const currentPrice = priceMap.get(trade.symbol);
         if (!currentPrice || currentPrice <= 0) continue;
+
+        // Anomaly protection: if price deviates > 15% from entry, skip tick to protect trade
+        const entryPrice = Number(trade.entry_avg ?? 0);
+        if (entryPrice > 0 && Math.abs(currentPrice - entryPrice) / entryPrice > 0.15) {
+          logger.warn({ tradeId: trade.id, symbol: trade.symbol, entryPrice, currentPrice }, "Skipping anomalous price tick > 15% from entry");
+          continue;
+        }
 
         const { data: targetsData } = await supabase
           .from("trade_targets")
@@ -141,17 +151,24 @@ export function startPaperWorker(
           "Paper Matching Engine executed actions"
         );
 
+        const allocatedMargin = tradeSnapshot.leverage > 0 && tradeSnapshot.entry_avg > 0
+          ? (tradeSnapshot.entry_avg * Number(trade.qty ?? 0)) / tradeSnapshot.leverage
+          : Number(trade.qty ?? 0) * tradeSnapshot.entry_avg;
+
+        const safePnlDelta = Math.max(result.totalRealizedPnlDelta, -allocatedMargin);
+        const safeNewRealizedPnl = Number(trade.realized_pnl ?? 0) + safePnlDelta;
+
         const exit = result.updatedTrade.exit;
         const applyResult = await supabase.rpc("apply_paper_trade_result", {
           target_trade_id: trade.id,
           expected_qty: Number(trade.qty ?? 0),
           expected_realized_pnl: Number(trade.realized_pnl ?? 0),
           new_qty: result.updatedTrade.qty,
-          new_realized_pnl: result.updatedTrade.realized_pnl,
+          new_realized_pnl: safeNewRealizedPnl,
           new_status: result.updatedTrade.status,
           new_trailing_stop: result.updatedTrade.trailing_stop,
           result_closed_at: result.updatedTrade.closed_at ?? null,
-          realized_pnl_delta: result.totalRealizedPnlDelta,
+          realized_pnl_delta: safePnlDelta,
           target_updates: result.updatedTargets,
           result_exit_reason: exit?.reason ?? null,
           result_exit_price: exit?.price ?? null,

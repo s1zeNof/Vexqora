@@ -113,7 +113,13 @@ export function startPulseScanner(
               });
 
               // Level 3: Evaluate for AI Signal with verified klines and microstructure
-              if (Math.abs(anomaly.changePct) >= 1.2 || anomaly.eventType === "volume_spike" || anomaly.eventType === "whale_accumulation") {
+              if (
+                Math.abs(anomaly.changePct) >= 0.70 ||
+                anomaly.eventType === "volume_spike" ||
+                anomaly.eventType === "whale_accumulation" ||
+                anomaly.eventType === "whale_distribution" ||
+                anomaly.eventType === "liquidity_sweep"
+              ) {
                 try {
                   const opp = await generateNemotronOpportunity(anomaly.symbol, anomaly.price, {
                     historicalContext: anomaly.historicalMatch,

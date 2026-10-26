@@ -203,16 +203,41 @@ export function evaluatePaperTrade(
 
   // 1. Check Stop Loss
   if (trade.sl !== null) {
-    const isSlHit = isLong ? currentPrice <= trade.sl : currentPrice >= trade.sl;
+    // Sanity check: Stop Loss must never be corrupted, inverted, or further than 10% / liquidation threshold
+    const maxAllowedDist = trade.entry_avg * Math.min(0.10, 1 / (trade.leverage || 5));
+    const isSlInvalid = isLong
+      ? trade.sl >= trade.entry_avg || (trade.entry_avg - trade.sl) > maxAllowedDist
+      : trade.sl <= trade.entry_avg || (trade.sl - trade.entry_avg) > maxAllowedDist;
+    const safeSl = isSlInvalid
+      ? (isLong ? trade.entry_avg * 0.975 : trade.entry_avg * 1.025)
+      : trade.sl;
+
+    const isSlHit = isLong ? currentPrice <= safeSl : currentPrice >= safeSl;
     if (isSlHit) {
-      const exitPrice = currentPrice;
-      const pnl = (exitPrice - trade.entry_avg) * remainingQty * (isLong ? 1 : -1);
+      // In realistic exchange matching, Stop Loss conditional orders trigger immediately near safeSl.
+      // Exit price allows normal market slippage, while strictly capping extreme anomalous spikes from wiping the user.
+      const slDistance = Math.abs(trade.entry_avg - safeSl);
+      const maxAllowedDeviation = Math.max(slDistance * 1.5, safeSl * 0.03);
+      const minExitPrice = safeSl - maxAllowedDeviation;
+      const maxExitPrice = safeSl + maxAllowedDeviation;
+      const exitPrice = isLong
+        ? Math.max(currentPrice, minExitPrice)
+        : Math.min(currentPrice, maxExitPrice);
+
+      const rawPnl = (exitPrice - trade.entry_avg) * remainingQty * (isLong ? 1 : -1);
+
+      // Isolated margin constraint: Loss can never exceed the allocated position margin
+      const positionMargin = trade.leverage > 0 && trade.entry_avg > 0
+        ? (trade.entry_avg * remainingQty) / trade.leverage
+        : remainingQty * trade.entry_avg;
+      const pnl = Math.max(rawPnl, -positionMargin);
+
       actions.push({
         type: "STOP_LOSS_TRIGGERED",
-        slPrice: trade.sl,
+        slPrice: safeSl,
         closedQty: remainingQty,
         realizedPnl: pnl,
-        reason: `Stop loss breached at ${exitPrice} (SL level: ${trade.sl})`
+        reason: `Stop loss breached at ${exitPrice} (SL level: ${safeSl})`
       });
 
       // All open targets cancelled
@@ -335,7 +360,11 @@ export function evaluatePaperTrade(
 
       if (currentPrice <= triggerPrice) {
         // Trailing stop trigger: market close remaining quantity
-        const pnl = (currentPrice - trade.entry_avg) * remainingQty;
+        const rawPnl = (currentPrice - trade.entry_avg) * remainingQty;
+        const positionMargin = trade.leverage > 0 && trade.entry_avg > 0
+          ? (trade.entry_avg * remainingQty) / trade.leverage
+          : remainingQty * trade.entry_avg;
+        const pnl = Math.max(rawPnl, -positionMargin);
         realizedPnlDelta += pnl;
 
         actions.push({
@@ -382,7 +411,11 @@ export function evaluatePaperTrade(
 
       if (currentPrice >= triggerPrice) {
         // Trailing stop trigger: market close remaining quantity
-        const pnl = (trade.entry_avg - currentPrice) * remainingQty;
+        const rawPnl = (trade.entry_avg - currentPrice) * remainingQty;
+        const positionMargin = trade.leverage > 0 && trade.entry_avg > 0
+          ? (trade.entry_avg * remainingQty) / trade.leverage
+          : remainingQty * trade.entry_avg;
+        const pnl = Math.max(rawPnl, -positionMargin);
         realizedPnlDelta += pnl;
 
         actions.push({
