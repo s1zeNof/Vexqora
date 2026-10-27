@@ -31,7 +31,8 @@ export interface WhaleTradeItem {
 }
 
 export interface TapeAnalysis {
-  cvdUsd: number; // Cumulative Volume Delta in USD (buy volume - sell volume)
+  cvdUsd: number; // Cumulative Volume Delta in USD
+  cvdType: "snapshot_recent_trades" | "accumulated_window";
   buyVolumeUsd: number;
   sellVolumeUsd: number;
   whaleTradesCount: number;
@@ -50,9 +51,11 @@ export interface LiquiditySweepResult {
 }
 
 export interface DerivativesPressureResult {
-  oiChangePct: number;
-  fundingRatePct: number;
-  squeezeRisk: "short_squeeze_high" | "long_flush_high" | "moderate" | "none";
+  oiChangePct: number | null;
+  fundingRatePct: number | null;
+  isFundingAvailable: boolean;
+  isOiAvailable: boolean;
+  squeezeRisk: "short_squeeze_high" | "long_flush_high" | "moderate" | "none" | "unknown";
   description: string;
 }
 
@@ -168,6 +171,7 @@ export function analyzeRecentTrades(
   if (!trades || trades.length === 0) {
     return {
       cvdUsd: 0,
+      cvdType: "snapshot_recent_trades",
       buyVolumeUsd: 0,
       sellVolumeUsd: 0,
       whaleTradesCount: 0,
@@ -225,6 +229,7 @@ export function analyzeRecentTrades(
 
   return {
     cvdUsd,
+    cvdType: "snapshot_recent_trades",
     buyVolumeUsd: Math.round(buyVolumeUsd),
     sellVolumeUsd: Math.round(sellVolumeUsd),
     whaleTradesCount: whaleTrades.length,
@@ -296,17 +301,24 @@ export function detectLiquiditySweep(
  * Analyzes derivatives positioning (Open Interest & Funding Rate) for squeeze risks.
  */
 export function analyzeDerivativesPressure(
-  oiPoints: ExchangeOpenInterestPoint[],
-  fundingRate: number = 0,
+  oiPoints?: ExchangeOpenInterestPoint[],
+  fundingRate?: number | null,
   priceChangePct: number = 0
 ): DerivativesPressureResult {
-  const fundingRatePct = Number((fundingRate * 100).toFixed(4));
-  if (!oiPoints || oiPoints.length < 2) {
+  const isFundingAvailable = typeof fundingRate === "number" && !isNaN(fundingRate);
+  const fundingRatePct = isFundingAvailable ? Number((fundingRate * 100).toFixed(4)) : null;
+
+  const isOiAvailable = Array.isArray(oiPoints) && oiPoints.length >= 2;
+  if (!isOiAvailable) {
     return {
-      oiChangePct: 0,
+      oiChangePct: null,
       fundingRatePct,
-      squeezeRisk: "none",
-      description: "Neutral derivatives state (insufficient historical OI points)"
+      isFundingAvailable,
+      isOiAvailable: false,
+      squeezeRisk: isFundingAvailable && Math.abs(fundingRatePct!) > 0.05 ? "moderate" : "unknown",
+      description: isFundingAvailable
+        ? `Funding rate is ${fundingRatePct}%. Open Interest historical data unavailable.`
+        : "Derivatives metrics (OI & Funding Rate) unavailable from exchange feed."
     };
   }
 
@@ -314,23 +326,25 @@ export function analyzeDerivativesPressure(
   const initialOI = oiPoints[0]!.openInterest;
   const oiChangePct = initialOI > 0 ? Number((((latestOI - initialOI) / initialOI) * 100).toFixed(2)) : 0;
 
-  // Short Squeeze Detection:
-  // Price surging (+3%+) while Open Interest is dropping sharply (-3%-) and funding is negative
-  if (priceChangePct >= 2.5 && oiChangePct <= -2.0 && fundingRatePct <= -0.01) {
+  // Short Squeeze Detection
+  if (isFundingAvailable && priceChangePct >= 2.5 && oiChangePct <= -2.0 && fundingRatePct! <= -0.01) {
     return {
       oiChangePct,
       fundingRatePct,
+      isFundingAvailable: true,
+      isOiAvailable: true,
       squeezeRisk: "short_squeeze_high",
       description: `Short Squeeze Active: Price up +${priceChangePct}% while OI dropped ${oiChangePct}% with negative funding (${fundingRatePct}%). Aggressive shorts are being forced to cover.`
     };
   }
 
-  // Long Flush / Liquidation Cascade:
-  // Price dropping sharply (-3%-) while OI is collapsing (-3%-) with positive funding
-  if (priceChangePct <= -2.5 && oiChangePct <= -2.0 && fundingRatePct >= 0.01) {
+  // Long Flush
+  if (isFundingAvailable && priceChangePct <= -2.5 && oiChangePct <= -2.0 && fundingRatePct! >= 0.01) {
     return {
       oiChangePct,
       fundingRatePct,
+      isFundingAvailable: true,
+      isOiAvailable: true,
       squeezeRisk: "long_flush_high",
       description: `Long Flush Active: Price down ${priceChangePct}% while OI dropped ${oiChangePct}% with positive funding (${fundingRatePct}%). Overleveraged longs liquidated.`
     };
@@ -339,8 +353,10 @@ export function analyzeDerivativesPressure(
   return {
     oiChangePct,
     fundingRatePct,
-    squeezeRisk: Math.abs(fundingRatePct) > 0.03 ? "moderate" : "none",
-    description: `OI changed ${oiChangePct >= 0 ? "+" : ""}${oiChangePct}% over window. Funding rate is ${fundingRatePct}%.`
+    isFundingAvailable,
+    isOiAvailable: true,
+    squeezeRisk: isFundingAvailable && Math.abs(fundingRatePct!) > 0.03 ? "moderate" : "none",
+    description: `OI changed ${oiChangePct >= 0 ? "+" : ""}${oiChangePct}% over window.${isFundingAvailable ? ` Funding rate is ${fundingRatePct}%.` : " Funding rate unavailable."}`
   };
 }
 
@@ -412,7 +428,7 @@ export function evaluateMarketMicrostructure(params: {
   const tapeResult = analyzeRecentTrades(params.trades);
   const currentPrice = obResult.midPrice > 0 ? obResult.midPrice : (params.klines[params.klines.length - 1]?.close ?? 0);
   const sweepResult = detectLiquiditySweep(params.klines, currentPrice);
-  const derivativesResult = analyzeDerivativesPressure(params.oiPoints ?? [], params.fundingRate ?? 0, priceChange);
+  const derivativesResult = analyzeDerivativesPressure(params.oiPoints, params.fundingRate, priceChange);
 
   const regime = classifyMarketRegime(obResult, tapeResult, derivativesResult, priceChange);
 

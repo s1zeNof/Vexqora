@@ -145,6 +145,15 @@ describe("Market Microstructure Analysis", () => {
       expect(res.squeezeRisk).toBe("long_flush_high");
       expect(res.description).toContain("Long Flush Active");
     });
+
+    it("honestly marks missing derivatives data as unavailable (P1.4)", () => {
+      const res = analyzeDerivativesPressure(undefined, undefined, 0);
+      expect(res.isFundingAvailable).toBe(false);
+      expect(res.isOiAvailable).toBe(false);
+      expect(res.fundingRatePct).toBeNull();
+      expect(res.oiChangePct).toBeNull();
+      expect(res.description).toContain("unavailable");
+    });
   });
 
   describe("Market Regime & Orchestration", () => {
@@ -162,6 +171,7 @@ describe("Market Microstructure Analysis", () => {
       };
       const tape = {
         cvdUsd: -80_000, // aggressive market selling
+        cvdType: "snapshot_recent_trades" as const,
         buyVolumeUsd: 100000,
         sellVolumeUsd: 180000,
         whaleTradesCount: 0,
@@ -173,6 +183,8 @@ describe("Market Microstructure Analysis", () => {
       const derivatives = {
         oiChangePct: 0,
         fundingRatePct: 0.01,
+        isFundingAvailable: true,
+        isOiAvailable: true,
         squeezeRisk: "none" as const,
         description: ""
       };
