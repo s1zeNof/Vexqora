@@ -16,6 +16,15 @@ const TF_MAP: Record<TimeframeOption, string> = {
   "1D": "D"
 };
 
+const TF_DURATION_MS: Record<TimeframeOption, number> = {
+  "1m": 60 * 1000,
+  "5m": 5 * 60 * 1000,
+  "15m": 15 * 60 * 1000,
+  "1H": 60 * 60 * 1000,
+  "4H": 4 * 60 * 60 * 1000,
+  "1D": 24 * 60 * 60 * 1000
+};
+
 export interface ClosedTradeMarkerData {
   side: "long" | "short";
   leverage: number;
@@ -195,9 +204,20 @@ export function SignalChart({
         cache: "no-store"
       });
       if (res.ok) {
-        const json = await res.json() as { success: boolean; klines: Kline[] };
+        const json = (await res.json()) as { success: boolean; klines: Kline[] };
         if (json.success && Array.isArray(json.klines) && json.klines.length > 0) {
-          setKlines(json.klines);
+          const fetched = [...json.klines];
+          if (activeCurrentPrice && activeCurrentPrice > 0 && fetched.length > 0) {
+            const lastIdx = fetched.length - 1;
+            const lastK = fetched[lastIdx]!;
+            fetched[lastIdx] = {
+              ...lastK,
+              close: activeCurrentPrice,
+              high: Math.max(lastK.high, activeCurrentPrice),
+              low: Math.min(lastK.low, activeCurrentPrice)
+            };
+          }
+          setKlines(fetched);
         }
       }
     } catch {
@@ -207,19 +227,43 @@ export function SignalChart({
     }
   };
 
-  // Update current live candle with live price
+  // Re-sync klines if initialKlines changes (e.g. symbol switch) and user is on default 15m
   useEffect(() => {
-    if (!activeCurrentPrice || klines.length === 0) return;
+    if (timeframe === "15m" && Array.isArray(initialKlines) && initialKlines.length > 0) {
+      setKlines(initialKlines);
+    }
+  }, [initialKlines, timeframe]);
+
+  // Update current live candle with live price in real time across ALL timeframes
+  useEffect(() => {
+    if (!activeCurrentPrice || activeCurrentPrice <= 0 || !Number.isFinite(activeCurrentPrice) || klines.length === 0) return;
     setKlines((prev) => {
       if (prev.length === 0) return prev;
       const copy = [...prev];
       const last = copy[copy.length - 1];
-      if (last && last.open > 0) {
-        const driftFromOpen = Math.abs(activeCurrentPrice - last.open) / last.open;
-        // Reject stray spikes (> 6% single tick from candle open) from polluting chart candle
-        if (driftFromOpen > 0.06) {
-          return prev;
-        }
+      if (!last || last.open <= 0) return prev;
+
+      // Sanity check: prevent corrupt outlier tick (> 10x or < 0.1x of candle close)
+      if (last.close > 0 && (activeCurrentPrice > last.close * 10 || activeCurrentPrice < last.close * 0.1)) {
+        return prev;
+      }
+
+      const durationMs = TF_DURATION_MS[timeframe] || (15 * 60 * 1000);
+      const now = Date.now();
+      const candleStartTime = Math.floor(now / durationMs) * durationMs;
+
+      // If time has elapsed past the candle duration, rollover to a new candle
+      if (last.time < candleStartTime) {
+        copy.push({
+          time: candleStartTime,
+          open: activeCurrentPrice,
+          high: activeCurrentPrice,
+          low: activeCurrentPrice,
+          close: activeCurrentPrice,
+          volume: 0
+        });
+      } else {
+        // Update current candle in real time
         copy[copy.length - 1] = {
           ...last,
           close: activeCurrentPrice,
@@ -229,9 +273,51 @@ export function SignalChart({
       }
       return copy;
     });
-  }, [activeCurrentPrice]);
+  }, [activeCurrentPrice, timeframe]);
 
-  // Real market klines only — strictly prohibit fabricating synthetic candles (P0.7)
+  // Periodic background sync with Bybit klines every 5s to keep historical bars and volume accurate
+  useEffect(() => {
+    let isMounted = true;
+    const intervalCode = TF_MAP[timeframe];
+
+    const syncKlines = async () => {
+      try {
+        const res = await fetch(`/api/market/klines?symbol=${symbol}&interval=${intervalCode}&limit=70`, {
+          cache: "no-store"
+        });
+        if (res.ok && isMounted) {
+          const json = (await res.json()) as { success: boolean; klines: Kline[] };
+          if (json.success && Array.isArray(json.klines) && json.klines.length > 0) {
+            setKlines((prev) => {
+              if (!isMounted) return prev;
+              const fetched = [...json.klines];
+              if (activeCurrentPrice && activeCurrentPrice > 0 && fetched.length > 0) {
+                const lastIdx = fetched.length - 1;
+                const lastK = fetched[lastIdx]!;
+                fetched[lastIdx] = {
+                  ...lastK,
+                  close: activeCurrentPrice,
+                  high: Math.max(lastK.high, activeCurrentPrice),
+                  low: Math.min(lastK.low, activeCurrentPrice)
+                };
+              }
+              return fetched;
+            });
+          }
+        }
+      } catch {
+        // silent fallback
+      }
+    };
+
+    const timer = setInterval(() => { void syncKlines(); }, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [symbol, timeframe, activeCurrentPrice]);
+
+    // Real market klines only — strictly prohibit fabricating synthetic candles (P0.7)
   const rawKlines: Kline[] = klines;
 
   const isMobile = containerWidth < 640;
@@ -889,7 +975,6 @@ export function SignalChart({
                   onClick={() => {
                     void handleTimeframeChange(tf);
                   }}
-                  disabled={isLoadingKlines}
                   className={`tab ${timeframe === tf ? "on" : ""}`}
                   style={{
                     padding: "3px 8px",
@@ -1993,7 +2078,7 @@ export function SignalChart({
                         textAnchor="middle"
                         fontFamily="'JetBrains Mono', monospace"
                       >
-                        {new Date(visibleKlines[hoverIndex].time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {timeframe === "1D" ? new Date(visibleKlines[hoverIndex].time).toLocaleDateString([], { month: "short", day: "numeric" }) : new Date(visibleKlines[hoverIndex].time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </text>
                     </>
                   )}
@@ -2005,7 +2090,7 @@ export function SignalChart({
                 const candleIdx = visibleKlines.indexOf(k);
                 const x = candleIdx * candleSlot + candleSlot / 2;
                 const date = new Date(k.time);
-                const timeStr = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+                const timeStr = timeframe === "1D" ? `${String(date.getDate()).padStart(2, "0")}.${String(date.getMonth() + 1).padStart(2, "0")}` : `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
                 return (
                   <text
                     key={k.time}
