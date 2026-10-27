@@ -156,6 +156,25 @@ export async function processJob(
   const tradeData = tradeInsertRes.data as Record<string, unknown>;
   const tradeId = String(tradeData.id);
 
+  // Trigger server-side AI companion session initialization (P1.4)
+  try {
+    const { data: acc } = await supabase.from("exchange_accounts").select("user_id").eq("id", account_id).single();
+    if (acc?.user_id) {
+      await supabase.from("trade_ai_sessions").insert({
+        user_id: acc.user_id,
+        account_id,
+        trade_id: tradeId,
+        signal_id,
+        symbol: signal.symbol,
+        status: "active",
+        initial_thesis: `Вхід у ${signal.side.toUpperCase()} по $${preview.entryPrice} (SL: $${signal.stopLoss}).`,
+        invalidation_criteria: `Пробиття Stop Loss $${signal.stopLoss} або зміна ринкової структури.`
+      });
+    }
+  } catch {
+    // Non-blocking session initialization
+  }
+
   // 6. Submit Entry Order
   logger.info({ tradeId, symbol: signal.symbol, qty: preview.qty, exchange: job.exchange_kind }, "Submitting entry order");
   const entryResult = await submitEntry(client, preview, tradeId);

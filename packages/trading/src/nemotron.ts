@@ -11,6 +11,12 @@ import { queryMLModelPrediction } from "./ml-bridge";
 export interface NemotronResponse {
   content: string;
   reasoning?: string;
+  model?: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 export interface NemotronVisionAnalysis {
@@ -93,6 +99,13 @@ export async function callNemotron(
       }
 
       const data = (await response.json()) as {
+        id?: string;
+        model?: string;
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
         choices?: Array<{
           message?: {
             content?: string | null;
@@ -105,9 +118,16 @@ export async function callNemotron(
       const content = choice?.content?.trim() || "";
       const reasoning = choice?.reasoning?.trim() || "";
 
+      const usageObj: { promptTokens?: number; completionTokens?: number; totalTokens?: number } = {};
+      if (typeof data.usage?.prompt_tokens === "number") usageObj.promptTokens = data.usage.prompt_tokens;
+      if (typeof data.usage?.completion_tokens === "number") usageObj.completionTokens = data.usage.completion_tokens;
+      if (typeof data.usage?.total_tokens === "number") usageObj.totalTokens = data.usage.total_tokens;
+
       return {
         content: content || reasoning,
-        ...(reasoning ? { reasoning } : {})
+        ...(reasoning ? { reasoning } : {}),
+        model: data.model ?? model,
+        ...(Object.keys(usageObj).length > 0 ? { usage: usageObj } : {})
       };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));

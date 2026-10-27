@@ -5,7 +5,8 @@
 
 import type { Kline } from "@crypto-bot/shared";
 import type { MarketMicrostructure } from "./microstructure";
-import type { NewsEvent } from "./news";
+import type { NewsEvent, NewsRiskAssessment } from "./news";
+import type { MarketContextSnapshot } from "./market-context";
 
 export type AgentKey =
   | "lead_trade_agent"
@@ -26,6 +27,31 @@ export type SkillKey =
   | "risk.capital_guardian"
   | "quant.feature_extraction"
   | "execution.quality_audit";
+
+export interface AccountDailyLossStatus {
+  checked: boolean;
+  dailyLossLimitPct?: number;
+  currentRealizedLossUsdt?: number;
+  limitBreached?: boolean;
+  balanceUsdt?: number;
+  details?: string;
+}
+
+export interface OrchestrateTradeAnalysisParams {
+  sessionId?: string;
+  symbol: string;
+  currentPrice: number;
+  side: "long" | "short";
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  klines?: Kline[];
+  mtfSnapshot?: MarketContextSnapshot | null;
+  microstructure?: MarketMicrostructure | null;
+  newsEvents?: NewsEvent[];
+  newsAssessment?: NewsRiskAssessment | null;
+  accountDailyLossStatus?: AccountDailyLossStatus | null;
+}
 
 export interface AgentRunContext {
   sessionId: string;
@@ -132,12 +158,12 @@ export async function executeAgentSkill(
       }
 
       case "orderflow.cvd_obi": {
-        const micro = input.microstructure as MarketMicrostructure | undefined;
+        const micro = input.microstructure as MarketMicrostructure | null | undefined;
         if (!micro) {
           return {
             skillKey,
             status: "INSUFFICIENT_DATA",
-            data: { message: "No live order book / CVD stream available" },
+            data: { message: "[DATA_UNAVAILABLE] Live order book / CVD stream unavailable" },
             evidenceIds: [],
             latencyMs: Date.now() - startTime,
             dataAsOfMs: Date.now()
@@ -168,6 +194,11 @@ export async function executeAgentSkill(
         const distancePct = entry > 0 ? (Math.abs(current - entry) / entry) * 100 : 0;
         const isBreached = side === "long" ? current <= sl : current >= sl;
 
+        const lossStatus = input.accountDailyLossStatus as AccountDailyLossStatus | null | undefined;
+        const dailyLossChecked = Boolean(lossStatus?.checked);
+        const dailyLossBreached = Boolean(lossStatus?.limitBreached);
+        const dailyLossDetails = lossStatus?.details ?? (dailyLossChecked ? "Денні ліміти в нормі" : "Денні ліміти не перевірено [CHECK_SKIPPED]");
+
         return {
           skillKey,
           status: "OK",
@@ -175,7 +206,11 @@ export async function executeAgentSkill(
             slBreached: isBreached,
             driftPct: distancePct,
             protectiveStopActive: sl > 0,
-            recommendedAction: isBreached ? "STOP_LOSS_REACHED" : "RISK_WITHIN_BOUNDS"
+            dailyLossChecked,
+            dailyLossBreached,
+            dailyLossDetails,
+            currentRealizedLossUsdt: lossStatus?.currentRealizedLossUsdt ?? 0,
+            recommendedAction: isBreached || dailyLossBreached ? "STOP_LOSS_REACHED" : "RISK_WITHIN_BOUNDS"
           },
           evidenceIds: [`risk_eval_${Date.now()}`],
           latencyMs: Date.now() - startTime,
@@ -184,7 +219,30 @@ export async function executeAgentSkill(
       }
 
       case "news.impact_scanner": {
-        const events = (input.newsEvents as NewsEvent[] | undefined) ?? [];
+        const assessment = input.newsAssessment as NewsRiskAssessment | null | undefined;
+        if (assessment?.coverageStatus === "UNAVAILABLE") {
+          return {
+            skillKey,
+            status: "INSUFFICIENT_DATA",
+            data: { message: "[DATA_UNAVAILABLE] News feed coverage offline" },
+            evidenceIds: [],
+            latencyMs: Date.now() - startTime,
+            dataAsOfMs: Date.now()
+          };
+        }
+
+        const events = (assessment?.activeEvents ?? (input.newsEvents as NewsEvent[] | undefined)) ?? [];
+        if (!assessment && events.length === 0) {
+          return {
+            skillKey,
+            status: "INSUFFICIENT_DATA",
+            data: { message: "[DATA_UNAVAILABLE] No verified news feed connected" },
+            evidenceIds: [],
+            latencyMs: Date.now() - startTime,
+            dataAsOfMs: Date.now()
+          };
+        }
+
         return {
           skillKey,
           status: "OK",
@@ -267,8 +325,8 @@ export async function runSubagent(
         status: "completed",
         analysis: isOk
           ? `Ринкова структура: ${regime}. Локальний діапазон: [${lowStr} - ${highStr}].`
-          : "Недостатньо свічкових даних для підтвердження структури ринку.",
-        recommendation: regime === "bullish_trend" ? "HOLD" : "REVIEW",
+          : "Недостатньо свічкових даних для підтвердження структури ринку [DATA_UNAVAILABLE].",
+        recommendation: isOk && regime === "bullish_trend" ? "HOLD" : "REVIEW",
         evidence,
         latencyMs: Date.now() - startTime
       };
@@ -286,8 +344,8 @@ export async function runSubagent(
         status: "completed",
         analysis: isOk
           ? `Стакан OBI: ${(obi * 100).toFixed(1)}%. Дельта CVD: ${cvd > 0 ? "+" : ""}${cvd.toFixed(1)}.`
-          : "Прямий біржовий потік ордерів / стакан недоступні.",
-        recommendation: Math.abs(obi) > 0.4 ? "REVIEW" : "HOLD",
+          : "Прямий біржовий потік ордерів / стакан недоступні [DATA_UNAVAILABLE].",
+        recommendation: isOk ? (Math.abs(obi) > 0.4 ? "REVIEW" : "HOLD") : "NO_ACTION",
         evidence,
         latencyMs: Date.now() - startTime
       };
@@ -296,15 +354,30 @@ export async function runSubagent(
     case "risk_guardian_agent": {
       const res = await executeAgentSkill("risk.capital_guardian", payload, childContext);
       evidence.push(res);
-      const breached = Boolean(res.data.slBreached);
+      const slBreached = Boolean(res.data.slBreached);
+      const dailyLossChecked = Boolean(res.data.dailyLossChecked);
+      const dailyLossBreached = Boolean(res.data.dailyLossBreached);
+      const detailsStr = typeof res.data.dailyLossDetails === "string" ? res.data.dailyLossDetails : "";
+
+      let analysis: string;
+      if (!dailyLossChecked) {
+        analysis = (slBreached ? "УВАГА: Захисний Stop Loss досягнуто або пробито! " : "Рівень ризику позиції контрольований. ") +
+          "Денні ліміти акаунту: [CHECK_SKIPPED / НЕ ПЕРЕВІРЕНО].";
+      } else if (dailyLossBreached) {
+        analysis = `КРИТИЧНО: Перевищено денний ліміт збитків! (${detailsStr}). ` +
+          (slBreached ? "Захисний Stop Loss пробито!" : "Рекомендується негайний перегляд позицій.");
+      } else {
+        analysis = (slBreached ? "УВАГА: Захисний Stop Loss досягнуто або пробито! " : "Рівень ризику позиції контрольований. ") +
+          "Денний ліміт збитків перевірено: ліміт у нормі.";
+      }
+
+      const recommendation = (slBreached || dailyLossBreached) ? "RECOMMEND_CLOSE" : "HOLD";
 
       return {
         agentKey,
         status: "completed",
-        analysis: breached
-          ? "УВАГА: Захисний Stop Loss досягнуто або пробито!"
-          : "Рівень ризику контрольований, позиція знаходиться в межах дозволеного стопу.",
-        recommendation: breached ? "RECOMMEND_CLOSE" : "HOLD",
+        analysis,
+        recommendation,
         evidence,
         latencyMs: Date.now() - startTime
       };
@@ -313,15 +386,18 @@ export async function runSubagent(
     case "news_events_agent": {
       const res = await executeAgentSkill("news.impact_scanner", payload, childContext);
       evidence.push(res);
+      const isOk = res.status === "OK";
       const hasHighImpact = Boolean(res.data.highImpact);
 
       return {
         agentKey,
         status: "completed",
-        analysis: hasHighImpact
-          ? "Виявлено важливі макро-події або біржові анонси, що можуть підвищити волатильність."
-          : "Критичних негативних новин або делістингів для монети не зафіксовано.",
-        recommendation: hasHighImpact ? "RECOMMEND_REDUCE" : "HOLD",
+        analysis: !isOk
+          ? "Стрічка верифікованих новин тимчасово недоступна [DATA_UNAVAILABLE]."
+          : hasHighImpact
+            ? "Виявлено важливі макро-події або біржові анонси, що можуть підвищити волатильність."
+            : "Критичних негативних новин або делістингів для монети не зафіксовано.",
+        recommendation: !isOk ? "NO_ACTION" : (hasHighImpact ? "RECOMMEND_REDUCE" : "HOLD"),
         evidence,
         latencyMs: Date.now() - startTime
       };
@@ -343,18 +419,9 @@ export async function runSubagent(
  * Lead Trade Agent multi-agent orchestration for a trade session.
  * Gathers intelligence across specialized agents with bounded recursion and returns synthesis.
  */
-export async function orchestrateTradeAnalysis(params: {
-  sessionId?: string;
-  symbol: string;
-  currentPrice: number;
-  side: "long" | "short";
-  entryPrice: number;
-  stopLoss: number;
-  tp1: number;
-  klines?: Kline[];
-  microstructure?: MarketMicrostructure | null;
-  newsEvents?: NewsEvent[];
-}): Promise<LeadTradeSynthesis> {
+export async function orchestrateTradeAnalysis(
+  params: OrchestrateTradeAnalysisParams
+): Promise<LeadTradeSynthesis> {
   const rootContext: AgentRunContext = {
     sessionId: params.sessionId ?? "session_ephemeral",
     symbol: params.symbol,
@@ -372,8 +439,11 @@ export async function orchestrateTradeAnalysis(params: {
     stopLoss: params.stopLoss,
     tp1: params.tp1,
     klines: params.klines ?? [],
+    mtfSnapshot: params.mtfSnapshot ?? null,
     microstructure: params.microstructure ?? null,
-    newsEvents: params.newsEvents ?? []
+    newsEvents: params.newsEvents ?? [],
+    newsAssessment: params.newsAssessment ?? null,
+    accountDailyLossStatus: params.accountDailyLossStatus ?? null
   };
 
   const [structureRes, orderFlowRes, riskRes, newsRes] = await Promise.all([

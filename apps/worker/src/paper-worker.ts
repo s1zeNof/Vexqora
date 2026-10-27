@@ -32,13 +32,12 @@ interface DbTarget {
   status: "open" | "filled" | "cancelled";
 }
 
-const proactiveAlertCooldownMap = new Map<string, number>();
-
 async function dispatchTradeAiEvent(
   supabase: SupabaseClient,
   tradeId: string,
   content: string,
-  payload?: Record<string, unknown>
+  payload?: Record<string, unknown>,
+  eventId?: string
 ): Promise<void> {
   try {
     let { data: session } = await supabase
@@ -85,9 +84,9 @@ async function dispatchTradeAiEvent(
     if (session?.id) {
       await supabase.from("trade_ai_messages").insert({
         session_id: session.id,
-        author_kind: "lead",
-        agent_id: "lead_trade_agent",
+        author_kind: "system",
         kind: "event",
+        event_id: eventId ?? null,
         content,
         structured_payload: payload ?? null
       });
@@ -200,7 +199,7 @@ export function startPaperWorker(
 
         const result = evaluatePaperTrade(tradeSnapshot, targetSnapshots, currentPrice);
 
-        // Proactive autonomous companion alerts for active trades
+        // Proactive autonomous companion alerts for active trades (P1.7: DB deduplication via event_id)
         if (tradeSnapshot.status === "active") {
           // 1. Proactive Stop Loss proximity warning (< 1.2% distance)
           if (tradeSnapshot.sl && tradeSnapshot.sl > 0) {
@@ -209,17 +208,15 @@ export function startPaperWorker(
             const distPct = distToSl / currentPrice;
 
             if (distPct > 0 && distPct <= 0.012) {
-              const cooldownKey = `sl_warn_${trade.id}`;
-              const lastAlert = proactiveAlertCooldownMap.get(cooldownKey) ?? 0;
-              if (Date.now() - lastAlert > 10 * 60 * 1000) {
-                proactiveAlertCooldownMap.set(cooldownKey, Date.now());
-                await dispatchTradeAiEvent(
-                  supabase,
-                  trade.id,
-                  `⚠️ **Увага по ризику:** Ціна $${currentPrice} наблизилася до Stop Loss ($${tradeSnapshot.sl}) на відстань ${(distPct * 100).toFixed(2)}%! Позиція у зоні підвищеного ризику.`,
-                  { action: "sl_warning", slPrice: tradeSnapshot.sl, currentPrice, distPct: distPct * 100 }
-                );
-              }
+              const bucket = Math.floor(Date.now() / (15 * 60 * 1000));
+              const eventId = `sl_warn_${trade.id}_${bucket}`;
+              await dispatchTradeAiEvent(
+                supabase,
+                trade.id,
+                `⚠️ **Увага по ризику:** Ціна ${currentPrice} наблизилася до Stop Loss (${tradeSnapshot.sl}) на відстань ${(distPct * 100).toFixed(2)}%! Позиція у зоні підвищеного ризику.`,
+                { action: "sl_warning", slPrice: tradeSnapshot.sl, currentPrice, distPct: distPct * 100 },
+                eventId
+              );
             }
           }
 
@@ -232,17 +229,14 @@ export function startPaperWorker(
               const moved = isLong ? currentPrice - tradeSnapshot.entry_avg : tradeSnapshot.entry_avg - currentPrice;
               const progress = moved / totalDist;
               if (progress >= 0.5 && progress < 0.9) {
-                const cooldownKey = `tp1_midway_${trade.id}`;
-                const lastAlert = proactiveAlertCooldownMap.get(cooldownKey) ?? 0;
-                if (Date.now() - lastAlert > 30 * 60 * 1000) {
-                  proactiveAlertCooldownMap.set(cooldownKey, Date.now());
-                  await dispatchTradeAiEvent(
-                    supabase,
-                    trade.id,
-                    `📈 **Прогрес угоди:** Подолано 50% дистанції до TP1 ($${tp1Price}). Поточна ціна: $${currentPrice}.`,
-                    { action: "tp1_midway", progressPct: Math.round(progress * 100), currentPrice }
-                  );
-                }
+                const eventId = `tp1_midway_${trade.id}`;
+                await dispatchTradeAiEvent(
+                  supabase,
+                  trade.id,
+                  `📈 **Прогрес угоди:** Подолано 50% дистанції до TP1 (${tp1Price}). Поточна ціна: ${currentPrice}.`,
+                  { action: "tp1_midway", progressPct: Math.round(progress * 100), currentPrice },
+                  eventId
+                );
               }
             }
           }

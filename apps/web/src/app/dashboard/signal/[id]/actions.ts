@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { sanitizeSymbol } from "@crypto-bot/shared";
 import { parseSignalText, createTradePreview, submitEntry, protectFilledPosition } from "@crypto-bot/trading";
+import { ensureTradeAiSession } from "./ai-companion-actions";
 
 export interface ExecuteSignalActionOptions {
   orderType?: "Market" | "Limit" | undefined;
@@ -235,6 +236,17 @@ lev ${leverage}`;
   }
 
   const tradeId: string = parsedTrade.data.id;
+
+  // Trigger server-side AI companion session initialization (P1.4)
+  void ensureTradeAiSession({
+    symbol: preview.signal.symbol,
+    tradeId,
+    signalId: targetSignalId,
+    side: preview.signal.side,
+    entryPrice: isImmediatelyFilled ? liveMarketPrice : effectiveEntryPrice,
+    stopLoss: preview.signal.stopLoss,
+    tp1: preview.signal.takeProfits[0]?.price ?? 0
+  }).catch(() => null);
 
   // Execute entry on exchange/paper
   const entrySubmission = await submitEntry(client, preview, tradeId);

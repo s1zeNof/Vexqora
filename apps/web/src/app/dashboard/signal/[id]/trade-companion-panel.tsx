@@ -178,16 +178,12 @@ export function TradeCompanionPanel({
   initialSession,
   symbol,
   side,
-  currentPrice,
   entryPrice,
   stopLossPrice,
   tp1Price,
-  pnlUsdt,
-  pnlPct,
   isPaperTrading,
   signalId,
-  tradeId,
-  klines
+  tradeId
 }: TradeCompanionPanelProps) {
   const [session, setSession] = useState<TradeAiSessionData | null>(initialSession);
   const [messages, setMessages] = useState<TradeAiMessageItem[]>(
@@ -245,13 +241,20 @@ export function TradeCompanionPanel({
     scrollToBottom();
   }, [messages, isPending]);
 
-  // Realtime background sync: poll every 4s for newly pushed messages from background workers
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  // Realtime background sync: poll every 3.5s with cursor delta (Bugfix P1.8)
   useEffect(() => {
     if (!session?.id) return;
     const interval = setInterval(() => {
       void (async () => {
         try {
-          const latest = await getLatestTradeAiMessages(session.id);
+          const currentMsgs = messagesRef.current;
+          const lastMsg = currentMsgs[currentMsgs.length - 1];
+          const latest = await getLatestTradeAiMessages(session.id, {
+            sinceIso: lastMsg?.createdAt
+          });
           if (latest && latest.length > 0) {
             setMessages((prev) => {
               const existingIds = new Set(prev.map((m) => m.id));
@@ -264,7 +267,7 @@ export function TradeCompanionPanel({
           // silent background sync catch
         }
       })();
-    }, 4000);
+    }, 3500);
 
     return () => clearInterval(interval);
   }, [session?.id]);
@@ -311,17 +314,7 @@ export function TradeCompanionPanel({
 
       if (!activeSession?.id) return;
 
-      const res = await sendTradeAiMessage(activeSession.id, prompt, {
-        symbol,
-        currentPrice,
-        side,
-        entryPrice,
-        stopLoss: stopLossPrice,
-        tp1: tp1Price,
-        pnlUsdt,
-        pnlPct,
-        klines
-      });
+      const res = await sendTradeAiMessage(activeSession.id, prompt);
 
       if (res) {
         setMessages((prev) => {
@@ -492,10 +485,41 @@ export function TradeCompanionPanel({
                   }}
                 >
                   <span style={{ fontWeight: 600, color: isSystemEvent ? "#FFC24B" : "#B5AEC7" }}>
-                    {isSystemEvent ? "Подія біржі" : "Vexqora AI"}
+                    {isSystemEvent ? "Подія ринку" : "Vexqora AI"}
                   </span>
                   <span>·</span>
                   <span>{formatMsgTime(m.createdAt)}</span>
+                  {m.structuredPayload?.source === "openrouter_llm" ? (
+                    <span
+                      style={{
+                        marginLeft: "4px",
+                        fontSize: "10px",
+                        fontFamily: "'JetBrains Mono', monospace",
+                        color: "#B285FF",
+                        background: "rgba(124, 77, 255, 0.12)",
+                        border: "1px solid rgba(124, 77, 255, 0.28)",
+                        borderRadius: "3px",
+                        padding: "1px 5px"
+                      }}
+                    >
+                      OpenRouter LLM {typeof m.structuredPayload?.tokensUsed === "number" ? `· ${m.structuredPayload.tokensUsed} tok` : ""}
+                    </span>
+                  ) : m.structuredPayload?.source === "deterministic_fallback" ? (
+                    <span
+                      style={{
+                        marginLeft: "4px",
+                        fontSize: "10px",
+                        fontFamily: "'JetBrains Mono', monospace",
+                        color: "#FFC24B",
+                        background: "rgba(255, 194, 75, 0.12)",
+                        border: "1px solid rgba(255, 194, 75, 0.28)",
+                        borderRadius: "3px",
+                        padding: "1px 5px"
+                      }}
+                    >
+                      Детерміністичний синтез
+                    </span>
+                  ) : null}
                 </div>
 
                 {/* Editorial text */}

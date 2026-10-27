@@ -20,6 +20,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { accountConnectionSchema, createAccountClient } from "../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import { ensureTradeAiSession } from "../signal/[id]/ai-companion-actions";
 
 export interface PreviewState {
   error?: string;
@@ -748,6 +749,17 @@ export async function confirmSignal(formData: FormData) {
       throw new Error(`Failed to persist trade: ${tradeRes.error?.message}`);
     }
     const tradeId = String(tradeRes.data.id);
+
+    // Trigger server-side AI companion session initialization (P1.4)
+    void ensureTradeAiSession({
+      symbol: preview.signal.symbol,
+      tradeId,
+      signalId,
+      side: preview.signal.side,
+      entryPrice: preview.entryPrice,
+      stopLoss: preview.signal.stopLoss,
+      tp1: preview.signal.takeProfits[0]?.price ?? 0
+    }).catch(() => null);
 
     // 8. Submit entry order
     const entryResult = await submitEntry(client, preview, tradeId);

@@ -8,6 +8,7 @@ import { startSignalOutcomeMonitor } from "./signal-monitor";
 import { reconcileOnStartup } from "./reconciler";
 import { processJob, type ExecutionJobData } from "./runner";
 import { startWsListener } from "./ws-listener";
+import { startMarketEventsScheduler } from "./market-events-scheduler";
 
 interface JobRow {
   id: string;
@@ -119,6 +120,9 @@ async function startWorker() {
   // Evaluate every canonical signal, even when the user never opened a trade.
   const stopSignalMonitor = startSignalOutcomeMonitor(supabase);
 
+  // Start 24/7 Market Events Scheduler for AI Companion (Phase P1-E)
+  const stopMarketEvents = startMarketEventsScheduler(supabase);
+
   logger.info({ pollIntervalMs: config.pollIntervalMs }, "Worker queue consumer active. Waiting for execution jobs...");
 
   let isRunning = true;
@@ -130,6 +134,7 @@ async function startWorker() {
     stopWsListener();
     stopPaper();
     stopSignalMonitor();
+    stopMarketEvents();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
