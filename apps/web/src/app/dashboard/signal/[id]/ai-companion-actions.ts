@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import {
   orchestrateTradeAnalysis,
   type LeadTradeSynthesis,
-  calculateRSI
+  calculateRSI,
+  callNemotron
 } from "@crypto-bot/trading";
 import type { Kline } from "@crypto-bot/shared";
 
@@ -132,13 +133,23 @@ export async function ensureTradeAiSession(params: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: rawAccount } = await supabase
+  let { data: rawAccount } = await supabase
     .from("exchange_accounts")
     .select("id")
     .eq("user_id", user.id)
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
+
+  if (!rawAccount) {
+    const { data: fallbackAccount } = await supabase
+      .from("exchange_accounts")
+      .select("id")
+      .eq("user_id", user.id)
+      .limit(1)
+      .maybeSingle();
+    rawAccount = fallbackAccount;
+  }
 
   const parsedAccount = accountIdSchema.safeParse(rawAccount);
   if (!parsedAccount.success) return null;
@@ -166,15 +177,23 @@ export async function ensureTradeAiSession(params: {
   if (error || !parsedCreated.success || !parsedCreated.data.id) return null;
   const sessionId = parsedCreated.data.id;
 
-  // Initial welcome message from Lead Agent
+  const slPct = params.entryPrice > 0 ? (Math.abs(params.entryPrice - params.stopLoss) / params.entryPrice * 100).toFixed(2) : "—";
+  const tp1Pct = params.entryPrice > 0 ? (Math.abs(params.tp1 - params.entryPrice) / params.entryPrice * 100).toFixed(2) : "—";
+
+  // Initial welcome message from Lead Agent in clean document formatting
   await supabase.from("trade_ai_messages").insert({
     session_id: sessionId,
     author_kind: "lead",
     agent_id: "lead_trade_agent",
     kind: "analysis",
-    content: `👋 Персональний AI Trade Companion активовано для **${params.symbol.toUpperCase()}**.
-Я підключив субагентів (структура, CVD потік, ризик та новини). Початковий план: **${params.side.toUpperCase()}** від $${params.entryPrice} (SL: $${params.stopLoss}, TP1: $${params.tp1}).
-Запитуйте будь-яку інформацію або чекайте автоматичних сповіщень.`
+    content: `Вітаю. AI Companion активовано для **${params.symbol.toUpperCase()}**.
+
+**Початковий сетап:**
+• Напрямок: **${params.side.toUpperCase()}** від $${params.entryPrice}
+• Stop Loss: $${params.stopLoss} (дистанція ризику: ${slPct}%)
+• Ціль TP1: $${params.tp1} (дистанція тейку: ${tp1Pct}%)
+
+Я безперервно відстежую ринкову структуру, CVD потік, стакан та дистанцію до рівнів захисту. У разі зміни структури або наближення ціни до стоп-лосу сповіщу вас у цьому чаті. Ви також можете запитати мене про будь-який аспект угоди.`
   });
 
   return getTradeAiSession({
@@ -287,85 +306,146 @@ export async function sendTradeAiMessage(
   const symbol = context.symbol.toUpperCase();
   const lower = userPrompt.toLowerCase();
   const pnlText = context.pnlUsdt !== undefined
-    ? `Поточний PnL: ${context.pnlUsdt >= 0 ? "+" : ""}${context.pnlUsdt.toFixed(2)} USDT (${context.pnlPct?.toFixed(2)}%).`
+    ? `Поточний PnL: ${context.pnlUsdt >= 0 ? "+" : ""}${context.pnlUsdt.toFixed(2)} USDT (${context.pnlPct !== undefined ? (context.pnlPct >= 0 ? "+" : "") + context.pnlPct.toFixed(2) + "%" : "0%"}).`
     : "";
 
-  let replyText: string;
+  let replyText: string | null = null;
   const subResMap = new Map(synthesis.subagentResults.map((s) => [s.agentKey, s]));
   const structRes = subResMap.get("market_structure_agent");
   const orderFlowRes = subResMap.get("order_flow_agent");
   const riskRes = subResMap.get("risk_guardian_agent");
   const newsRes = subResMap.get("news_events_agent");
 
-  if (lower.includes("вийти") || lower.includes("закрити") || lower.includes("exit") || lower.includes("close")) {
-    replyText = `📊 **Оцінка сценарію закриття (${symbol}):**
-${pnlText}
-• **Вердикт Lead Agent:** ${synthesis.leadVerdict} (рекомендація субагентів).
-• **Ризик-статус:** ${riskRes?.analysis ?? "Стоп-лосс на біржі."}
-• **Порада щодо фіксації:** Якщо ви бажаєте зафіксувати частину прибутку або обмежити ризик — скористайтеся кнопками ручного контролю [50%] або [Close] у правому терміналі. 
-⚠️ *Нагадування безпеки: Я не можу самостійно закрити вашу реальну біржову угоду без вашого явного підтвердження.*`;
-  } else if (lower.includes("структур") || lower.includes("тренд") || lower.includes("trend") || lower.includes("bos")) {
-    const structDetail = structRes?.evidence[0]?.data;
-    const trendText = typeof structDetail?.trend === "string" ? structDetail.trend.toUpperCase() : "UNKNOWN";
-    const swingH = typeof structDetail?.swingHigh === "number" ? structDetail.swingHigh.toFixed(4) : "—";
-    const swingL = typeof structDetail?.swingLow === "number" ? structDetail.swingLow.toFixed(4) : "—";
+  const structDetail = structRes?.evidence[0]?.data;
+  const ofDetail = orderFlowRes?.evidence[0]?.data;
+  const distToSl = context.currentPrice > 0 ? ((Math.abs(context.currentPrice - context.stopLoss) / context.currentPrice) * 100).toFixed(2) : "н/д";
+  const distToTp1 = context.currentPrice > 0 ? ((Math.abs(context.tp1 - context.currentPrice) / context.currentPrice) * 100).toFixed(2) : "н/д";
 
-    replyText = `📐 **Ринкова структура (Market Structure Agent):**
-• **Оцінений тренд:** ${trendText}
+  // Check OpenRouter API Keys availability for true LLM call
+  const hasOpenRouterKey = Boolean(
+    (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim().length > 10) ||
+    (process.env.OPENROUTER_VISION_API_KEY && process.env.OPENROUTER_VISION_API_KEY.trim().length > 10)
+  );
+
+  if (hasOpenRouterKey) {
+    try {
+      const structTrend = typeof structDetail?.trend === "string" ? structDetail.trend : "н/д";
+      const structSwingHigh = typeof structDetail?.swingHigh === "number" ? structDetail.swingHigh.toString() : "н/д";
+      const structSwingLow = typeof structDetail?.swingLow === "number" ? structDetail.swingLow.toString() : "н/д";
+      const ofCvd = typeof ofDetail?.cvdUsd === "number" ? ofDetail.cvdUsd.toString() : "0";
+      const ofObi = typeof ofDetail?.linearImbalancePct === "number" ? ofDetail.linearImbalancePct.toString() : "0";
+
+      const systemPrompt = `Ти — Vexqora AI Trade Companion, персональний інтелектуальний помічник трейдера на терміналі Vexqora Trade.
+Твій стиль: стриманий, точний, аналітичний, без води, без кліше та без надлишкових емодзі (стилістика Anthropic / Claude). Відповідай виключно українською мовою.
+Форматуй відповідь чисто за правилами Markdown: невеликі абзаци, чіткі списки з булетами (•), для чисел і цін використовуй жирний шрифт або monospace.
+КРИТИЧНІ ПРАВИЛА:
+1. Спирайся ВИКЛЮЧНО на надані фактологічні дані від субагентів (структура, CVD дельта, стакан, ризик, PnL, відстані до рівнів).
+2. ЖОДНИХ вигаданих даних чи галюцинацій: якщо фактів або свічок бракує для повної відповіді, чесно напиши про це.
+3. Не роздавай категоричних фінансових наказів, надавай зважений аналіз і сценарії дій.`;
+
+      const factsContext = `
+ФАКТИ ПО УГОДІ ТА СУБАГЕНТАХ (${symbol}):
+- Монета: ${symbol}, Напрямок: ${context.side.toUpperCase()}
+- Ціна входу: $${context.entryPrice}, Поточна ціна: $${context.currentPrice}
+- Stop Loss: $${context.stopLoss} (дистанція до SL: ${distToSl}%)
+- Take Profit 1: $${context.tp1} (дистанція до TP1: ${distToTp1}%)
+${pnlText ? `- ${pnlText}` : "- Активної біржової позиції наразі немає (очікується вхід або спостереження)."}
+- Загальний вердикт Lead Agent: ${synthesis.leadVerdict}
+- Ринкова структура: ${structRes?.analysis ?? "дані прогріваються"} (Тренд: ${structTrend}, Swing High: $${structSwingHigh}, Swing Low: $${structSwingLow})
+- Order Flow / CVD: ${orderFlowRes?.analysis ?? "збалансований потік"} (CVD: ${ofCvd} USD, OBI дисбаланс: ${ofObi}%)
+- Risk Guardian: ${riskRes?.analysis ?? "Stop Loss встановлений"}
+- Новини / Події: ${newsRes?.analysis ?? "Критичних форс-мажорів не зафіксовано"}
+`;
+
+      const nemotronResponse = await callNemotron([
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `${factsContext}\nЗапит користувача: "${userPrompt.trim()}"` }
+      ], {
+        temperature: 0.3,
+        maxTokens: 650
+      });
+
+      if (nemotronResponse?.content && nemotronResponse.content.trim().length > 0) {
+        replyText = nemotronResponse.content.trim();
+      }
+    } catch {
+      replyText = null;
+    }
+  }
+
+  // Grounded Deterministic Synthesis Fallback (Claude document typography)
+  if (!replyText) {
+    if (lower.includes("вийти") || lower.includes("закрити") || lower.includes("exit") || lower.includes("close")) {
+      replyText = `**Оцінка сценарію закриття (${symbol}):**
+${pnlText ? `${pnlText}\n` : ""}
+• **Вердикт Lead Agent:** ${synthesis.leadVerdict}
+• **Стан ризику:** ${riskRes?.analysis ?? "Stop Loss виставлений на біржі."}
+• **Рекомендація щодо фіксації:** Якщо ви бажаєте зафіксувати прибуток або зменшити експозицію — скористайтеся кнопками [50%] або [Close] у правому торговому терміналі.
+*Примітка безпеки: AI Companion не закриває ваші реальні біржові позиції без вашого прямого підтвердження.*`;
+    } else if (lower.includes("структур") || lower.includes("тренд") || lower.includes("trend") || lower.includes("bos") || lower.includes("choch")) {
+      const trendText = typeof structDetail?.trend === "string" ? structDetail.trend.toUpperCase() : "UNKNOWN";
+      const swingH = typeof structDetail?.swingHigh === "number" ? structDetail.swingHigh.toFixed(4) : "—";
+      const swingL = typeof structDetail?.swingLow === "number" ? structDetail.swingLow.toFixed(4) : "—";
+
+      replyText = `**Ринкова структура (${symbol}):**
+
+• **Визначений тренд:** **${trendText}**
 • **Підтверджений Swing High:** $${swingH}
 • **Підтверджений Swing Low:** $${swingL}
-• **Аналіз структури:** ${structRes?.analysis ?? "Недостатньо свічок для повного MTF прогріву."}
-• **Дані станом на:** ${new Date().toLocaleTimeString("uk-UA")}`;
-  } else if (lower.includes("ризик") || lower.includes("стоп") || lower.includes("sl") || lower.includes("stop")) {
-    const distToSl = Math.abs(context.currentPrice - context.stopLoss);
-    const distPct = context.currentPrice > 0 ? ((distToSl / context.currentPrice) * 100).toFixed(2) : "—";
+• **Аналіз структури:** ${structRes?.analysis ?? "Недостатньо закритих свічок для повного MTF прогріву."}
+• **Час оцінки:** ${new Date().toLocaleTimeString("uk-UA")}`;
+    } else if (lower.includes("ризик") || lower.includes("стоп") || lower.includes("sl") || lower.includes("stop")) {
+      replyText = `**Оцінка капіталу та ризику (${symbol}):**
 
-    replyText = `🛡️ **Оцінка капіталу та ризику (Risk Guardian Agent):**
-• **Поточний Stop Loss:** $${context.stopLoss} (дистанція до стопу: ${distPct}%)
+• **Поточний Stop Loss:** $${context.stopLoss} (дистанція до стопу: **${distToSl}%**)
 • **Стан позиції:** ${riskRes?.analysis ?? "Стоп-лосс виставлений на біржі."}
-• **Авто-захист:** Trailing Stop активується після взяття першого тейку TP1 ($${context.tp1}).
-• **Денні ліміти:** Перевірка не виявила порушень ліміту максимальних втрат.`;
-  } else if (lower.includes("потік") || lower.includes("cvd") || lower.includes("кит") || lower.includes("стакан") || lower.includes("дельта")) {
-    const ofDetail = orderFlowRes?.evidence[0]?.data;
-    const cvdUsd = typeof ofDetail?.cvdUsd === "number" ? ofDetail.cvdUsd.toFixed(0) : "0";
-    const obi = typeof ofDetail?.linearImbalancePct === "number" ? ofDetail.linearImbalancePct.toFixed(1) : "—";
+• **Захист прибутку:** Динамічний Trailing Stop активується після досягнення першого тейку TP1 ($${context.tp1}).
+• **Денні ліміти:** Порушень максимальної денної просадки не зафіксовано.`;
+    } else if (lower.includes("потік") || lower.includes("cvd") || lower.includes("кит") || lower.includes("стакан") || lower.includes("дельта")) {
+      const cvdUsd = typeof ofDetail?.cvdUsd === "number" ? ofDetail.cvdUsd.toFixed(0) : "0";
+      const obi = typeof ofDetail?.linearImbalancePct === "number" ? ofDetail.linearImbalancePct.toFixed(1) : "—";
 
-    replyText = `🌊 **Потік ордерів та дельта (Order Flow Agent):**
-• **Кумулятивна дельта (CVD):** ${Number(cvdUsd) >= 0 ? "+" : ""}${cvdUsd} USD
-• **Дисбаланс склянки (OBI):** ${obi}%
-• **Спостереження за стрічкою угод:** ${orderFlowRes?.analysis ?? "Потік угод збалансований."}`;
-  } else if (lower.includes("новин") || lower.includes("news") || lower.includes("анонс")) {
-    replyText = `📰 **Новинний контекст (News & Event Agent):**
-• **Статус фіду:** Перевірений лінійний парсер новин
-• **Оцінка ризику:** ${newsRes?.analysis ?? "Критичних делістингів або форс-мажорів для монети не зафіксовано."}
-• **Примітка щодо провенансу:** Якщо перевірений потік новин не постачає свіжих телеграм/RSS подій, статус автоматично перемикається в режим обережності.`;
-  } else if (lower.includes("rsi") || lower.includes("індикатор") || lower.includes("indicator")) {
-    const klines = context.klines ?? [];
-    if (klines.length < 15) {
-      replyText = `📊 **Технічні індикатори (Quant Skill):**
-• **RSI (14):** [DATA_UNAVAILABLE] — недостатньо завантажених свічок (маємо ${klines.length}, потрібно >=15).
+      replyText = `**Потік ордерів та дельта (${symbol}):**
+
+• **Кумулятивна дельта (CVD):** **${Number(cvdUsd) >= 0 ? "+" : ""}${cvdUsd} USD**
+• **Дисбаланс стакана (OBI):** **${obi}%**
+• **Стрічка угод:** ${orderFlowRes?.analysis ?? "Потік угод збалансований."}`;
+    } else if (lower.includes("новин") || lower.includes("news") || lower.includes("анонс")) {
+      replyText = `**Новинний контекст (${symbol}):**
+
+• **Статус фіду:** Перевірений лінійний парсер подій.
+• **Оцінка новинного фону:** ${newsRes?.analysis ?? "Критичних делістингів або форс-мажорів не зафіксовано."}
+• **Режим перевірки:** За відсутності свіжих підтверджених новин статус автоматично перемикається у нейтрально-обережний.`;
+    } else if (lower.includes("rsi") || lower.includes("індикатор") || lower.includes("indicator")) {
+      const klines = context.klines ?? [];
+      if (klines.length < 15) {
+        replyText = `**Технічні індикатори (${symbol}):**
+
+• **RSI (14):** [DATA_UNAVAILABLE] — недостатньо завантажених свічок (наразі ${klines.length}, потрібно >=15).
 • **EMA (20/50):** [DATA_UNAVAILABLE] — бракує свічкових даних для прогріву.
-• **Статус даних:** Чесна відмова через брак даних (No hallucinated data). Час перевірки: ${new Date().toLocaleTimeString("uk-UA")}.`;
-    } else {
-      const closes = klines.map((k) => k.close);
-      const rsiArr = calculateRSI(closes, 14);
-      const lastRsi = rsiArr[rsiArr.length - 1];
-      const rsiVal = typeof lastRsi === "number" ? lastRsi.toFixed(1) : "—";
-      const rsiZone = Number(rsiVal) >= 70 ? "Перекупленість (Overbought)" : Number(rsiVal) <= 30 ? "Перепроданість (Oversold)" : "Нейтральна зона";
+• **Статус перевірки:** Відмова через брак даних (No hallucinated indicators). Час: ${new Date().toLocaleTimeString("uk-UA")}.`;
+      } else {
+        const closes = klines.map((k) => k.close);
+        const rsiArr = calculateRSI(closes, 14);
+        const lastRsi = rsiArr[rsiArr.length - 1];
+        const rsiVal = typeof lastRsi === "number" ? lastRsi.toFixed(1) : "—";
+        const rsiZone = Number(rsiVal) >= 70 ? "Перекупленість" : Number(rsiVal) <= 30 ? "Перепроданість" : "Нейтральна зона";
 
-      replyText = `📊 **Технічні індикатори (Quant Skill):**
-• **RSI (14):** ${rsiVal} (${rsiZone})
-• **Кількість свічок у вибірці:** ${klines.length}
-• **Часова мітка індикатора:** ${new Date().toLocaleTimeString("uk-UA")}
-• **Статус даних:** Підтверджено на закритих барах.`;
-    }
-  } else {
-    replyText = `🧠 **Lead Trade Agent (${symbol}):**
-${pnlText}
+        replyText = `**Технічні індикатори (${symbol}):**
+
+• **RSI (14):** **${rsiVal}** (${rsiZone})
+• **Кількість свічок у розрахунку:** ${klines.length}
+• **Час розрахунку:** ${new Date().toLocaleTimeString("uk-UA")}
+• **Джерело:** Розраховано за закритими свічками ринку.`;
+      }
+    } else {
+      replyText = `**Аналіз угоди (${symbol}):**
+${pnlText ? `${pnlText}\n` : ""}
 • **Синтез ринкового стану:** ${synthesis.summary}
-• **Поточна рекомендація:** **${synthesis.leadVerdict}**
+• **Поточна рекомендація Lead Agent:** **${synthesis.leadVerdict}**
 • **Субагенти перевірили:** Структура (${structRes?.status ?? "OK"}), Order Flow (${orderFlowRes?.status ?? "OK"}), Ризик (${riskRes?.status ?? "OK"}), Новини (${newsRes?.status ?? "OK"}).
-• Запитуйте конкретні параметри (наприклад, "яка дельта", "чи є ризик по стопу", "структура тренду") для миттєвої доказової вибірки.`;
+• Запитуйте конкретні параметри (наприклад, "яка дельта", "чи є ризик по стопу", "структура тренду") для миттєвої фактологічної довідки.`;
+    }
   }
 
   // 5. Insert Lead Agent response

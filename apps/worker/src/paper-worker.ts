@@ -32,6 +32,8 @@ interface DbTarget {
   status: "open" | "filled" | "cancelled";
 }
 
+const proactiveAlertCooldownMap = new Map<string, number>();
+
 async function dispatchTradeAiEvent(
   supabase: SupabaseClient,
   tradeId: string,
@@ -39,23 +41,59 @@ async function dispatchTradeAiEvent(
   payload?: Record<string, unknown>
 ): Promise<void> {
   try {
-    const { data: session } = await supabase
+    let { data: session } = await supabase
       .from("trade_ai_sessions")
       .select("id")
       .eq("trade_id", tradeId)
       .maybeSingle();
 
+    if (!session?.id) {
+      // Auto-create session if missing so background events are guaranteed delivered
+      const { data: trade } = await supabase
+        .from("trades")
+        .select("id, account_id, symbol, side, entry_avg, sl, exchange_accounts(user_id)")
+        .eq("id", tradeId)
+        .maybeSingle();
+
+      if (trade) {
+        const userId = (trade.exchange_accounts as { user_id?: string } | null)?.user_id;
+        if (userId) {
+          const tradeSide = typeof trade.side === "string" ? trade.side.toUpperCase() : "LONG";
+          const tradeEntry = typeof trade.entry_avg === "number" ? trade.entry_avg.toString() : "—";
+          const tradeSl = typeof trade.sl === "number" ? trade.sl.toString() : "—";
+
+          const { data: newSession } = await supabase
+            .from("trade_ai_sessions")
+            .insert({
+              user_id: userId,
+              account_id: trade.account_id,
+              trade_id: trade.id,
+              symbol: trade.symbol,
+              status: "active",
+              initial_thesis: `Вхід у ${tradeSide} по $${tradeEntry} (SL: $${tradeSl}).`,
+              invalidation_criteria: `Пробиття Stop Loss $${tradeSl}.`
+            })
+            .select("id")
+            .single();
+          if (newSession?.id) {
+            session = newSession;
+          }
+        }
+      }
+    }
+
     if (session?.id) {
       await supabase.from("trade_ai_messages").insert({
         session_id: session.id,
-        author_kind: "system",
+        author_kind: "lead",
+        agent_id: "lead_trade_agent",
         kind: "event",
         content,
         structured_payload: payload ?? null
       });
     }
-  } catch {
-    // best-effort event dispatch
+  } catch (err) {
+    logger.warn({ tradeId, err }, "Failed to dispatch trade AI event");
   }
 }
 
@@ -161,6 +199,54 @@ export function startPaperWorker(
         }));
 
         const result = evaluatePaperTrade(tradeSnapshot, targetSnapshots, currentPrice);
+
+        // Proactive autonomous companion alerts for active trades
+        if (tradeSnapshot.status === "active") {
+          // 1. Proactive Stop Loss proximity warning (< 1.2% distance)
+          if (tradeSnapshot.sl && tradeSnapshot.sl > 0) {
+            const isLong = tradeSnapshot.side === "long";
+            const distToSl = isLong ? currentPrice - tradeSnapshot.sl : tradeSnapshot.sl - currentPrice;
+            const distPct = distToSl / currentPrice;
+
+            if (distPct > 0 && distPct <= 0.012) {
+              const cooldownKey = `sl_warn_${trade.id}`;
+              const lastAlert = proactiveAlertCooldownMap.get(cooldownKey) ?? 0;
+              if (Date.now() - lastAlert > 10 * 60 * 1000) {
+                proactiveAlertCooldownMap.set(cooldownKey, Date.now());
+                await dispatchTradeAiEvent(
+                  supabase,
+                  trade.id,
+                  `⚠️ **Увага по ризику:** Ціна $${currentPrice} наблизилася до Stop Loss ($${tradeSnapshot.sl}) на відстань ${(distPct * 100).toFixed(2)}%! Позиція у зоні підвищеного ризику.`,
+                  { action: "sl_warning", slPrice: tradeSnapshot.sl, currentPrice, distPct: distPct * 100 }
+                );
+              }
+            }
+          }
+
+          // 2. Proactive milestone alert: 50% progression toward TP1
+          if (targetSnapshots.length > 0 && targetSnapshots[0]?.price && targetSnapshots[0].status === "open") {
+            const tp1Price = targetSnapshots[0].price;
+            const isLong = tradeSnapshot.side === "long";
+            const totalDist = Math.abs(tp1Price - tradeSnapshot.entry_avg);
+            if (totalDist > 0) {
+              const moved = isLong ? currentPrice - tradeSnapshot.entry_avg : tradeSnapshot.entry_avg - currentPrice;
+              const progress = moved / totalDist;
+              if (progress >= 0.5 && progress < 0.9) {
+                const cooldownKey = `tp1_midway_${trade.id}`;
+                const lastAlert = proactiveAlertCooldownMap.get(cooldownKey) ?? 0;
+                if (Date.now() - lastAlert > 30 * 60 * 1000) {
+                  proactiveAlertCooldownMap.set(cooldownKey, Date.now());
+                  await dispatchTradeAiEvent(
+                    supabase,
+                    trade.id,
+                    `📈 **Прогрес угоди:** Подолано 50% дистанції до TP1 ($${tp1Price}). Поточна ціна: $${currentPrice}.`,
+                    { action: "tp1_midway", progressPct: Math.round(progress * 100), currentPrice }
+                  );
+                }
+              }
+            }
+          }
+        }
 
         if (result.actions.length === 0 || (result.actions.length === 1 && result.actions[0]?.type === "MANUAL_HOLD")) {
           continue;

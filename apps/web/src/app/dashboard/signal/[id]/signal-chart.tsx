@@ -236,10 +236,29 @@ export function SignalChart({
 
   const isMobile = containerWidth < 640;
 
-  // Responsive Height: 390px on phones, 500px on desktop (or 540px / 720px expanded)
-  const defaultHeight = isMobile ? 390 : 500;
-  const expandedHeight = isMobile ? 540 : 720;
-  const height = isFullscreen ? (typeof window !== "undefined" ? window.innerHeight : 760) : isExpanded ? expandedHeight : defaultHeight;
+  // Responsive Height: 390px on phones, 74vh on desktop (or 88vh expanded)
+  const [viewportHeight, setViewportHeight] = useState<number>(700);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setViewportHeight(window.innerHeight);
+      const onResize = () => setViewportHeight(window.innerHeight);
+      window.addEventListener("resize", onResize);
+      return () => window.removeEventListener("resize", onResize);
+    }
+  }, []);
+
+  const defaultHeight = isMobile
+    ? 390
+    : Math.max(580, Math.min(880, Math.round(viewportHeight * 0.74)));
+  const expandedHeight = isMobile
+    ? 540
+    : Math.max(740, Math.min(1100, Math.round(viewportHeight * 0.88)));
+  const height = isFullscreen
+    ? (typeof window !== "undefined" ? window.innerHeight : 760)
+    : isExpanded
+      ? expandedHeight
+      : defaultHeight;
 
   // Dynamic Price Axis Width: 54px on mobile, 76px on desktop
   const priceAxisWidth = isMobile ? 54 : 76;
@@ -696,7 +715,7 @@ export function SignalChart({
   const highestCandle = highestCandleIdx >= 0 ? visibleKlines[highestCandleIdx] : null;
 
   return (
-    <div ref={chartCardRef} className="cd" style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div ref={chartCardRef} className="cd" style={{ overflow: "hidden", display: "flex", flexDirection: "column", height: "100%", width: "100%" }}>
       {/* Top Chart Header: Controls & Target Levels Bar */}
       <div
         style={{
@@ -834,10 +853,10 @@ export function SignalChart({
 
       {/* Main Chart Body */}
       {chartMode === "tradingview" ? (
-        <div style={{ position: "relative", width: "100%", height: isExpanded ? "740px" : isMobile ? "420px" : "540px", background: "#07050F", transition: "height 0.25s ease" }}>
+        <div style={{ position: "relative", width: "100%", height: `${height}px`, background: "#07050F", transition: "height 0.25s ease" }}>
           <TradingViewChart
             symbol={symbol}
-            height={isExpanded ? "740px" : isMobile ? "420px" : "540px"}
+            height={`${height}px`}
             interval="15"
             showToolbar={true}
             onSwitchToTerminal={() => setChartMode("terminal")}

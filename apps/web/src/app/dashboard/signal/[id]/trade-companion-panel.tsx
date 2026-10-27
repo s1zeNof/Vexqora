@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect, useTransition } from "react";
+import React, { useState, useRef, useEffect, useTransition } from "react";
 import type { TradeAiSessionData, TradeAiMessageItem } from "./ai-companion-actions";
 import {
   sendTradeAiMessage,
   ensureTradeAiSession,
   getLatestTradeAiMessages
 } from "./ai-companion-actions";
+import type { Kline } from "@crypto-bot/shared";
 
 interface TradeCompanionPanelProps {
   initialSession: TradeAiSessionData | null;
@@ -21,6 +22,156 @@ interface TradeCompanionPanelProps {
   isPaperTrading?: boolean | undefined;
   signalId?: string | null | undefined;
   tradeId?: string | null | undefined;
+  klines?: Kline[] | undefined;
+}
+
+/**
+ * Clean Anthropic/Claude-inspired Markdown typesetter.
+ * Renders prose, bullet points, headers, monospace numbers and prices
+ * without neon SaaS cards or visual noise.
+ */
+function ClaudeMarkdownContent({ text }: { text: string }) {
+  const lines = text.split("\n");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      {lines.map((rawLine, idx) => {
+        const line = rawLine.trim();
+
+        // Empty line -> breathing room spacer
+        if (!line) {
+          return <div key={idx} style={{ height: "6px" }} />;
+        }
+
+        // Section header: starts with ### or ## or **Header:**
+        const isHeader =
+          line.startsWith("### ") ||
+          line.startsWith("## ") ||
+          (line.startsWith("**") && (line.endsWith(":**") || line.endsWith("**")) && !line.includes("•"));
+
+        if (isHeader) {
+          const headerText = line
+            .replace(/^#{2,3}\s*/, "")
+            .replace(/^\*\*/, "")
+            .replace(/\*\*$/, "")
+            .replace(/:$/, "");
+
+          return (
+            <div
+              key={idx}
+              style={{
+                fontFamily: "'Plus Jakarta Sans', sans-serif",
+                fontWeight: 600,
+                fontSize: "13.5px",
+                color: "#F1EEFF",
+                marginTop: idx > 0 ? "8px" : "0",
+                marginBottom: "2px",
+                letterSpacing: "-0.01em"
+              }}
+            >
+              {headerText}
+            </div>
+          );
+        }
+
+        // Bullet point: starts with • or - or *
+        const isBullet = line.startsWith("• ") || line.startsWith("- ") || line.startsWith("* ");
+        if (isBullet) {
+          const bulletContent = line.replace(/^[•\-*]\s*/, "");
+          return (
+            <div
+              key={idx}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "8px",
+                paddingLeft: "4px",
+                lineHeight: "1.6"
+              }}
+            >
+              <span
+                style={{
+                  color: "#7C4DFF",
+                  userSelect: "none",
+                  fontSize: "13px",
+                  lineHeight: "1.6"
+                }}
+              >
+                •
+              </span>
+              <div style={{ flex: 1 }}>{renderInlineTokens(bulletContent)}</div>
+            </div>
+          );
+        }
+
+        // Regular line of prose
+        return (
+          <div key={idx} style={{ lineHeight: "1.6" }}>
+            {renderInlineTokens(line)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Formats inline bold (**text**), code (`code`), prices ($XX.XX), and PnL markers.
+ */
+function renderInlineTokens(line: string): React.ReactNode {
+  // Regex to match **bold** or `code` tokens
+  const tokenRegex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const parts = line.split(tokenRegex);
+
+  return parts.map((part, i) => {
+    if (!part) return null;
+
+    if (part.startsWith("**") && part.endsWith("**")) {
+      const inner = part.slice(2, -2);
+      return (
+        <strong
+          key={i}
+          style={{
+            fontWeight: 600,
+            color: "#F1EEFF"
+          }}
+        >
+          {inner}
+        </strong>
+      );
+    }
+
+    if (part.startsWith("`") && part.endsWith("`")) {
+      const inner = part.slice(1, -1);
+      return (
+        <code
+          key={i}
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "12px",
+            background: "#161324",
+            padding: "1px 5px",
+            borderRadius: "4px",
+            color: "#E2DCF7",
+            border: "1px solid rgba(255, 255, 255, 0.08)"
+          }}
+        >
+          {inner}
+        </code>
+      );
+    }
+
+    return <span key={i}>{part}</span>;
+  });
+}
+
+function formatMsgTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
 }
 
 export function TradeCompanionPanel({
@@ -35,7 +186,8 @@ export function TradeCompanionPanel({
   pnlPct,
   isPaperTrading,
   signalId,
-  tradeId
+  tradeId,
+  klines
 }: TradeCompanionPanelProps) {
   const [session, setSession] = useState<TradeAiSessionData | null>(initialSession);
   const [messages, setMessages] = useState<TradeAiMessageItem[]>(
@@ -45,7 +197,7 @@ export function TradeCompanionPanel({
   const [isPending, startTransition] = useTransition();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Keep session in sync if parent updates initialSession
+  // Sync session if parent updates initialSession
   useEffect(() => {
     if (initialSession && !session) {
       setSession(initialSession);
@@ -53,15 +205,47 @@ export function TradeCompanionPanel({
     }
   }, [initialSession, session]);
 
+  // Guaranteed proactive AI session initialization on mount
+  useEffect(() => {
+    if (!session && symbol) {
+      let isCancelled = false;
+      void (async () => {
+        try {
+          const ensured = await ensureTradeAiSession({
+            symbol,
+            tradeId: tradeId ?? undefined,
+            signalId: signalId ?? undefined,
+            side,
+            entryPrice,
+            stopLoss: stopLossPrice,
+            tp1: tp1Price
+          });
+          if (!isCancelled && ensured) {
+            setSession(ensured);
+            if (ensured.messages && ensured.messages.length > 0) {
+              setMessages(ensured.messages);
+            }
+          }
+        } catch {
+          // graceful background init fallback
+        }
+      })();
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+  }, [session, symbol, tradeId, signalId, side, entryPrice, stopLossPrice, tp1Price]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isPending]);
 
-  // Realtime background sync: poll every 4s for newly pushed messages (e.g. from worker dispatchTradeAiEvent)
+  // Realtime background sync: poll every 4s for newly pushed messages from background workers
   useEffect(() => {
     if (!session?.id) return;
     const interval = setInterval(() => {
@@ -104,7 +288,6 @@ export function TradeCompanionPanel({
     startTransition(async () => {
       let activeSession = session;
 
-      // On-demand session creation upon user interaction (Zero mutations on initial page load)
       if (!activeSession) {
         activeSession = await ensureTradeAiSession({
           symbol,
@@ -136,7 +319,8 @@ export function TradeCompanionPanel({
         stopLoss: stopLossPrice,
         tp1: tp1Price,
         pnlUsdt,
-        pnlPct
+        pnlPct,
+        klines
       });
 
       if (res) {
@@ -151,8 +335,8 @@ export function TradeCompanionPanel({
   const quickPills = [
     { label: "📐 Структура тренду", prompt: "Яка поточна структура тренду на 15M/1H?" },
     { label: "🛡️ Оцінка ризику", prompt: "Який поточний рівень ризику для мого стопу?" },
-    { label: "📊 Сценарій закриття", prompt: "Чи варто зараз закрити 50% або вийти в безубиток?" },
-    { label: "🌊 Дельта та кити", prompt: "Чи є тиск великих ордерів у CVD стакані?" }
+    { label: "🌊 Потік CVD та дельта", prompt: "Чи є тиск великих ордерів у CVD стакані?" },
+    { label: "📊 Сценарій закриття", prompt: "Чи варто зараз закрити 50% або вийти в безубиток?" }
   ];
 
   return (
@@ -161,19 +345,20 @@ export function TradeCompanionPanel({
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        width: "100%",
         minHeight: "520px",
-        background: "linear-gradient(180deg, #0F0B1E 0%, #07050F 100%)",
-        border: "1px solid #2A2145",
-        borderRadius: "8px",
+        background: "#0C0A14",
+        border: "1px solid rgba(255, 255, 255, 0.08)",
+        borderRadius: "10px",
         overflow: "hidden"
       }}
     >
-      {/* Header */}
+      {/* Header: Clean, quiet, Claude-inspired restraint */}
       <div
         style={{
-          padding: "12px 14px",
-          background: "#130E26",
-          borderBottom: "1px solid #2A2145",
+          padding: "12px 16px",
+          background: "#100D1C",
+          borderBottom: "1px solid rgba(255, 255, 255, 0.07)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -181,59 +366,43 @@ export function TradeCompanionPanel({
           gap: "8px"
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <div
-            style={{
-              width: "28px",
-              height: "28px",
-              borderRadius: "6px",
-              background: "linear-gradient(135deg, #7C4DFF 0%, #B24BFF 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "14px"
-            }}
-          >
-            🤖
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <div>
-            <div style={{ font: "700 13px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>
-              AI Trade Companion
+            <div style={{ font: "600 13.5px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>
+              Vexqora AI
             </div>
-            <div style={{ font: "500 10.5px 'JetBrains Mono', monospace", color: "#8A82A5" }}>
+            <div style={{ font: "500 11px 'JetBrains Mono', monospace", color: "#8A82A5" }}>
               {symbol} · {side.toUpperCase()} @ ${entryPrice}
             </div>
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span
             style={{
-              width: "7px",
-              height: "7px",
+              width: "6px",
+              height: "6px",
               borderRadius: "50%",
-              background: "#35F2D0",
-              boxShadow: "0 0 8px #35F2D0"
+              background: "#35F2D0"
             }}
           />
           <span
             style={{
-              font: "700 10px 'JetBrains Mono', monospace",
-              color: "#35F2D0",
-              textTransform: "uppercase"
+              font: "500 11px 'JetBrains Mono', monospace",
+              color: "#8A82A5"
             }}
           >
-            24/7 Live
+            Онлайн
           </span>
           {isPaperTrading && (
             <span
               style={{
-                background: "rgba(185, 162, 255, 0.15)",
-                color: "#B9A2FF",
-                border: "1px solid #7C4DFF44",
-                padding: "2px 6px",
-                borderRadius: "3px",
-                fontSize: "10px",
+                background: "#161324",
+                color: "#A59CC4",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                padding: "2px 7px",
+                borderRadius: "4px",
+                fontSize: "10.5px",
                 fontWeight: 600
               }}
             >
@@ -243,32 +412,16 @@ export function TradeCompanionPanel({
         </div>
       </div>
 
-      {/* Trade Thesis Banner */}
-      <div
-        style={{
-          padding: "8px 12px",
-          background: "rgba(124, 77, 255, 0.08)",
-          borderBottom: "1px solid #2A214544",
-          fontSize: "11px",
-          color: "#A59CC4",
-          lineHeight: "1.4"
-        }}
-      >
-        <span style={{ color: "#F1EEFF", fontWeight: 600 }}>Торгова теза: </span>
-        {session?.initialThesis ??
-          `Вхід у ${side.toUpperCase()} з ціллю TP1 $${tp1Price} та Stop Loss $${stopLossPrice}.`}
-      </div>
-
-      {/* Messages Stream */}
+      {/* Messages Stream: Generous breathing room, unboxed AI document prose */}
       <div
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: "12px",
+          padding: "18px 16px",
           display: "flex",
           flexDirection: "column",
-          gap: "10px",
-          fontSize: "12.5px"
+          gap: "20px",
+          fontSize: "13px"
         }}
       >
         {messages.length === 0 ? (
@@ -277,64 +430,84 @@ export function TradeCompanionPanel({
               margin: "auto",
               textAlign: "center",
               color: "#8A82A5",
-              padding: "20px"
+              padding: "24px",
+              maxWidth: "320px"
             }}
           >
-            <div style={{ fontSize: "24px", marginBottom: "8px" }}>💬</div>
-            <div style={{ fontWeight: 600, color: "#F1EEFF", marginBottom: "4px" }}>
+            <div style={{ fontWeight: 600, color: "#F1EEFF", marginBottom: "6px", fontSize: "14px" }}>
               AI Companion готовий до діалогу
             </div>
-            <div style={{ fontSize: "11.5px" }}>
-              Запитайте про ризик позиції, структуру або натисніть швидку підказку нижче.
+            <div style={{ fontSize: "12px", lineHeight: "1.5" }}>
+              Поставте запитання про поточну ринкову структуру, дистанцію до стоп-лосу або скористайтеся підказками нижче.
             </div>
           </div>
         ) : (
           messages.map((m) => {
             const isUser = m.authorKind === "user";
+
+            if (isUser) {
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    alignSelf: "flex-end",
+                    maxWidth: "85%",
+                    padding: "9px 13px",
+                    borderRadius: "12px 12px 3px 12px",
+                    background: "#181424",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    color: "#F1EEFF",
+                    lineHeight: "1.5",
+                    fontSize: "13px",
+                    wordBreak: "break-word"
+                  }}
+                >
+                  {m.content}
+                </div>
+              );
+            }
+
+            // AI or Background Event Message: Editorial document layout
+            const isSystemEvent = m.authorKind === "system" || m.kind === "event";
+
             return (
               <div
                 key={m.id}
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  alignSelf: isUser ? "flex-end" : "flex-start",
-                  maxWidth: "92%"
+                  alignSelf: "flex-start",
+                  width: "100%",
+                  gap: "4px"
                 }}
               >
-                {!isUser && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "5px",
-                      marginBottom: "3px",
-                      fontSize: "10px",
-                      color: "#7C4DFF",
-                      fontWeight: 700
-                    }}
-                  >
-                    <span>{m.agentId === "lead_trade_agent" ? "🤖 Lead Agent" : "⚡ AI Companion"}</span>
-                    <span style={{ color: "#6C628A", fontWeight: 400 }}>
-                      {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  </div>
-                )}
-
+                {/* Meta header */}
                 <div
                   style={{
-                    padding: "8px 12px",
-                    borderRadius: isUser ? "10px 10px 2px 10px" : "10px 10px 10px 2px",
-                    background: isUser
-                      ? "linear-gradient(135deg, #7C4DFF 0%, #5B2FCC 100%)"
-                      : "#171229",
-                    border: isUser ? "1px solid #9C72FF" : "1px solid #2A2145",
-                    color: "#F1EEFF",
-                    lineHeight: "1.45",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word"
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    fontSize: "11px",
+                    color: "#80779E"
                   }}
                 >
-                  {m.content}
+                  <span style={{ fontWeight: 600, color: isSystemEvent ? "#FFC24B" : "#B5AEC7" }}>
+                    {isSystemEvent ? "Подія біржі" : "Vexqora AI"}
+                  </span>
+                  <span>·</span>
+                  <span>{formatMsgTime(m.createdAt)}</span>
+                </div>
+
+                {/* Editorial text */}
+                <div
+                  style={{
+                    color: "#D8D3E8",
+                    lineHeight: "1.65",
+                    fontSize: "13px",
+                    paddingLeft: "2px"
+                  }}
+                >
+                  <ClaudeMarkdownContent text={m.content} />
                 </div>
               </div>
             );
@@ -347,62 +520,72 @@ export function TradeCompanionPanel({
               alignSelf: "flex-start",
               display: "flex",
               alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              background: "#171229",
-              border: "1px solid #2A2145",
-              borderRadius: "8px",
+              gap: "8px",
+              padding: "6px 2px",
               color: "#8A82A5",
-              fontSize: "11px"
+              fontSize: "12px"
             }}
           >
-            <span style={{ animation: "pulse 1s infinite" }}>⏳ Lead Agent аналізує ринок...</span>
+            <span>Аналізую ринок</span>
+            <span
+              style={{
+                display: "inline-flex",
+                gap: "2px",
+                fontSize: "14px",
+                letterSpacing: "1px"
+              }}
+            >
+              ···
+            </span>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick Action Suggestion Pills */}
-      <div
-        style={{
-          padding: "6px 10px",
-          display: "flex",
-          gap: "6px",
-          overflowX: "auto",
-          background: "#0D0A1A",
-          borderTop: "1px solid #2A214544"
-        }}
-      >
-        {quickPills.map((p, i) => (
-          <button
-            key={i}
-            onClick={() => handleSend(p.prompt)}
-            disabled={isPending}
-            style={{
-              whiteSpace: "nowrap",
-              padding: "4px 8px",
-              borderRadius: "4px",
-              background: "rgba(124, 77, 255, 0.12)",
-              border: "1px solid #7C4DFF33",
-              color: "#B9A2FF",
-              fontSize: "10.5px",
-              fontWeight: 600,
-              cursor: isPending ? "not-allowed" : "pointer",
-              transition: "all 0.15s"
-            }}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
+      {/* Quick Action Suggestion Pills (Shown only in fresh/empty conversations) */}
+      {messages.length <= 2 && (
+        <div
+          style={{
+            padding: "8px 14px",
+            display: "flex",
+            gap: "6px",
+            overflowX: "auto",
+            background: "#0E0B1A",
+            borderTop: "1px solid rgba(255, 255, 255, 0.05)"
+          }}
+        >
+          {quickPills.map((p, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => handleSend(p.prompt)}
+              disabled={isPending}
+              style={{
+                whiteSpace: "nowrap",
+                padding: "4px 9px",
+                borderRadius: "5px",
+                background: "#151222",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                color: "#A59CC4",
+                fontSize: "11px",
+                fontWeight: 500,
+                cursor: isPending ? "not-allowed" : "pointer",
+                transition: "all 0.15s"
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* Input bar */}
+      {/* Input Composer: Pinned at bottom */}
       <div
         style={{
-          padding: "10px",
-          background: "#130E26",
-          borderTop: "1px solid #2A2145",
+          padding: "10px 14px",
+          background: "#100D1C",
+          borderTop: "1px solid rgba(255, 255, 255, 0.07)",
           display: "flex",
           gap: "8px",
           alignItems: "center"
@@ -422,28 +605,27 @@ export function TradeCompanionPanel({
           disabled={isPending}
           style={{
             flex: 1,
-            padding: "8px 12px",
-            background: "#0A0714",
-            border: "1px solid #2A2145",
+            padding: "9px 12px",
+            background: "#141120",
+            border: "1px solid rgba(255, 255, 255, 0.09)",
             borderRadius: "6px",
             color: "#F1EEFF",
-            fontSize: "12px",
+            fontSize: "12.5px",
             outline: "none"
           }}
         />
         <button
+          type="button"
           onClick={() => handleSend()}
           disabled={!input.trim() || isPending}
           style={{
             padding: "8px 14px",
-            background: input.trim() && !isPending
-              ? "linear-gradient(135deg, #7C4DFF 0%, #B24BFF 100%)"
-              : "#2A2145",
+            background: input.trim() && !isPending ? "#7C4DFF" : "#1F1A2E",
             border: "none",
             borderRadius: "6px",
-            color: input.trim() && !isPending ? "#FFFFFF" : "#6C628A",
+            color: input.trim() && !isPending ? "#FFFFFF" : "#5F5774",
             fontSize: "12px",
-            fontWeight: 700,
+            fontWeight: 600,
             cursor: input.trim() && !isPending ? "pointer" : "not-allowed",
             transition: "all 0.15s"
           }}
