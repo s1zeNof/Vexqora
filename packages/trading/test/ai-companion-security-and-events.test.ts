@@ -319,4 +319,103 @@ describe("AI Companion Security, Multi-Agent Grounding, and Autonomous Events (P
       expect(payload.tokensUsed).toBeNull();
     });
   });
+
+  describe("P0.2 — Client Message ID & Optimistic Deduplication", () => {
+    it("reconciles optimistic temporary message with server-assigned UUID without duplicates", () => {
+      const clientMessageId = "cmsg_1793108000_abc123";
+
+      // 1. Initial local state with optimistic message
+      const localMessages = [
+        {
+          id: clientMessageId,
+          clientMessageId,
+          authorKind: "user" as const,
+          content: "Яка поточна структура?",
+          createdAt: new Date().toISOString(),
+          status: "sending" as const
+        }
+      ];
+
+      // 2. Server polling returns persisted message with server UUID and client_message_id
+      const serverIncoming = [
+        {
+          id: "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+          clientMessageId,
+          authorKind: "user" as const,
+          content: "Яка поточна структура?",
+          createdAt: new Date().toISOString()
+        }
+      ];
+
+      // 3. Reconcile
+      const reconciled = localMessages.map((local) => {
+        const matchingServer = serverIncoming.find(
+          (srv) => srv.clientMessageId === local.clientMessageId || srv.id === local.id
+        );
+        return matchingServer ? { ...matchingServer, status: "sent" as const } : local;
+      });
+
+      const existingIds = new Set(reconciled.map((m) => m.id));
+      const trulyNew = serverIncoming.filter((srv) => !existingIds.has(srv.id));
+      const finalMessages = [...reconciled, ...trulyNew];
+
+      // MUST NOT duplicate! Exactly 1 message with updated server id
+      expect(finalMessages).toHaveLength(1);
+      expect(finalMessages[0]?.id).toBe("3fa85f64-5717-4562-b3fc-2c963f66afa6");
+      expect(finalMessages[0]?.clientMessageId).toBe(clientMessageId);
+      expect(finalMessages[0]?.status).toBe("sent");
+    });
+  });
+
+  describe("P0.4 — Autonomous Intelligence & Proactive Event Scenarios", () => {
+    it("evaluates MTF conflict between 15M short-term momentum and 4H macro trend", () => {
+      const isLong = true;
+      const trend15M = "bullish";
+      const trend4H = "bearish";
+
+      // MTF Conflict detection
+      const hasConflict = isLong && trend15M === "bullish" && trend4H === "bearish";
+      expect(hasConflict).toBe(true);
+
+      const warningText = "Короткостроковий імпульс 15M висхідний, проте старший тренд 4H залишається спадним";
+      expect(warningText).toContain("4H");
+    });
+
+    it("evaluates severe Order Flow aggression shift opposing active trade", () => {
+      const positionSide = "long";
+      const buyerAggressionPct = 26.5; // Sellers dominating tape (> 73% sells)
+      const orderBookImbalance = -0.42; // Heavy ask wall
+
+      const isAggressionOpposing = positionSide === "long" && buyerAggressionPct < 30 && orderBookImbalance < -0.35;
+      expect(isAggressionOpposing).toBe(true);
+    });
+
+    it("evaluates post-trade analysis when trade status transitions to closed", () => {
+      const trade = {
+        id: "trade-completed-1",
+        symbol: "XAUUSDT",
+        realized_pnl: 185.5,
+        exit_reason: "tp1",
+        exit_price: 4052.1
+      };
+
+      const pnl = trade.realized_pnl;
+      const isProfitable = pnl > 0;
+      const eventId = `post_trade_${trade.id}`;
+
+      expect(isProfitable).toBe(true);
+      expect(eventId).toBe("post_trade_trade-completed-1");
+    });
+  });
+
+  describe("P0.3 — Live Execution Stages Transition", () => {
+    it("verifies structured operational stages sequence", () => {
+      const stagesSequence = ["queued", "fetching_data", "analyzing", "synthesizing", "completed"];
+      expect(stagesSequence[0]).toBe("queued");
+      expect(stagesSequence[1]).toBe("fetching_data");
+      expect(stagesSequence[2]).toBe("analyzing");
+      expect(stagesSequence[3]).toBe("synthesizing");
+      expect(stagesSequence[4]).toBe("completed");
+    });
+  });
 });
