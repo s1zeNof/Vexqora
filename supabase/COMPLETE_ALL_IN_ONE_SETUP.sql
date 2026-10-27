@@ -17,7 +17,7 @@
 
 create extension if not exists pgcrypto;
 
-do $ begin
+do $$ begin
   if not exists (select 1 from pg_type where typname = 'exchange_kind') then
     create type public.exchange_kind as enum ('bybit', 'binance', 'paper');
   else
@@ -29,7 +29,7 @@ do $ begin
   if not exists (select 1 from pg_type where typname = 'signal_source') then
     create type public.signal_source as enum ('chat', 'telegram', 'tradingview', 'api');
   end if;
-end $;
+end $$;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -230,7 +230,7 @@ as $$ begin insert into public.profiles(id) values(new.id); return new; end; $$;
 create trigger on_auth_user_created after insert on auth.users
 for each row execute procedure public.handle_new_user();
 
-do $ begin alter publication supabase_realtime add table public.chat_messages; exception when others then null; end $;
+do $$ begin alter publication supabase_realtime add table public.chat_messages; exception when others then null; end $$;
 
 
 
