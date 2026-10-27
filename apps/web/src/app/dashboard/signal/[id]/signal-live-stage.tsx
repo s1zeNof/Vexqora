@@ -690,10 +690,10 @@ export function SignalLiveStage({
         </div>
       </div>
 
-            {/* Mobile/Tablet Segmented Control (< 1140px) */}
+            {/* Mobile/Tablet Segmented Control (< 1140px only) */}
       <div
+        className="mobile-stage-selector"
         style={{
-          display: "flex",
           gap: "8px",
           background: "#0E0B1A",
           padding: "6px",
@@ -701,7 +701,6 @@ export function SignalLiveStage({
           border: "1px solid #2A2145",
           margin: "4px 0 12px"
         }}
-        className="mobile-stage-selector"
       >
         <button
           type="button"
@@ -760,9 +759,9 @@ export function SignalLiveStage({
       </div>
 
       {/* Main Full-Width Terminal Stage: 3 Panels */}
-      <div className="terminal-stage-grid">
+      <div className={`terminal-stage-grid mobile-view-${mobileTab}`}>
         {/* Panel 1: Live Interactive Chart (~50-55%) */}
-        <div style={{ minWidth: 0, width: "100%", display: mobileTab === "stage" ? "block" : undefined }}>
+        <div className="terminal-panel-chart" style={{ minWidth: 0, width: "100%" }}>
           <SignalChart
             symbol={symbol}
             initialKlines={klines}
@@ -797,7 +796,7 @@ export function SignalLiveStage({
         </div>
 
         {/* Panel 2: Specs & Order Execution (~22%) */}
-        <div style={{ display: mobileTab === "stage" ? "flex" : undefined, flexDirection: "column", gap: "16px", minWidth: 0 }}>
+        <div className="terminal-panel-order" style={{ flexDirection: "column", gap: "16px", minWidth: 0 }}>
           {/* Signal Specs Card */}
           <div className="cd" style={{ padding: "18px 20px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -904,7 +903,7 @@ export function SignalLiveStage({
         </div>
 
         {/* Panel 3: Always-On Per-Trade AI Companion (~26%) */}
-        <div style={{ minWidth: 0, height: "100%", display: mobileTab === "companion" ? "block" : undefined }}>
+        <div className="terminal-panel-companion" style={{ minWidth: 0, height: "100%" }}>
           <TradeCompanionPanel
             initialSession={aiSession ?? null}
             symbol={symbol}
@@ -923,7 +922,7 @@ export function SignalLiveStage({
       </div>
 
       {/* Bottom Institutional Workspace with Full-Width Tabs */}
-      <div className="terminal-workspace" style={{ display: mobileTab === "workspace" ? "block" : undefined }}>
+      <div className={`terminal-workspace mobile-view-${mobileTab}`}>
         {/* Workspace Tab Header */}
         <div
           style={{

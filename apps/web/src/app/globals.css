@@ -412,12 +412,13 @@ input:focus, select:focus, textarea:focus {
 .main-shell {
   min-height: calc(100vh - 64px);
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 24px;
+  max-width: 100%;
+  margin: 0;
+  padding: 16px clamp(12px, 1.5vw, 28px);
   display: flex;
   flex-direction: column;
   gap: 20px;
+  box-sizing: border-box;
 }
 
 @media (max-width: 768px) {
@@ -957,25 +958,28 @@ input:focus, select:focus, textarea:focus {
 
 
 /* Full-Width Institutional Terminal Stage Grid (Phase P2) */
+.mobile-stage-selector {
+  display: none !important;
+}
+
 .terminal-stage-grid {
-  display: grid;
+  display: grid !important;
   grid-template-columns: minmax(500px, 1.45fr) minmax(310px, 0.75fr) minmax(330px, 0.85fr);
   gap: 16px;
   width: 100%;
   align-items: stretch;
 }
 
-@media (max-width: 1360px) {
-  .terminal-stage-grid {
-    grid-template-columns: minmax(440px, 1.3fr) minmax(300px, 0.8fr) minmax(310px, 0.85fr);
-  }
+.terminal-panel-chart {
+  display: block;
 }
 
-@media (max-width: 1140px) {
-  .terminal-stage-grid {
-    display: flex;
-    flex-direction: column;
-  }
+.terminal-panel-order {
+  display: flex;
+}
+
+.terminal-panel-companion {
+  display: block;
 }
 
 .terminal-workspace {
@@ -985,6 +989,57 @@ input:focus, select:focus, textarea:focus {
   border-radius: 8px;
   overflow: hidden;
   margin-top: 16px;
+  display: block;
+}
+
+@media (max-width: 1360px) {
+  .terminal-stage-grid {
+    grid-template-columns: minmax(440px, 1.3fr) minmax(300px, 0.8fr) minmax(310px, 0.85fr);
+  }
+}
+
+@media (max-width: 1140px) {
+  .mobile-stage-selector {
+    display: flex !important;
+  }
+
+  .terminal-stage-grid {
+    display: flex !important;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .terminal-stage-grid.mobile-view-stage .terminal-panel-chart,
+  .terminal-stage-grid.mobile-view-stage .terminal-panel-order {
+    display: flex !important;
+  }
+  .terminal-stage-grid.mobile-view-stage .terminal-panel-chart {
+    display: block !important;
+  }
+  .terminal-stage-grid.mobile-view-stage .terminal-panel-companion {
+    display: none !important;
+  }
+  .terminal-workspace.mobile-view-stage {
+    display: none !important;
+  }
+
+  .terminal-stage-grid.mobile-view-companion .terminal-panel-chart,
+  .terminal-stage-grid.mobile-view-companion .terminal-panel-order {
+    display: none !important;
+  }
+  .terminal-stage-grid.mobile-view-companion .terminal-panel-companion {
+    display: block !important;
+  }
+  .terminal-workspace.mobile-view-companion {
+    display: none !important;
+  }
+
+  .terminal-stage-grid.mobile-view-workspace {
+    display: none !important;
+  }
+  .terminal-workspace.mobile-view-workspace {
+    display: block !important;
+  }
 }
 
 .terminal-tab-btn {

@@ -407,7 +407,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%", maxWidth: "100%", margin: "0", padding: "0 clamp(8px, 1.5vw, 24px) 40px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%", maxWidth: "100%", margin: "0", padding: "0 0 40px 0" }}>
       <SignalLiveStage
         symbol={formattedSymbol}
         side={side}
