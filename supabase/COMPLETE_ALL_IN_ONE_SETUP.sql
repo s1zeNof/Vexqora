@@ -503,6 +503,15 @@ values
   ('Volume Climax & Mean Reversion', 'price_spike', 'Range Consolidation', 34, 70.6, 2.4, 20, 'Parabolic exhaustion spike (>4% in 30s) followed by immediate bid exhaustion. 24 of 34 historical cases reverted back to VWAP.')
 on conflict do nothing;
 
+alter table public.market_pulses enable row level security;
+alter table public.historical_patterns enable row level security;
+
+drop policy if exists "anyone can view market pulses" on public.market_pulses;
+create policy "anyone can view market pulses" on public.market_pulses for select using (true);
+
+drop policy if exists "anyone can view historical patterns" on public.historical_patterns;
+create policy "anyone can view historical patterns" on public.historical_patterns for select using (true);
+
 
 alter table public.trades
   add column if not exists exit_reason text,
