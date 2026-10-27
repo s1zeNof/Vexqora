@@ -82,6 +82,18 @@ async function dispatchTradeAiEvent(
     }
 
     if (session?.id) {
+      if (eventId) {
+        const { data: existing } = await supabase
+          .from("trade_ai_messages")
+          .select("id")
+          .eq("session_id", session.id)
+          .eq("event_id", eventId)
+          .limit(1)
+          .maybeSingle();
+
+        if (existing) return;
+      }
+
       await supabase.from("trade_ai_messages").insert({
         session_id: session.id,
         author_kind: "system",

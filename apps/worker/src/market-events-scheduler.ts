@@ -22,7 +22,6 @@ interface DbSessionRow {
     side: "long" | "short";
     entry_avg: number | null;
     sl: number | null;
-    tp1: number | null;
     qty: number | null;
     leverage?: number | null;
     realized_pnl?: number | null;
@@ -53,6 +52,17 @@ async function recordSessionEvent(
   content: string,
   payload?: Record<string, unknown>
 ): Promise<boolean> {
+  // Application-level deduplication (safe even if remote DB unique index not yet migrated)
+  const { data: existing } = await supabase
+    .from("trade_ai_messages")
+    .select("id")
+    .eq("session_id", sessionId)
+    .eq("event_id", eventId)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) return false;
+
   const { error } = await supabase.from("trade_ai_messages").insert({
     session_id: sessionId,
     author_kind: "system",
@@ -71,6 +81,14 @@ async function recordSessionEvent(
     // Unique constraint violation (trade_ai_messages_session_event_idx) -> already sent
     return false;
   }
+
+  // Update session last_message_at timestamp
+  await supabase
+    .from("trade_ai_sessions")
+    .update({ last_message_at: new Date().toISOString() })
+    .eq("id", sessionId);
+
+  logger.info({ sessionId, eventId, eventType: payload?.eventType }, "Dispatched autonomous AI event to session");
   return true;
 }
 
@@ -80,13 +98,127 @@ async function recordSessionEvent(
  */
 export async function evaluateMarketEvents(supabase: SupabaseClient): Promise<void> {
   try {
+    // 0. Auto-sync sessions for all active trades so every open position has an AI session
+    interface ActiveTradeSyncRow {
+      id: string;
+      account_id: string;
+      symbol: string;
+      side: "long" | "short";
+      entry_avg: number | null;
+      sl: number | null;
+      signal_id: string | null;
+      exchange_accounts?: { user_id?: string } | null;
+    }
+
+    const { data: rawActiveTrades } = await supabase
+      .from("trades")
+      .select("id, account_id, symbol, side, entry_avg, sl, signal_id, exchange_accounts(user_id)")
+      .in("status", ["active", "entry_open"]);
+
+    const activeTrades = (rawActiveTrades ?? []) as unknown as ActiveTradeSyncRow[];
+
+    if (activeTrades.length > 0) {
+      for (const tr of activeTrades) {
+        const userId = tr.exchange_accounts?.user_id;
+        if (!userId) continue;
+
+        // Check if session exists with this trade_id
+        const { data: existingSession } = await supabase
+          .from("trade_ai_sessions")
+          .select("id")
+          .eq("trade_id", tr.id)
+          .maybeSingle();
+
+        if (!existingSession) {
+          // Check if there is an unlinked active session for this user and symbol
+          const { data: unlinkedSession } = await supabase
+            .from("trade_ai_sessions")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("symbol", tr.symbol)
+            .is("trade_id", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          let sessionId: string | undefined = unlinkedSession ? String(unlinkedSession.id) : undefined;
+
+          if (unlinkedSession?.id) {
+            await supabase
+              .from("trade_ai_sessions")
+              .update({ trade_id: tr.id, status: "active" })
+              .eq("id", unlinkedSession.id);
+          } else {
+            const sideStr = tr.side === "short" ? "SHORT" : "LONG";
+            const entryStr = tr.entry_avg ? `$${Number(tr.entry_avg).toFixed(2)}` : "по ринку";
+            const slStr = tr.sl ? `$${Number(tr.sl).toFixed(2)}` : "не встановлено";
+            const { data: createdSession } = await supabase
+              .from("trade_ai_sessions")
+              .insert({
+                user_id: userId,
+                account_id: tr.account_id,
+                trade_id: tr.id,
+                signal_id: tr.signal_id ?? null,
+                symbol: tr.symbol,
+                status: "active",
+                initial_thesis: `Вхід у ${sideStr} по ${entryStr} (SL: ${slStr}).`,
+                invalidation_criteria: `Пробиття Stop Loss ${slStr} або злам структури.`
+              })
+              .select("id")
+              .maybeSingle();
+            if (createdSession?.id) {
+              sessionId = String(createdSession.id);
+            }
+          }
+
+          if (sessionId) {
+            const { data: existingMsg } = await supabase
+              .from("trade_ai_messages")
+              .select("id")
+              .eq("session_id", sessionId)
+              .limit(1)
+              .maybeSingle();
+
+            if (!existingMsg) {
+              const initSide = tr.side === "short" ? "SHORT" : "LONG";
+              const initEntry = tr.entry_avg ? `$${Number(tr.entry_avg).toFixed(2)}` : "—";
+              const initSl = tr.sl ? `$${Number(tr.sl).toFixed(2)}` : "—";
+              await supabase.from("trade_ai_messages").insert({
+                session_id: sessionId,
+                author_kind: "lead",
+                kind: "analysis",
+                content: `Вітаю. AI Companion активовано для **${tr.symbol}**.\n\n` +
+                  `**Поточна активна позиція:**\n` +
+                  `• Напрямок: **${initSide}** від ${initEntry}\n` +
+                  `• Захисний Stop Loss: **${initSl}**\n\n` +
+                  `Я цілодобово відстежую ринкову структуру 15M/4H, біржовий стакан та динаміку ціни. У разі важливих рухів або наближення до ключових рівнів сповіщу вас у цьому чаті.`,
+                structured_payload: {
+                  eventType: "session_init",
+                  symbol: tr.symbol,
+                  side: tr.side,
+                  entryPrice: tr.entry_avg,
+                  stopLoss: tr.sl
+                }
+              });
+              logger.info({ symbol: tr.symbol, sessionId }, "AI Companion initialized session with welcome analysis");
+            }
+          }
+        }
+      }
+    }
+
     const { data: rawSessions, error } = await supabase
       .from("trade_ai_sessions")
-      .select("id, user_id, account_id, trade_id, signal_id, symbol, status, trades(id, symbol, side, entry_avg, sl, tp1, qty, leverage, realized_pnl, exit_reason, exit_price, closed_at, status), signals(id, parsed), exchange_accounts(environment, exchange, paper_balance)")
+      .select("id, user_id, account_id, trade_id, signal_id, symbol, status, trades(id, symbol, side, entry_avg, sl, qty, leverage, realized_pnl, exit_reason, exit_price, closed_at, status), signals(id, parsed), exchange_accounts(environment, exchange, paper_balance)")
       .eq("status", "active")
       .limit(50);
 
-    if (error || !rawSessions || rawSessions.length === 0) return;
+    if (error) {
+      logger.error({ error: error.message }, "Error fetching trade_ai_sessions in evaluateMarketEvents");
+      return;
+    }
+
+    if (!rawSessions || rawSessions.length === 0) return;
 
     const sessions = rawSessions as unknown as DbSessionRow[];
 
@@ -137,8 +269,21 @@ export async function evaluateMarketEvents(supabase: SupabaseClient): Promise<vo
         side = session.trades.side === "short" ? "short" : "long";
         entry = Number(session.trades.entry_avg ?? 0);
         sl = Number(session.trades.sl ?? 0);
-        tp1 = Number(session.trades.tp1 ?? 0);
-      } else if (session.signals?.parsed) {
+
+        // Authoritatively query TP1 from trade_targets
+        const { data: targetData } = await supabase
+          .from("trade_targets")
+          .select("price")
+          .eq("trade_id", session.trades.id)
+          .eq("idx", 1)
+          .maybeSingle();
+
+        if (targetData?.price) {
+          tp1 = Number(targetData.price);
+        }
+      }
+
+      if (tp1 === 0 && session.signals?.parsed) {
         const parsed = session.signals.parsed;
         if (parsed.side === "short" || parsed.side === "long") side = parsed.side;
         if (typeof parsed.entryPrice === "number") entry = parsed.entryPrice;
@@ -393,6 +538,46 @@ export async function evaluateMarketEvents(supabase: SupabaseClient): Promise<vo
             eventType: "volume_spike",
             volume: lastBar.volume,
             avgVolume: avgVol,
+            severity: "info"
+          });
+        }
+      }
+
+      // 9. Periodic Grounded Trade Briefing (every 30m when active and quiet)
+      if (session.trades && session.trades.status === "active" && entry > 0) {
+        const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
+        const eventId = `pulse_briefing_${session.id}_${bucket}`;
+
+        const isLong = side === "long";
+        const direction = isLong ? 1 : -1;
+        const leverage = Number(session.trades.leverage ?? 5);
+        const pnlPct = ((currentPrice - entry) / entry) * 100 * direction * leverage;
+        const distSlPct = sl > 0 ? (Math.abs(currentPrice - sl) / currentPrice) * 100 : 0;
+        const distTpPct = tp1 > 0 ? (Math.abs(tp1 - currentPrice) / currentPrice) * 100 : 0;
+
+        const { data: recentMsgs } = await supabase
+          .from("trade_ai_messages")
+          .select("created_at")
+          .eq("session_id", session.id)
+          .gte("created_at", new Date(Date.now() - 25 * 60 * 1000).toISOString())
+          .limit(1);
+
+        if (!recentMsgs || recentMsgs.length === 0) {
+          const pnlSign = pnlPct >= 0 ? "+" : "";
+          const briefContent = `⏱️ **Автономний моніторинг позиції (${symbol}):**\n\n` +
+            `• Поточна ціна: **$${currentPrice}** (Вхід: $${entry})\n` +
+            `• Розрахунковий PnL: **${pnlSign}${pnlPct.toFixed(2)}%** (${leverage}x)\n` +
+            (tp1 > 0 ? `• Дистанція до TP1 ($${tp1}): **${distTpPct.toFixed(2)}%**\n` : "") +
+            (sl > 0 ? `• Дистанція до SL ($${sl}): **${distSlPct.toFixed(2)}%**\n` : "") +
+            `• **Статус:** Позиція супроводжується AI Companion 24/7. Захисні рівні під контролем.`;
+
+          await recordSessionEvent(supabase, session.id, eventId, briefContent, {
+            eventType: "periodic_briefing",
+            currentPrice,
+            entryPrice: entry,
+            pnlPct,
+            distSlPct,
+            distTpPct,
             severity: "info"
           });
         }

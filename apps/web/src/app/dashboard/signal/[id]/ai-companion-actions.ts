@@ -361,7 +361,37 @@ export async function getTradeAiSession(params: {
     query = query.eq("signal_id", params.signalId);
   }
 
-  const { data: rawExisting } = await query.limit(1).maybeSingle();
+  let { data: rawExisting } = await query.limit(1).maybeSingle();
+
+  // Fallback: If tradeId was passed but no session has trade_id set,
+  // link matching active session for this user and symbol
+  if (!rawExisting && params.tradeId) {
+    let fallbackQuery = supabase
+      .from("trade_ai_sessions")
+      .select("id, symbol, status, initial_thesis, invalidation_criteria")
+      .eq("user_id", user.id)
+      .eq("symbol", params.symbol.toUpperCase());
+
+    if (params.signalId) {
+      fallbackQuery = fallbackQuery.eq("signal_id", params.signalId);
+    } else {
+      fallbackQuery = fallbackQuery.is("trade_id", null);
+    }
+
+    const { data: fallbackExisting } = await fallbackQuery
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fallbackExisting) {
+      await supabase
+        .from("trade_ai_sessions")
+        .update({ trade_id: params.tradeId })
+        .eq("id", fallbackExisting.id);
+      rawExisting = fallbackExisting;
+    }
+  }
+
   const existing = sessionSchema.safeParse(rawExisting).data ?? null;
   if (!existing) return null;
 
@@ -422,7 +452,7 @@ export async function ensureTradeAiSession(params: {
   if (params.tradeId) {
     const { data: rawTrade, error: tradeErr } = await supabase
       .from("trades")
-      .select("id, account_id, symbol, side, entry_avg, sl, tp1, status")
+      .select("id, account_id, symbol, side, entry_avg, sl, status")
       .eq("id", params.tradeId)
       .maybeSingle();
 
@@ -447,7 +477,18 @@ export async function ensureTradeAiSession(params: {
     authoritativeSide = trade.side === "short" ? "short" : "long";
     authoritativeEntry = Number(trade.entry_avg ?? authoritativeEntry);
     authoritativeSl = Number(trade.sl ?? authoritativeSl);
-    authoritativeTp1 = Number(trade.tp1 ?? authoritativeTp1);
+
+    // Query TP1 from trade_targets
+    const { data: targetData } = await supabase
+      .from("trade_targets")
+      .select("price")
+      .eq("trade_id", params.tradeId)
+      .eq("idx", 1)
+      .maybeSingle();
+
+    if (targetData?.price) {
+      authoritativeTp1 = Number(targetData.price);
+    }
 
     const { data: existingSession } = await supabase
       .from("trade_ai_sessions")
@@ -785,7 +826,7 @@ export async function sendTradeAiMessage(
   if (session.trade_id) {
     const { data: rawTrade } = await supabase
       .from("trades")
-      .select("symbol, side, entry_avg, sl, tp1, qty, leverage, opened_at, status")
+      .select("symbol, side, entry_avg, sl, qty, leverage, opened_at, status")
       .eq("id", session.trade_id)
       .maybeSingle();
 
@@ -794,10 +835,21 @@ export async function sendTradeAiMessage(
       side = trade.side === "short" ? "short" : "long";
       entryPrice = Number(trade.entry_avg ?? 0);
       stopLoss = Number(trade.sl ?? 0);
-      tp1 = Number(trade.tp1 ?? 0);
       qty = Number(trade.qty ?? 0);
       leverage = Number(trade.leverage ?? 5);
       openedAt = trade.opened_at ?? null;
+
+      // Authoritatively query TP1 from trade_targets
+      const { data: targetData } = await supabase
+        .from("trade_targets")
+        .select("price")
+        .eq("trade_id", session.trade_id)
+        .eq("idx", 1)
+        .maybeSingle();
+
+      if (targetData?.price) {
+        tp1 = Number(targetData.price);
+      }
     }
   } else if (session.signal_id) {
     const { data: rawSignal } = await supabase

@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
         if (session.trade_id) {
           const { data: rawTrade } = await supabase
             .from("trades")
-            .select("symbol, side, entry_avg, sl, tp1, qty, leverage, opened_at, status")
+            .select("symbol, side, entry_avg, sl, qty, leverage, opened_at, status")
             .eq("id", session.trade_id)
             .maybeSingle();
 
@@ -135,7 +135,6 @@ export async function POST(req: NextRequest) {
             side?: string;
             entry_avg?: number | string | null;
             sl?: number | string | null;
-            tp1?: number | string | null;
             qty?: number | string | null;
             leverage?: number | string | null;
             opened_at?: string | null;
@@ -145,10 +144,20 @@ export async function POST(req: NextRequest) {
             side = trade.side === "short" ? "short" : "long";
             entryPrice = Number(trade.entry_avg ?? 0);
             stopLoss = Number(trade.sl ?? 0);
-            tp1 = Number(trade.tp1 ?? 0);
             qty = Number(trade.qty ?? 0);
             leverage = Number(trade.leverage ?? 5);
             openedAt = trade.opened_at ?? null;
+
+            const { data: targetData } = await supabase
+              .from("trade_targets")
+              .select("price")
+              .eq("trade_id", session.trade_id)
+              .eq("idx", 1)
+              .maybeSingle();
+
+            if (targetData?.price) {
+              tp1 = Number(targetData.price);
+            }
           }
         } else if (session.signal_id) {
           const { data: rawSignal } = await supabase
