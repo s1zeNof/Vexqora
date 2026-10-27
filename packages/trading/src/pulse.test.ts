@@ -77,4 +77,12 @@ describe("Vexqora Pulse Scanner", () => {
       expect(Math.abs(opp.change24hPct)).toBeLessThanOrEqual(5.0);
     }
   });
+
+  it("excludes mega-cap symbols (BTCUSDT, ETHUSDT) from universe scan", async () => {
+    const opps = await fetchTopUniverseOpportunities(6, undefined, "balanced");
+    for (const opp of opps) {
+      expect(opp.symbol).not.toBe("BTCUSDT");
+      expect(opp.symbol).not.toBe("ETHUSDT");
+    }
+  });
 });

@@ -58,11 +58,14 @@ export async function protectFilledPosition(
   tradeId: string
 ): Promise<ProtectionSubmission> {
   const closeSide = preview.signal.side === "long" ? "sell" : "buy";
+  const tp1Price = preview.signal.takeProfits[0]?.price;
+  const activePrice = preview.signal.trailingStop?.activationPrice ?? tp1Price;
+
   await client.setTradingStop({
     symbol: preview.signal.symbol,
     stopLoss: preview.signal.stopLoss,
-    ...(preview.signal.trailingStop?.activationPrice === undefined ? {} : { activePrice: preview.signal.trailingStop.activationPrice }),
-    ...(preview.signal.trailingStop
+    ...(activePrice !== undefined && preview.signal.trailingStop ? { activePrice } : {}),
+    ...(preview.signal.trailingStop && activePrice !== undefined
       ? { trailingStop: preview.signal.trailingStop.distance.type === "absolute"
         ? preview.signal.trailingStop.distance.value
         : roundToStep(preview.entryPrice * preview.signal.trailingStop.distance.value / 100, preview.tickSize) }
@@ -75,17 +78,22 @@ export async function protectFilledPosition(
     const isLast = index === preview.signal.takeProfits.length - 1;
     const rawQty = isLast ? preview.qty - allocated : preview.qty * target.sharePct / 100;
     const qty = roundToStep(rawQty, preview.qtyStep, "down");
-    if (qty <= 0) throw new Error(`TP${index + 1} quantity rounds to zero`);
+    if (qty <= 0) continue;
     allocated += qty;
-    takeProfitOrders.push(await client.placeOrder({
-      symbol: preview.signal.symbol,
-      side: closeSide,
-      type: "limit",
-      price: target.price,
-      qty,
-      reduceOnly: true,
-      orderLinkId: orderLinkId("tp", tradeId, String(index + 1))
-    }));
+    try {
+      const ack = await client.placeOrder({
+        symbol: preview.signal.symbol,
+        side: closeSide,
+        type: "limit",
+        price: target.price,
+        qty,
+        reduceOnly: true,
+        orderLinkId: orderLinkId("tp", tradeId, String(index + 1))
+      });
+      takeProfitOrders.push(ack);
+    } catch (tpErr) {
+      console.warn(`TP${index + 1} placement failed on exchange for ${preview.signal.symbol}:`, tpErr);
+    }
   }
   return { takeProfitOrders, status: "active" };
 }

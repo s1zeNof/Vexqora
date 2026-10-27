@@ -61,18 +61,20 @@ export interface TechnicalSMCContext {
  */
 export function calculateSMCContext(
   klines: Kline[],
-  currentPrice: number
+  currentPrice: number,
+  change24hPct?: number
 ): TechnicalSMCContext {
   if (klines.length < 3) {
-    // Dynamic estimate based on typical crypto volatility profile (1.8% ATR)
-    const estimatedAtr = currentPrice * 0.018;
+    // Dynamic estimate based on typical crypto volatility profile (2.2% ATR)
+    const estimatedAtr = currentPrice * 0.022;
+    const isBearish24h = change24hPct !== undefined ? change24hPct < 0 : false;
     return {
       atr: estimatedAtr,
-      swingHigh: currentPrice * 1.025,
-      swingLow: currentPrice * 0.975,
-      ema20: currentPrice * 0.995,
-      ema50: currentPrice * 0.99,
-      trend: "bullish",
+      swingHigh: currentPrice * 1.03,
+      swingLow: currentPrice * 0.97,
+      ema20: isBearish24h ? currentPrice * 1.01 : currentPrice * 0.99,
+      ema50: isBearish24h ? currentPrice * 1.02 : currentPrice * 0.98,
+      trend: isBearish24h ? "bearish" : "bullish",
       sweptLiquidity: true
     };
   }
@@ -91,10 +93,10 @@ export function calculateSMCContext(
   }
   const atr = trs.length > 0
     ? trs.slice(-14).reduce((sum, v) => sum + v, 0) / Math.min(trs.length, 14)
-    : currentPrice * 0.018;
+    : currentPrice * 0.022;
 
   // 2. Swing High and Low of recent structure
-  const recentBars = klines.slice(-15);
+  const recentBars = klines.slice(-25);
   const swingHigh = Math.max(...recentBars.map(k => k.high));
   const swingLow = Math.min(...recentBars.map(k => k.low));
 
@@ -142,7 +144,7 @@ export function calculateSMCContext(
     (lastBar.high > swingHigh && lastBar.close < swingHigh);
 
   return {
-    atr: Math.max(atr, currentPrice * 0.005),
+    atr: Math.max(atr, currentPrice * 0.012),
     swingHigh,
     swingLow,
     ema20,
@@ -177,13 +179,14 @@ export function generateOpportunityFromTicker(
     riskPct?: number | undefined;
     leverage?: number | undefined;
     klines?: Kline[] | undefined;
+    change24hPct?: number | undefined;
   }
 ): AISignalOpportunity {
   const normSymbol = symbol.toUpperCase();
   const tickSize = getSensibleTickSize(lastPrice, options?.tickSize);
 
   // 1. Calculate real SMC context
-  const smc = calculateSMCContext(options?.klines ?? [], lastPrice);
+  const smc = calculateSMCContext(options?.klines ?? [], lastPrice, options?.change24hPct);
 
   // 2. Select Side (honor manual override, otherwise follow SMC trend / market structure)
   const side = options?.side ?? (smc.trend === "bearish" ? "short" : "long");
@@ -193,20 +196,22 @@ export function generateOpportunityFromTicker(
   let riskPerUnit: number;
 
   if (side === "long") {
-    // SL anchored below swing low minus 0.35x ATR buffer
-    const rawSl = Math.min(lastPrice - smc.atr * 1.2, smc.swingLow - smc.atr * 0.35);
-    stopLoss = roundToStep(Math.max(rawSl, lastPrice * 0.95), tickSize);
+    // SL anchored below swing low minus 0.5x ATR buffer
+    const rawSl = Math.min(lastPrice - smc.atr * 1.5, smc.swingLow - smc.atr * 0.5);
+    stopLoss = roundToStep(Math.max(rawSl, lastPrice * 0.94), tickSize);
     riskPerUnit = lastPrice - stopLoss;
   } else {
-    // SL anchored above swing high plus 0.35x ATR buffer
-    const rawSl = Math.max(lastPrice + smc.atr * 1.2, smc.swingHigh + smc.atr * 0.35);
-    stopLoss = roundToStep(Math.min(rawSl, lastPrice * 1.05), tickSize);
+    // SL anchored above swing high plus 0.5x ATR buffer
+    const rawSl = Math.max(lastPrice + smc.atr * 1.5, smc.swingHigh + smc.atr * 0.5);
+    stopLoss = roundToStep(Math.min(rawSl, lastPrice * 1.06), tickSize);
     riskPerUnit = stopLoss - lastPrice;
   }
 
-  // Ensure risk is sensible (at least 1% of price)
-  if (riskPerUnit <= 0 || riskPerUnit / lastPrice < 0.008) {
-    riskPerUnit = lastPrice * 0.015;
+  // Ensure risk is sensible: in crypto altcoins, a Stop Loss tighter than 2.2% gets easily stopped out by normal wick noise.
+  // Minimum safe SL distance is 2.2% (up to 4.5% max).
+  const minSafeRiskPct = 0.022;
+  if (riskPerUnit <= 0 || riskPerUnit / lastPrice < minSafeRiskPct) {
+    riskPerUnit = lastPrice * minSafeRiskPct;
     stopLoss = side === "long"
       ? roundToStep(lastPrice - riskPerUnit, tickSize)
       : roundToStep(lastPrice + riskPerUnit, tickSize);

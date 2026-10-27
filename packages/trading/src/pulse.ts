@@ -193,6 +193,8 @@ export function selectUniverseOpportunities(
   return result.slice(0, limit);
 }
 
+export const MEGA_CAP_SYMBOLS = new Set(["BTCUSDT", "ETHUSDT"]);
+
 export async function fetchTopUniverseOpportunities(
   limit: number = 6,
   customFetch: typeof fetch = fetch,
@@ -215,7 +217,7 @@ export async function fetchTopUniverseOpportunities(
       const list = data.result?.list ?? [];
       if (list.length > 0) {
         const candidates: UniverseMarketOpportunity[] = list
-          .filter((t) => t.symbol.endsWith("USDT") && Number(t.turnover24h) >= 5_000_000)
+          .filter((t) => t.symbol.endsWith("USDT") && !MEGA_CAP_SYMBOLS.has(t.symbol) && Number(t.turnover24h) >= 5_000_000)
           .map((t) => {
             const changePct = Number(t.price24hPcnt) * 100;
             const turnover = Number(t.turnover24h);
@@ -262,7 +264,7 @@ export async function fetchTopUniverseOpportunities(
       }>;
       if (Array.isArray(list) && list.length > 0) {
         const candidates: UniverseMarketOpportunity[] = list
-          .filter((t) => t.symbol.endsWith("USDT") && Number(t.quoteVolume) >= 5_000_000)
+          .filter((t) => t.symbol.endsWith("USDT") && !MEGA_CAP_SYMBOLS.has(t.symbol) && Number(t.quoteVolume) >= 5_000_000)
           .map((t) => {
             const changePct = Number(t.priceChangePercent);
             const turnover = Number(t.quoteVolume);
@@ -295,10 +297,10 @@ export async function fetchTopUniverseOpportunities(
     // fallback
   }
 
-  // Fallback liquid defaults if both APIs unreachable
+  // Fallback liquid defaults if both APIs unreachable (altcoins / mid-caps only, no mega-caps)
   const defaults: UniverseMarketOpportunity[] = [
     { symbol: "SOLUSDT", lastPrice: 182.5, change24hPct: 3.2, turnover24h: 420_000_000, anomalyType: "volume_breakout", category: "moderate" },
-    { symbol: "BTCUSDT", lastPrice: 67200, change24hPct: 1.8, turnover24h: 1_200_000_000, anomalyType: "volume_breakout", category: "moderate" },
+    { symbol: "AVAXUSDT", lastPrice: 28.4, change24hPct: 1.8, turnover24h: 120_000_000, anomalyType: "volume_breakout", category: "moderate" },
     { symbol: "LINKUSDT", lastPrice: 12.4, change24hPct: -2.1, turnover24h: 75_000_000, anomalyType: "liquidity_hunt", category: "moderate" },
     { symbol: "SUIUSDT", lastPrice: 2.15, change24hPct: 7.4, turnover24h: 85_000_000, anomalyType: "volume_breakout", category: "momentum" },
     { symbol: "NEARUSDT", lastPrice: 4.85, change24hPct: 6.9, turnover24h: 62_000_000, anomalyType: "volatility_expansion", category: "momentum" },

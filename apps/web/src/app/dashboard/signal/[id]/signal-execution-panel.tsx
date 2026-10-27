@@ -787,7 +787,7 @@ export function SignalExecutionPanel({
       {/* Primary Execution Button (OKX Big Action) */}
       <button
         type="button"
-        disabled={isPending}
+        disabled={isPending || (isSlReached && !isAdapted)}
         onClick={handleSubmit}
         style={{
           minHeight: "46px",
@@ -796,15 +796,15 @@ export function SignalExecutionPanel({
           width: "100%",
           borderRadius: "8px",
           font: "700 14px 'Plus Jakarta Sans', sans-serif",
-          cursor: isPending ? "not-allowed" : "pointer",
+          cursor: isPending || (isSlReached && !isAdapted) ? "not-allowed" : "pointer",
           border: 0,
-          background: isPending
+          background: isPending || (isSlReached && !isAdapted)
             ? "#2A2145"
             : (orderType === "Market"
                 ? (isLong ? "#35F2D0" : "#FF4F9A")
                 : "linear-gradient(135deg, #7C4DFF, #B24BFF)"),
-          color: isPending
-            ? "#A59CC4"
+          color: isPending || (isSlReached && !isAdapted)
+            ? "#8E88A8"
             : (orderType === "Market" && isLong ? "#07050F" : "#FFFFFF"),
           transition: "opacity 0.15s ease",
           display: "flex",
@@ -818,11 +818,13 @@ export function SignalExecutionPanel({
       >
         {isPending
           ? "⏳ Відкриваю ордер..."
-          : orderType === "Market"
-            ? (isAdapted || isTp1Reached
-                ? `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} за $${formatCryptoPrice(currentPrice)} з новими TP`
-                : `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} по ринку ($${formatCryptoPrice(currentPrice)})`)
-            : `⏳ Виставити Limit ${isLong ? "LONG" : "SHORT"} на $${formatCryptoPrice(effectiveEntry)}`}
+          : isSlReached && !isAdapted
+            ? "⛔ Сетап інвалідовано (Stop Loss пробито)"
+            : orderType === "Market"
+              ? (isAdapted || isTp1Reached
+                  ? `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} за $${formatCryptoPrice(currentPrice)} з новими TP`
+                  : `⚡ Відкрити ${isLong ? "LONG" : "SHORT"} по ринку ($${formatCryptoPrice(currentPrice)})`)
+              : `⏳ Виставити Limit ${isLong ? "LONG" : "SHORT"} на $${formatCryptoPrice(effectiveEntry)}`}
       </button>
     </div>
   );

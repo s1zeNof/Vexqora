@@ -51,10 +51,13 @@ export function parseSignalText(rawText: string, source: Signal["source"] = "cha
   const riskLine = lines.find((line) => line.toLowerCase().startsWith("risk "));
   let trailingStop: Signal["trailingStop"];
   if (trailingLine) {
-    const match = trailingLine.slice(6).trim().match(/^(\d+(?:[.,]\d+)?)(%)?(?:\s+after\s+tp\d+)?$/i);
+    const match = trailingLine.slice(6).trim().match(/^(\d+(?:[.,]\d+)?)(%)?(?:\s+after\s+tp(\d+))?$/i);
     if (!match?.[1]) throw new SignalParseError("Invalid trail; expected DISTANCE or PERCENT%", trailingLine);
+    const tpTargetNum = match[3] ? parseInt(match[3], 10) : 1;
+    const activationPrice = takeProfits[tpTargetNum - 1]?.price;
     trailingStop = {
-      distance: { type: match[2] ? "percent" : "absolute", value: parsePositive(match[1], "Trailing distance") }
+      distance: { type: match[2] ? "percent" : "absolute", value: parsePositive(match[1], "Trailing distance") },
+      ...(activationPrice !== undefined ? { activationPrice } : {})
     };
   }
 

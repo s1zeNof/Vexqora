@@ -113,7 +113,7 @@ export async function scanMarketOpportunityAction(formData: FormData): Promise<v
         const [instrument, ticker, klines] = await Promise.all([
           client.getInstrument(symbol),
           client.getTicker(symbol),
-          fetchRecentKlines(symbol, "15", 15).catch(() => [])
+          fetchRecentKlines(symbol, "15", 50).catch(() => [])
         ]);
 
         const hist = findHistoricalPatternMatch(symbol, "liquidity_sweep", 2.5, klines);

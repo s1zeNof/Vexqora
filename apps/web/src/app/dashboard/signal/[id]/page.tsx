@@ -181,6 +181,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
       takeProfits?: Array<{ price: number; sharePct: number }>;
     };
     opportunity?: {
+      side?: "long" | "short";
       strategy?: string;
       rationale?: string;
       qualityScore?: number;
@@ -190,16 +191,26 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     };
   } | null;
 
-  const isLong = parsedPreview?.signal?.side ? parsedPreview.signal.side === "long" : changeNum >= 0;
-  const side = isLong ? ("long" as const) : ("short" as const);
-  const entry = parsedPreview?.entryPrice ?? (currentPrice > 0 ? currentPrice : (klines[klines.length - 1]?.close ?? 1));
-  const slDist = entry * 0.025;
-  const stopLoss = parsedPreview?.signal?.stopLoss ?? (isLong ? entry - slDist : entry + slDist);
+  const parsedAny = parsedPreview as Record<string, unknown> | null;
+  const rawSide = parsedPreview?.signal?.side ?? parsedPreview?.opportunity?.side ?? (parsedAny?.side as string);
+  const textSide = signalRecord?.raw_text
+    ? (/\bSHORT\b/i.test(signalRecord.raw_text) ? "short" : (/\bLONG\b/i.test(signalRecord.raw_text) ? "long" : undefined))
+    : undefined;
+  const side: "long" | "short" = (rawSide ?? textSide ?? (changeNum >= 0 ? "long" : "short")) === "short" ? "short" : "long";
+  const isLong = side === "long";
 
-  const tps = parsedPreview?.signal?.takeProfits ?? [];
-  const tp1 = tps[0]?.price ?? (isLong ? entry + slDist * 1.8 : entry - slDist * 1.8);
-  const tp2 = tps[1]?.price ?? (isLong ? entry + slDist * 2.6 : entry - slDist * 2.6);
-  const tp3 = tps[2]?.price ?? (isLong ? entry + slDist * 3.5 : entry - slDist * 3.5);
+  const entry = Number(parsedPreview?.entryPrice ?? (parsedAny?.entryPrice as number) ?? (currentPrice > 0 ? currentPrice : (klines[klines.length - 1]?.close ?? 1)));
+  const slDist = entry * 0.025;
+  const stopLoss = Number(
+    parsedPreview?.signal?.stopLoss ??
+    (parsedAny?.stopLoss as number) ??
+    (isLong ? entry - slDist : entry + slDist)
+  );
+
+  const tps = parsedPreview?.signal?.takeProfits ?? ((parsedAny?.takeProfits as Array<{ price: number; sharePct: number }>) || []);
+  const tp1 = Number(tps[0]?.price ?? (isLong ? entry + slDist * 1.8 : entry - slDist * 1.8));
+  const tp2 = Number(tps[1]?.price ?? (isLong ? entry + slDist * 2.6 : entry - slDist * 2.6));
+  const tp3 = Number(tps[2]?.price ?? (isLong ? entry + slDist * 3.5 : entry - slDist * 3.5));
 
   const strategy = parsedPreview?.opportunity?.strategy ?? "Fair Value Gap (FVG) Mitigation & Expansion";
   const rationale = parsedPreview?.opportunity?.rationale ?? "Structural liquidity sweep followed by market structure shift (MSS) into discount value gap.";

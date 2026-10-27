@@ -52,5 +52,23 @@ describe("executor", () => {
     expect(reduceTradeStatus("entry_open", { type: "ENTRY_FILLED" })).toBe("active");
     expect(() => reduceTradeStatus("closed", { type: "ENTRY_FILLED" })).toThrow("Invalid trade transition");
   });
+
+  it("only enables trailing stop with activePrice (TP1 level) to prevent immediate exit on fill", async () => {
+    const mock = mockClient("live");
+    const previewWithTrail: TradePreview = {
+      ...preview,
+      signal: {
+        ...preview.signal,
+        trailingStop: { distance: { type: "percent", value: 1 } }
+      }
+    };
+    await protectFilledPosition(mock.client, previewWithTrail, "trade-2");
+    expect(mock.calls[0]).toEqual(["setTradingStop", {
+      symbol: "BTCUSDT",
+      stopLoss: 64_000,
+      activePrice: 66_000,
+      trailingStop: 650
+    }]);
+  });
 });
 

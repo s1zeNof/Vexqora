@@ -99,8 +99,10 @@ export async function executeSignalAction(
     effectiveTP1 = options.adaptedLevels.tp1;
     effectiveTP2 = options.adaptedLevels.tp2;
     effectiveTP3 = options.adaptedLevels.tp3;
-  } else if (orderType === "Market" && (isTp1Breached || isSlBreached)) {
-    // If the market moved past TP1 or SL, dynamically recalibrate so the new order has valid targets ahead of entry
+  } else if (orderType === "Market" && isSlBreached) {
+    throw new Error(`⚠️ Вхід скасовано: початковий Stop Loss цього сигналу ($${canonicalSL}) вже було пробито ринком. Сетап недійсний. Будь ласка, запустіть свіжий скан ринку.`);
+  } else if (orderType === "Market" && isTp1Breached) {
+    // If the market moved past TP1, dynamically recalibrate so the new order has valid targets ahead of entry
     const slDist = liveMarketPrice * 0.025;
     effectiveSL = isLong ? liveMarketPrice - slDist : liveMarketPrice + slDist;
     effectiveTP1 = isLong ? liveMarketPrice + slDist * 1.8 : liveMarketPrice - slDist * 1.8;
