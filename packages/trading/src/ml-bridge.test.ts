@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument */
 import { describe, it, expect } from "vitest";
 import { calculateExpectedValue, queryMLModelPrediction } from "./ml-bridge";
 
@@ -67,6 +68,66 @@ describe("ML Bridge & Expected Value (EV) Engine", () => {
 
       expect(res.decision).toBe("NO_TRADE");
       expect(res.rejectionReason).toBeDefined();
+    });
+
+    it("faithfully preserves Bayesian fallback provenance even on HTTP 200 response", async () => {
+      const mockFetch = async () => ({
+        ok: true,
+        json: async () => ({
+          symbol: "SOLUSDT",
+          side: "long",
+          winProbabilityPct: 53.2,
+          expectedValueUsd: 12.5,
+          riskReward: 2.1,
+          decision: "TRADE",
+          modelType: "StatisticalBayesian",
+          topFeatures: ["rsi_14", "atr_14"]
+        })
+      }) as any;
+
+      const res = await queryMLModelPrediction({
+        symbol: "SOLUSDT",
+        side: "long",
+        entryPrice: 150,
+        stopLoss: 145,
+        tp1: 160,
+        klines: []
+      }, mockFetch);
+
+      expect(res.modelType).toBe("StatisticalBayesian");
+      expect(res.isFallback).toBe(true);
+      expect(res.status).toBe("FALLBACK_RULE");
+      expect(res.decision).toBe("NO_TRADE"); // Not auto-approved as trained CatBoost
+    });
+
+    it("acknowledges verified CatBoostClassifier when modelLoaded is authentic", async () => {
+      const mockFetch = (async () => ({
+        ok: true,
+        json: async () => ({
+          symbol: "BTCUSDT",
+          side: "long",
+          winProbabilityPct: 67.5,
+          expectedValueUsd: 45.0,
+          riskReward: 2.4,
+          decision: "TRADE",
+          modelType: "CatBoostClassifier",
+          topFeatures: ["rsi_14", "vol_ratio"]
+        })
+      })) as any;
+
+      const res = await queryMLModelPrediction({
+        symbol: "BTCUSDT",
+        side: "long",
+        entryPrice: 65000,
+        stopLoss: 64000,
+        tp1: 67400,
+        klines: []
+      }, mockFetch);
+
+      expect(res.modelType).toBe("CatBoostClassifier");
+      expect(res.isFallback).toBe(false);
+      expect(res.status).toBe("OK");
+      expect(res.decision).toBe("TRADE");
     });
   });
 });

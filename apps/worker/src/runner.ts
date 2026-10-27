@@ -1,6 +1,6 @@
 import { createBybitClient, createPaperExchangeClient, decryptSecret } from "@crypto-bot/exchange";
 import type { RiskSettingsRow, Signal } from "@crypto-bot/shared";
-import { createTradePreview, protectFilledPosition, submitEntry, type TradePreview } from "@crypto-bot/trading";
+import { createTradePreview, protectFilledPosition, submitEntry, verifyExecutionGates, type TradePreview } from "@crypto-bot/trading";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
 import { sendDiscordAlert } from "./notifications";
@@ -115,6 +115,21 @@ export async function processJob(
       dailyPnl
     }
   );
+
+  // 4b. Enforce 4-Gate Decision Ensemble verification on backend execution path
+  const gateCheck = verifyExecutionGates({
+    symbol: signal.symbol,
+    side: signal.side,
+    entryPrice: preview.entryPrice,
+    stopLoss: signal.stopLoss,
+    tp1: signal.takeProfits[0]?.price ?? preview.entryPrice,
+    riskReward: preview.weightedRewardRisk,
+    killSwitchActive: Boolean(riskSettings.kill_switch)
+  });
+
+  if (!gateCheck.passed) {
+    throw new Error(`Order execution blocked by Decision Ensemble Gate: ${gateCheck.rejectionReasons.join("; ")}`);
+  }
 
   // 5. Persist trade record
   const tradeInsertRes = await supabase

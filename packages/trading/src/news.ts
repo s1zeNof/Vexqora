@@ -106,14 +106,15 @@ export function evaluateNewsRiskForTrade(
 ): NewsRiskAssessment {
   const asOfIso = new Date().toISOString();
 
-  if (coverageStatus === "UNAVAILABLE" || !events) {
+  // Strict P0-B rule: Empty events or unavailable coverage means UNKNOWN risk, never optimistic "all clear"
+  if (coverageStatus === "UNAVAILABLE" || !events || events.length === 0) {
     return {
       symbol,
       hasHighImpactNews: false,
       riskLevel: "UNKNOWN",
       coverageStatus: "UNAVAILABLE",
       activeEvents: [],
-      recommendation: "Новинний моніторинг наразі недоступний. Торгуйте з підвищеною обережністю.",
+      recommendation: "Перевірене новинне покриття відсутнє (UNAVAILABLE). Ризик не визначено (UNKNOWN).",
       asOfIso
     };
   }

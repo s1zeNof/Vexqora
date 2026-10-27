@@ -108,12 +108,21 @@ export function analyzeTimeframeStructure(
   const atrArr = calculateATR(highs, lows, closes, 14);
   const atr = n >= 15 ? (atrArr[n - 1] ?? null) : null;
 
-  // Swings across last min(25, n) bars
-  const lookback = Math.min(25, n);
-  const windowHighs = highs.slice(n - lookback);
-  const windowLows = lows.slice(n - lookback);
-  const swingHigh = Math.max(...windowHighs);
-  const swingLow = Math.min(...windowLows);
+  // Swings across previous confirmed bars (excluding the bar being evaluated for breakout)
+  // Ensures lastClose > swingHigh is mathematically valid for real OHLC where close <= high
+  const lookback = Math.min(25, n - 1);
+  let swingHigh: number;
+  let swingLow: number;
+
+  if (n >= 3 && lookback >= 2) {
+    const priorHighs = highs.slice(n - 1 - lookback, n - 1);
+    const priorLows = lows.slice(n - 1 - lookback, n - 1);
+    swingHigh = Math.max(...priorHighs);
+    swingLow = Math.min(...priorLows);
+  } else {
+    swingHigh = Math.max(...highs);
+    swingLow = Math.min(...lows);
+  }
 
   // Objective Trend Determination
   let trend: TrendDirection = "unknown";
@@ -131,7 +140,7 @@ export function analyzeTimeframeStructure(
 
   // Structure Shift (BOS/CHOCH)
   let structureShift: "BOS" | "CHOCH" | "NONE" | null = "NONE";
-  if (n >= 4 && lastClose !== null) {
+  if (n >= 4 && lastClose !== null && swingHigh > 0 && swingLow > 0) {
     const prevClose = closes[n - 2] ?? lastClose;
     if (lastClose > swingHigh && prevClose <= swingHigh) {
       structureShift = trend === "bearish" ? "CHOCH" : "BOS";
@@ -306,7 +315,7 @@ export function buildMarketContextSnapshot(params: {
       missingTimeframes: missing,
       usableTimeframes: usable,
       hasMacroData: s1D.status === "OK" || s4H.status === "OK",
-      allCandlesClosed: true
+      allCandlesClosed: usable.length >= 3 && missing.length === 0
     }
   };
 }

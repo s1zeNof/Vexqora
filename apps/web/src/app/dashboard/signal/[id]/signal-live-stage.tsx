@@ -916,6 +916,8 @@ export function SignalLiveStage({
             pnlUsdt={activePosition ? livePnlUsdt : undefined}
             pnlPct={activePosition ? livePnlPct : undefined}
             isPaperTrading={isPaperTrading}
+            signalId={targetSignalId}
+            tradeId={activePosition?.id}
           />
         </div>
       </div>

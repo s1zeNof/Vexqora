@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateSignalOutcome,
   classifyTradeLossRootCause,
+  attributeTradeLoss,
   type SignalOutcomeSnapshot
 } from "./signal-outcome";
 
@@ -72,5 +73,22 @@ describe("signal outcome evaluator", () => {
       side: "long", entryPrice: 100, exitPrice: 94, stopLoss: 95,
       maxAdversePct: 5.5, maxFavorablePct: 0.05
     })).toBe("wrong_direction");
+  });
+
+  it("attributes trade loss with explicit HEURISTIC_RULE_ATTRIBUTION notice", () => {
+    const attr = attributeTradeLoss({
+      side: "long",
+      entryPrice: 100,
+      exitPrice: 94,
+      stopLoss: 95,
+      maxAdversePct: 6,
+      maxFavorablePct: 0.1,
+      entry24hChangePct: 10.0
+    });
+
+    expect(attr.rootCause).toBe("overextension");
+    expect(attr.attributionMethod).toBe("HEURISTIC_RULE_ATTRIBUTION");
+    expect(attr.isEmpiricalModelTrained).toBe(false);
+    expect(attr.details).toContain("not yet applied");
   });
 });

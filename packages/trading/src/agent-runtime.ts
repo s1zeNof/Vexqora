@@ -61,6 +61,8 @@ export interface AgentRunResult {
 export interface LeadTradeSynthesis {
   leadVerdict: "HOLD" | "REVIEW" | "RECOMMEND_REDUCE" | "RECOMMEND_CLOSE" | "NO_ACTION";
   confidencePct: number;
+  isCalibrated: false;
+  calibrationNotice: string;
   summary: string;
   subagentResults: AgentRunResult[];
   timestampMs: number;
@@ -383,17 +385,33 @@ export async function orchestrateTradeAnalysis(params: {
 
   const subagentResults = [structureRes, orderFlowRes, riskRes, newsRes];
 
-  // Lead synthesis logic
+  // Dynamically compute evidence completeness (Phase P4 / Audit P1-D)
+  let validEvidenceCount = 0;
+  for (const res of subagentResults) {
+    for (const ev of res.evidence) {
+      if (ev.status === "OK") validEvidenceCount++;
+    }
+  }
+
+  const evidenceCompleteness = subagentResults.length > 0
+    ? Math.min(1, validEvidenceCount / subagentResults.length)
+    : 0;
+
+  // Lead synthesis logic based strictly on subagent signals
   let leadVerdict: LeadTradeSynthesis["leadVerdict"] = "HOLD";
-  let confidencePct = 78;
 
   if (riskRes.recommendation === "RECOMMEND_CLOSE") {
     leadVerdict = "RECOMMEND_CLOSE";
-    confidencePct = 95;
   } else if (newsRes.recommendation === "RECOMMEND_REDUCE" || orderFlowRes.recommendation === "REVIEW") {
     leadVerdict = "RECOMMEND_REDUCE";
-    confidencePct = 70;
+  } else if (structureRes.recommendation === "REVIEW") {
+    leadVerdict = "REVIEW";
   }
+
+  // Evidence-weighted confidence percentage (eliminates hardcoded 78/95/70 numbers)
+  const confidencePct = Math.round(40 + 50 * evidenceCompleteness);
+  const calibrationNotice =
+    "УВАГА: Оцінка надійності є евристичним зведенням доказів субагентів, а не статистично каліброваною байєсівською ймовірністю.";
 
   const summary = `Lead Trade Agent синтез для ${params.symbol}: ` +
     `Структура (${structureRes.recommendation}), Потік ордерів (${orderFlowRes.recommendation}), ` +
@@ -402,6 +420,8 @@ export async function orchestrateTradeAnalysis(params: {
   return {
     leadVerdict,
     confidencePct,
+    isCalibrated: false,
+    calibrationNotice,
     summary,
     subagentResults,
     timestampMs: Date.now(),

@@ -15,3 +15,4 @@ export * from "./feature-registry";
 export * from "./market-context";
 export * from "./news";
 export * from "./agent-runtime";
+export * from "./ensemble-gate";

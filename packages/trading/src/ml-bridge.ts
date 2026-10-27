@@ -122,19 +122,46 @@ export async function queryMLModelPrediction(
     clearTimeout(timeout);
 
     if (res.ok) {
-      const json = (await res.json()) as Partial<MLPredictionResponse>;
+      const json = (await res.json()) as Record<string, unknown>;
+      const rawModelType = typeof json.modelType === "string" ? json.modelType : "UNKNOWN";
+      const isActualCatBoost = rawModelType === "CatBoostClassifier";
+
+      let modelType: MLModelType;
+      let isFallback: boolean;
+      let status: MLStatus;
+
+      if (isActualCatBoost) {
+        modelType = "CatBoostClassifier";
+        isFallback = false;
+        status = "OK";
+      } else if (rawModelType === "StatisticalBayesian") {
+        modelType = "StatisticalBayesian";
+        isFallback = true;
+        status = "FALLBACK_RULE";
+      } else if (rawModelType === "InsufficientDataFallback") {
+        modelType = "INSUFFICIENT_DATA";
+        isFallback = true;
+        status = "INSUFFICIENT_DATA";
+      } else {
+        modelType = "RULE_HEURISTIC";
+        isFallback = true;
+        status = "FALLBACK_RULE";
+      }
+
       return {
         symbol: normSymbol,
         side: req.side,
         winProbabilityPct: typeof json.winProbabilityPct === "number" ? json.winProbabilityPct : 50.0,
         expectedValueUsd: typeof json.expectedValueUsd === "number" ? json.expectedValueUsd : 0.0,
         riskReward: typeof json.riskReward === "number" ? json.riskReward : riskReward,
-        decision: json.decision === "TRADE" ? "TRADE" : "NO_TRADE",
-        rejectionReason: json.rejectionReason ?? null,
-        modelType: "CatBoostClassifier",
-        isFallback: false,
-        status: "OK",
-        topFeatures: Array.isArray(json.topFeatures) ? json.topFeatures : []
+        decision: json.decision === "TRADE" && isActualCatBoost ? "TRADE" : "NO_TRADE",
+        rejectionReason: typeof json.rejectionReason === "string"
+          ? json.rejectionReason
+          : (isActualCatBoost ? null : "Model is in Bayesian/Heuristic fallback mode (no trained .cbm CatBoost model loaded)"),
+        modelType,
+        isFallback,
+        status,
+        topFeatures: Array.isArray(json.topFeatures) ? (json.topFeatures as string[]) : []
       };
     }
   } catch {

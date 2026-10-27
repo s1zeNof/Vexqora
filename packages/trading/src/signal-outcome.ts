@@ -48,9 +48,16 @@ export interface TradeLossAttributionParams {
   exitReason?: string;
 }
 
+export interface TradeLossAttributionResult {
+  rootCause: TradeLossRootCause;
+  attributionMethod: "HEURISTIC_RULE_ATTRIBUTION";
+  isEmpiricalModelTrained: false;
+  details: string;
+}
+
 /**
  * Classifies the specific root cause for a trade loss (Phase P5 Continuous Learning)
- * Eliminates heuristic blame and accurately maps outcome to empirical market context.
+ * Explicitly identified as HEURISTIC_RULE_ATTRIBUTION (deterministic rules, not trained ML).
  */
 export function classifyTradeLossRootCause(params: TradeLossAttributionParams): TradeLossRootCause {
   if (params.exitReason === "manual") {
@@ -86,6 +93,19 @@ export function classifyTradeLossRootCause(params: TradeLossAttributionParams): 
   return "stop_loss_hit";
 }
 
+/**
+ * Attributes a trade loss with explicit provenance and non-ML heuristic disclaimer.
+ */
+export function attributeTradeLoss(params: TradeLossAttributionParams): TradeLossAttributionResult {
+  const rootCause = classifyTradeLossRootCause(params);
+  return {
+    rootCause,
+    attributionMethod: "HEURISTIC_RULE_ATTRIBUTION",
+    isEmpiricalModelTrained: false,
+    details: `Loss attributed via deterministic heuristics (${rootCause}). Model retrain not yet applied.`
+  };
+}
+
 export interface TradeLearningRecord {
   id: string;
   tradeId?: string;
@@ -97,6 +117,7 @@ export interface TradeLearningRecord {
   realizedPnl: number;
   outcome: "win" | "loss" | "partial" | "breakeven";
   rootCause: string;
+  attributionMethod: "HEURISTIC_RULE_ATTRIBUTION";
   isEmpirical: boolean;
   modelProvenance: {
     modelVersion: string;

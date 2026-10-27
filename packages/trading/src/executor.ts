@@ -1,5 +1,6 @@
 import type { ExchangeClient, OrderAck } from "@crypto-bot/shared";
 import { roundToStep, type TradePreview } from "./risk";
+import { verifyExecutionGates } from "./ensemble-gate";
 
 export type TradeStatus = "pending" | "entry_open" | "active" | "closed" | "cancelled" | "failed";
 
@@ -32,6 +33,19 @@ function orderLinkId(prefix: string, tradeId: string, suffix: string): string {
 }
 
 export async function submitEntry(client: ExchangeClient, preview: TradePreview, tradeId: string): Promise<EntrySubmission> {
+  const gateCheck = verifyExecutionGates({
+    symbol: preview.signal.symbol,
+    side: preview.signal.side,
+    entryPrice: preview.entryPrice,
+    stopLoss: preview.signal.stopLoss,
+    tp1: preview.signal.takeProfits[0]?.price ?? preview.entryPrice,
+    riskReward: preview.weightedRewardRisk
+  });
+
+  if (!gateCheck.passed) {
+    throw new Error(`Execution blocked by Decision Ensemble Gate: ${gateCheck.rejectionReasons.join("; ")}`);
+  }
+
   await client.setLeverage(preview.signal.symbol, preview.leverage);
   const side = preview.signal.side === "long" ? "buy" : "sell";
   const entry = preview.signal.entry;

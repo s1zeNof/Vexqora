@@ -2,7 +2,11 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import type { TradeAiSessionData, TradeAiMessageItem } from "./ai-companion-actions";
-import { sendTradeAiMessage } from "./ai-companion-actions";
+import {
+  sendTradeAiMessage,
+  ensureTradeAiSession,
+  getLatestTradeAiMessages
+} from "./ai-companion-actions";
 
 interface TradeCompanionPanelProps {
   initialSession: TradeAiSessionData | null;
@@ -15,6 +19,8 @@ interface TradeCompanionPanelProps {
   pnlUsdt?: number | undefined;
   pnlPct?: number | undefined;
   isPaperTrading?: boolean | undefined;
+  signalId?: string | null | undefined;
+  tradeId?: string | null | undefined;
 }
 
 export function TradeCompanionPanel({
@@ -27,8 +33,11 @@ export function TradeCompanionPanel({
   tp1Price,
   pnlUsdt,
   pnlPct,
-  isPaperTrading
+  isPaperTrading,
+  signalId,
+  tradeId
 }: TradeCompanionPanelProps) {
+  const [session, setSession] = useState<TradeAiSessionData | null>(initialSession);
   const [messages, setMessages] = useState<TradeAiMessageItem[]>(
     initialSession?.messages ?? []
   );
@@ -36,7 +45,13 @@ export function TradeCompanionPanel({
   const [isPending, startTransition] = useTransition();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const sessionId = initialSession?.id;
+  // Keep session in sync if parent updates initialSession
+  useEffect(() => {
+    if (initialSession && !session) {
+      setSession(initialSession);
+      setMessages(initialSession.messages ?? []);
+    }
+  }, [initialSession, session]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -46,9 +61,35 @@ export function TradeCompanionPanel({
     scrollToBottom();
   }, [messages]);
 
+  // Realtime background sync: poll every 4s for newly pushed messages (e.g. from worker dispatchTradeAiEvent)
+  useEffect(() => {
+    if (!session?.id) return;
+    const interval = setInterval(() => {
+      void (async () => {
+        try {
+          const latest = await getLatestTradeAiMessages(session.id);
+          if (latest && latest.length > 0) {
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map((m) => m.id));
+              const newOnes = latest.filter((m) => !existingIds.has(m.id));
+              if (newOnes.length === 0) return prev;
+              return [...prev, ...newOnes];
+            });
+          }
+        } catch {
+          // silent background sync catch
+        }
+      })();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [session?.id]);
+
   const handleSend = (textToSend?: string) => {
     const prompt = (textToSend ?? input).trim();
-    if (!prompt || !sessionId || isPending) return;
+    if (!prompt || isPending) return;
+
+    if (!textToSend) setInput("");
 
     const optimisticUserMsg: TradeAiMessageItem = {
       id: `temp-${Date.now()}`,
@@ -59,19 +100,50 @@ export function TradeCompanionPanel({
     };
 
     setMessages((prev) => [...prev, optimisticUserMsg]);
-    if (!textToSend) setInput("");
 
     startTransition(async () => {
-      const res = await sendTradeAiMessage(sessionId, prompt, {
+      let activeSession = session;
+
+      // On-demand session creation upon user interaction (Zero mutations on initial page load)
+      if (!activeSession) {
+        activeSession = await ensureTradeAiSession({
+          symbol,
+          tradeId: tradeId ?? undefined,
+          signalId: signalId ?? undefined,
+          side,
+          entryPrice,
+          stopLoss: stopLossPrice,
+          tp1: tp1Price
+        });
+        if (activeSession) {
+          setSession(activeSession);
+          if (activeSession.messages && activeSession.messages.length > 0) {
+            setMessages((prev) => {
+              const prevWithoutTemp = prev.filter((m) => m.id !== optimisticUserMsg.id);
+              return [...activeSession!.messages, ...prevWithoutTemp, optimisticUserMsg];
+            });
+          }
+        }
+      }
+
+      if (!activeSession?.id) return;
+
+      const res = await sendTradeAiMessage(activeSession.id, prompt, {
         symbol,
         currentPrice,
         side,
+        entryPrice,
+        stopLoss: stopLossPrice,
+        tp1: tp1Price,
         pnlUsdt,
         pnlPct
       });
 
       if (res) {
-        setMessages((prev) => [...prev, res]);
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === res.id)) return prev;
+          return [...prev, res];
+        });
       }
     });
   };
@@ -183,7 +255,7 @@ export function TradeCompanionPanel({
         }}
       >
         <span style={{ color: "#F1EEFF", fontWeight: 600 }}>Торгова теза: </span>
-        {initialSession?.initialThesis ??
+        {session?.initialThesis ??
           `Вхід у ${side.toUpperCase()} з ціллю TP1 $${tp1Price} та Stop Loss $${stopLossPrice}.`}
       </div>
 

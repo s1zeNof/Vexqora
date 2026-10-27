@@ -70,5 +70,21 @@ describe("executor", () => {
       trailingStop: 650
     }]);
   });
-});
 
+  it("strictly blocks order execution on backend if 4-gate ensemble check fails", async () => {
+    const mock = mockClient("live");
+    const badPreview: TradePreview = {
+      ...preview,
+      weightedRewardRisk: 0.5,
+      signal: {
+        ...preview.signal,
+        stopLoss: 66_000
+      }
+    };
+
+    await expect(submitEntry(mock.client, badPreview, "trade-bad")).rejects.toThrow(
+      "Execution blocked by Decision Ensemble Gate"
+    );
+    expect(mock.calls).toHaveLength(0);
+  });
+});

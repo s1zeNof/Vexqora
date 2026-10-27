@@ -69,6 +69,12 @@ describe("News & Event Intelligence (P1.5)", () => {
     expect(res.hasHighImpactNews).toBe(false);
   });
 
+  it("strictly forbids optimistic ONLINE when events list is empty", () => {
+    const res = evaluateNewsRiskForTrade("SOLUSDT", [], "ONLINE");
+    expect(res.riskLevel).toBe("UNKNOWN");
+    expect(res.coverageStatus).toBe("UNAVAILABLE");
+  });
+
   it("identifies critical risk for delisting notice", () => {
     const res = evaluateNewsRiskForTrade("BADCOINUSDT", sampleEvents, "ONLINE");
     expect(res.riskLevel).toBe("CRITICAL");

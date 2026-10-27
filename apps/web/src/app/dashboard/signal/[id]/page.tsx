@@ -8,7 +8,7 @@ import {
   buildMarketContextSnapshot,
   evaluateNewsRiskForTrade
 } from "@crypto-bot/trading";
-import { getOrCreateTradeAiSession } from "./ai-companion-actions";
+import { getTradeAiSession } from "./ai-companion-actions";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
@@ -177,7 +177,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   }
 
   // 4. Fetch Klines for chart
-  const klines = await fetchRecentKlines(formattedSymbol, "15", 35).catch(() => []);
+  const klines = await fetchRecentKlines(formattedSymbol, "15", 200).catch(() => []);
 
   // 5. Compute signal targets
   const parsedPreview = signalRecord?.parsed as {
@@ -349,8 +349,8 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
         return null;
       }
     })(),
-    fetchRecentKlines(formattedSymbol, "240", 25).catch(() => []),
-    fetchRecentKlines(formattedSymbol, "D", 25).catch(() => [])
+    fetchRecentKlines(formattedSymbol, "240", 200).catch(() => []),
+    fetchRecentKlines(formattedSymbol, "D", 200).catch(() => [])
   ]);
 
   const targetSignalId = signalRecord?.id ?? null;
@@ -365,16 +365,12 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     asOfMs: Date.now()
   });
 
-  const newsRisk = evaluateNewsRiskForTrade(formattedSymbol, [], "ONLINE");
+  const newsRisk = evaluateNewsRiskForTrade(formattedSymbol, [], "UNAVAILABLE");
 
-  const aiSession = await getOrCreateTradeAiSession({
+  const aiSession = await getTradeAiSession({
     symbol: formattedSymbol,
     tradeId: activePosition?.id ?? null,
-    signalId: targetSignalId,
-    side,
-    entryPrice: entry,
-    stopLoss,
-    tp1
+    signalId: targetSignalId
   }).catch(() => null);
 
   const isPaperTrading = account?.exchange === "paper" || account?.environment === "demo";

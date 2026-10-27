@@ -107,6 +107,8 @@ describe("Multi-Agent Runtime & Skill Engine (Phase P4)", () => {
     expect(synthesis.leadVerdict).toBeDefined();
     expect(synthesis.subagentResults.length).toBe(4);
     expect(synthesis.authorizationRequirement).toBe("explicit_user_confirmation_required");
+    expect(synthesis.isCalibrated).toBe(false);
+    expect(synthesis.calibrationNotice).toContain("каліброваною");
   });
 
   it("recommends CLOSE when Stop Loss is breached in risk guardian", async () => {
@@ -122,6 +124,7 @@ describe("Multi-Agent Runtime & Skill Engine (Phase P4)", () => {
     });
 
     expect(synthesis.leadVerdict).toBe("RECOMMEND_CLOSE");
-    expect(synthesis.confidencePct).toBe(95);
+    expect(synthesis.confidencePct).toBeGreaterThan(50);
+    expect(synthesis.isCalibrated).toBe(false);
   });
 });
