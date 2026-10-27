@@ -39,7 +39,15 @@ export interface NemotronVisionAnalysis {
   fullReasoning: string;
 }
 
-const DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free";
+const CANDIDATE_MODELS = [
+  process.env.OPENROUTER_MODEL,
+  "deepseek/deepseek-chat",
+  "meta-llama/llama-3.3-70b-instruct",
+  "google/gemini-2.5-flash",
+  "qwen/qwen-2.5-72b-instruct"
+].filter((m): m is string => Boolean(m && m.trim().length > 0));
+
+const DEFAULT_MODEL = "deepseek/deepseek-chat";
 const VISION_MODEL = "nvidia/nemotron-3.5-super-vl:free";
 
 function getAvailableKeys(preferredKey?: string): string[] {
@@ -67,36 +75,41 @@ export async function callNemotron(
     throw new Error("No OPENROUTER_API_KEY configured");
   }
 
-  const model = options?.model ?? process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
+  const requestedModel = (options?.model ?? process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL).trim();
+  const modelsToTry: string[] = typeof requestedModel === "string" && requestedModel.length > 0
+    ? [requestedModel, ...CANDIDATE_MODELS.filter((m) => m !== requestedModel)]
+    : CANDIDATE_MODELS;
+
   let lastError: Error | null = null;
 
   for (const apiKey of keys) {
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://vexqora.vercel.app",
-          "X-Title": "Vexqora Trade"
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: options?.temperature ?? 0.4,
-          max_tokens: options?.maxTokens ?? 800
-        })
-      });
+    for (const model of modelsToTry) {
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://vexqora.vercel.app",
+            "X-Title": "Vexqora Trade"
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: options?.temperature ?? 0.3,
+            max_tokens: options?.maxTokens ?? 800
+          })
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        // If rate limited or quota exceeded, try next key
-        if (response.status === 429 || response.status === 402) {
-          lastError = new Error(`Key rate limited (${response.status}): ${errorText}`);
-          continue;
+        if (!response.ok) {
+          const errorText = await response.text();
+          // If rate limited or quota exceeded, try next model or key
+          if (response.status === 429 || response.status === 402 || response.status === 404 || response.status === 503) {
+            lastError = new Error(`Model ${model} unavailable (${response.status}): ${errorText}`);
+            continue;
+          }
+          throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
         }
-        throw new Error(`Nemotron API error ${response.status}: ${errorText}`);
-      }
 
       const data = (await response.json()) as {
         id?: string;
@@ -126,11 +139,12 @@ export async function callNemotron(
       return {
         content: content || reasoning,
         ...(reasoning ? { reasoning } : {}),
-        model: data.model ?? model,
+        model: String(data.model || model || "deepseek/deepseek-chat"),
         ...(Object.keys(usageObj).length > 0 ? { usage: usageObj } : {})
       };
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+      }
     }
   }
 

@@ -359,19 +359,32 @@ export async function runSubagent(
       const dailyLossBreached = Boolean(res.data.dailyLossBreached);
       const detailsStr = typeof res.data.dailyLossDetails === "string" ? res.data.dailyLossDetails : "";
 
+      const side = (payload.side as "long" | "short") ?? "long";
+      const entry = Number(payload.entryPrice ?? childContext.currentPrice);
+      const current = childContext.currentPrice;
+      const isProfitable = entry > 0 && (side === "long" ? current > entry : current < entry);
+
       let analysis: string;
       if (!dailyLossChecked) {
         analysis = (slBreached ? "УВАГА: Захисний Stop Loss досягнуто або пробито! " : "Рівень ризику позиції контрольований. ") +
           "Денні ліміти акаунту: [CHECK_SKIPPED / НЕ ПЕРЕВІРЕНО].";
       } else if (dailyLossBreached) {
-        analysis = `КРИТИЧНО: Перевищено денний ліміт збитків! (${detailsStr}). ` +
-          (slBreached ? "Захисний Stop Loss пробито!" : "Рекомендується негайний перегляд позицій.");
+        if (isProfitable) {
+          analysis = `Загальний денний ліміт втрат за день досягнуто (${detailsStr}), проте поточна позиція у прибутку. Рекомендується супровід за планом або часткова фіксація прибутку (50%).`;
+        } else {
+          analysis = `КРИТИЧНО: Перевищено денний ліміт збитків! (${detailsStr}). ` +
+            (slBreached ? "Захисний Stop Loss пробито!" : "Рекомендується негайний перегляд позицій.");
+        }
       } else {
         analysis = (slBreached ? "УВАГА: Захисний Stop Loss досягнуто або пробито! " : "Рівень ризику позиції контрольований. ") +
           "Денний ліміт збитків перевірено: ліміт у нормі.";
       }
 
-      const recommendation = (slBreached || dailyLossBreached) ? "RECOMMEND_CLOSE" : "HOLD";
+      const recommendation = slBreached
+        ? "RECOMMEND_CLOSE"
+        : (dailyLossBreached && !isProfitable)
+          ? "RECOMMEND_CLOSE"
+          : "HOLD";
 
       return {
         agentKey,
