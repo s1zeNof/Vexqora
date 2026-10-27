@@ -28,32 +28,50 @@ def calculate_sma(values: List[float], period: int) -> List[float]:
     return result
 
 def calculate_rsi(closes: List[float], period: int = 14) -> List[float]:
-    if len(closes) < 2:
-        return [50.0] * len(closes)
-    
+    """
+    Computes standard Wilder's smoothed Relative Strength Index (RSI).
+    Guarantees output array length is strictly equal to len(closes).
+    Bars prior to `period` are filled with 50.0 (neutral warm-up).
+    """
+    n = len(closes)
+    if n == 0:
+        return []
+    if n <= period:
+        return [50.0] * n
+
+    rsi = [50.0] * n
+
+    # Calculate initial average gain/loss over the first `period` changes (bars 1..period)
     gains = []
     losses = []
-    for i in range(1, len(closes)):
-        delta = closes[i] - closes[i - 1]
-        gains.append(max(0.0, delta))
-        losses.append(max(0.0, -delta))
-    
-    rsi = [50.0]
-    if len(gains) < period:
-        for _ in range(len(gains)):
-            rsi.append(50.0)
-        return rsi
+    for i in range(1, period + 1):
+        diff = closes[i] - closes[i - 1]
+        gains.append(max(0.0, diff))
+        losses.append(max(0.0, -diff))
 
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    rs = avg_gain / (avg_loss + 1e-9)
-    rsi.append(100.0 - (100.0 / (1.0 + rs)))
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
 
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        rs = avg_gain / (avg_loss + 1e-9)
-        rsi.append(100.0 - (100.0 / (1.0 + rs)))
+    if avg_loss == 0.0:
+        rsi[period] = 100.0 if avg_gain > 0.0 else 50.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi[period] = 100.0 - (100.0 / (1.0 + rs))
+
+    # Wilder's exponential smoothing for subsequent bars
+    for i in range(period + 1, n):
+        diff = closes[i] - closes[i - 1]
+        gain = max(0.0, diff)
+        loss = max(0.0, -diff)
+
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+
+        if avg_loss == 0.0:
+            rsi[i] = 100.0 if avg_gain > 0.0 else 50.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi[i] = 100.0 - (100.0 / (1.0 + rs))
 
     return rsi
 
@@ -68,10 +86,21 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
         tr.append(max(h_l, h_pc, l_pc))
     return calculate_ema(tr, period)
 
+def _extract_timestamp_ms(candle: Dict[str, Any]) -> int:
+    for key in ("timestamp", "time", "openTime", "openTimeMs"):
+        if key in candle and candle[key] is not None:
+            try:
+                val = int(candle[key])
+                if val > 0:
+                    return val
+            except (ValueError, TypeError):
+                continue
+    return 0
+
 def extract_candle_features(candles: List[Dict[str, Any]]) -> List[Dict[str, float]]:
     """
     Given a chronological list of candles:
-    [{"time": ts, "open": o, "high": h, "low": l, "close": c, "volume": v}, ...]
+    [{"timestamp": ts (or "time"), "open": o, "high": h, "low": l, "close": c, "volume": v}, ...]
     Computes pure normalized features for each bar without lookahead bias.
     """
     n = len(candles)
@@ -83,7 +112,7 @@ def extract_candle_features(candles: List[Dict[str, Any]]) -> List[Dict[str, flo
     lows = [float(c["low"]) for c in candles]
     closes = [float(c["close"]) for c in candles]
     volumes = [float(c.get("volume", 0)) for c in candles]
-    times = [int(c.get("time", 0)) for c in candles]
+    times = [_extract_timestamp_ms(c) for c in candles]
 
     # Moving averages
     ema_9 = calculate_ema(closes, 9)

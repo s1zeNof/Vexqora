@@ -10,7 +10,7 @@ interface AiEnsembleCardProps {
   rationale: string;
   qualityScore: string;
   qualityTier: string;
-  winProbabilityPct: number;
+  winProbabilityPct?: number;
   mlPrediction: MLPredictionResponse | null;
   microstructure: MarketMicrostructure | null;
   adaptiveAi: AdaptiveConfidenceResult;
@@ -23,7 +23,6 @@ export function AiEnsembleCard({
   rationale,
   qualityScore,
   qualityTier,
-  winProbabilityPct,
   mlPrediction,
   microstructure,
   adaptiveAi
@@ -35,15 +34,17 @@ export function AiEnsembleCard({
   const scoreNum = parseFloat(qualityScore) || 7.0;
   const gate1Passed = scoreNum >= 7.0 && adaptiveAi.decision !== "NO_TRADE";
 
-  // Gate 2: Microstructure Flow (OBI + CVD)
+  // Gate 2: Microstructure Flow (OBI + CVD) — P0.8: Missing data is UNKNOWN, not auto-pass
+  const hasMicrostructure = microstructure !== null && microstructure !== undefined;
   const obi = microstructure?.orderBook.weightedImbalance ?? 0;
   const cvd = microstructure?.tape.cvdUsd ?? 0;
-  const gate2Passed = isLong ? (obi > -0.30 && cvd >= -100_000) : (obi < 0.30 && cvd <= 100_000);
+  const gate2Passed = hasMicrostructure && (isLong ? (obi > -0.30 && cvd >= -100_000) : (obi < 0.30 && cvd <= 100_000));
 
-  // Gate 3: Quantitative ML & Net EV (CatBoost)
-  const mlWinProb = mlPrediction?.winProbabilityPct ?? winProbabilityPct;
-  const mlEV = mlPrediction?.expectedValueUsd ?? 14.5;
-  const gate3Passed = (mlPrediction ? mlPrediction.decision === "TRADE" : mlWinProb >= 52) && mlEV > 0;
+  // Gate 3: Quantitative ML & Net EV (CatBoost) — P0.8: No fake 14.5 EV or auto-pass on missing model
+  const hasRealMl = mlPrediction !== null && !mlPrediction.isFallback && mlPrediction.status === "OK" && mlPrediction.modelType !== "MODEL_UNAVAILABLE";
+  const mlWinProb = mlPrediction?.winProbabilityPct ?? 0;
+  const mlEV = mlPrediction?.expectedValueUsd ?? 0.0;
+  const gate3Passed = hasRealMl && mlPrediction.decision === "TRADE" && mlEV > 0;
 
   // Gate 4: Capital Preservation Risk Engine
   const gate4Passed = !adaptiveAi.isHighRisk && adaptiveAi.decision !== "NO_TRADE";
@@ -63,21 +64,23 @@ export function AiEnsembleCard({
       id: "microstructure",
       title: "2. Мікроструктура та CVD (Bybit Tape)",
       passed: gate2Passed,
-      badge: gate2Passed ? "СХВАЛЕНО" : "СУПЕРЕЧНІСТЬ",
-      color: gate2Passed ? "#35F2D0" : "#FF4F9A",
-      detail: microstructure
+      badge: !hasMicrostructure ? "НЕМАЄ ДАНИХ" : gate2Passed ? "СХВАЛЕНО" : "СУПЕРЕЧНІСТЬ",
+      color: !hasMicrostructure ? "#8A82A5" : gate2Passed ? "#35F2D0" : "#FF4F9A",
+      detail: hasMicrostructure
         ? `OBI: ${obi >= 0 ? "+" : ""}${(obi * 100).toFixed(1)}% · CVD: ${cvd >= 0 ? "+" : ""}$${Math.round(cvd).toLocaleString()} · Китів: ${microstructure.tape.whaleTradesCount} блоків (${microstructure.regime.toUpperCase()}).`
-        : `Потік ордерів нейтральний або в межах звичайної дисперсії.`
+        : "Біржовий стакан та потік угод недоступні (UNKNOWN). Немає підтвердження мікроструктури."
     },
     {
       id: "ml",
       title: "3. Квантовий ML-фільтр (CatBoost + FreqAI)",
       passed: gate3Passed,
-      badge: gate3Passed ? "ПОЗИТИВНЕ EV" : "НЕГАТИВНЕ EV",
-      color: gate3Passed ? "#35F2D0" : "#FF4F9A",
-      detail: mlPrediction
+      badge: !hasRealMl ? "НЕДОСТУПНО" : gate3Passed ? "ПОЗИТИВНЕ EV" : "НЕГАТИВНЕ EV",
+      color: !hasRealMl ? "#8A82A5" : gate3Passed ? "#35F2D0" : "#FF4F9A",
+      detail: hasRealMl
         ? `P(TP перед SL) = ${mlWinProb.toFixed(1)}% · Чисте EV: ${mlEV >= 0 ? "+" : ""}$${mlEV.toFixed(2)} (після комісій Bybit 0.11%) [${mlPrediction.modelType}].`
-        : `Калібрована ймовірність успіху: ${mlWinProb}% (EV позитивне).`
+        : mlPrediction?.isFallback
+        ? `ML-модель недоступна (${mlPrediction.rejectionReason || "сервіс офлайн"}). Захисний режим NO_TRADE.`
+        : "Дані ML-моделі відсутні. Фіктивні оцінки заборонено (P0.8)."
     },
     {
       id: "risk",

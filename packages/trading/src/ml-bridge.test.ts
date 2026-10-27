@@ -47,7 +47,10 @@ describe("ML Bridge & Expected Value (EV) Engine", () => {
 
       expect(res.symbol).toBe("BTCUSDT");
       expect(res.winProbabilityPct).toBeGreaterThan(40);
-      expect(res.modelType).toContain("Quantitative");
+      expect(res.modelType).toBe("MODEL_UNAVAILABLE");
+      expect(res.isFallback).toBe(true);
+      expect(res.status).toBe("MODEL_UNAVAILABLE");
+      expect(res.decision).toBe("NO_TRADE");
       expect(typeof res.expectedValueUsd).toBe("number");
     });
 

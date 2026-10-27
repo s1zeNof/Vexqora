@@ -231,22 +231,8 @@ export function SignalChart({
     });
   }, [activeCurrentPrice]);
 
-  // Fallback synthetic candles if API returned empty
-  const rawKlines: Kline[] = klines.length >= 5 ? klines : (() => {
-    const list: Kline[] = [];
-    const base = entry || 100;
-    const now = Date.now();
-    for (let i = 40; i >= 0; i--) {
-      const t = now - i * 15 * 60 * 1000;
-      const variation = Math.sin(i * 0.4) * (base * 0.015);
-      const open = base + variation;
-      const close = open + Math.cos(i * 0.3) * (base * 0.01);
-      const high = Math.max(open, close) + base * 0.005;
-      const low = Math.min(open, close) - base * 0.005;
-      list.push({ time: t, open, high, low, close, volume: 1000 + i * 50 });
-    }
-    return list;
-  })();
+  // Real market klines only — strictly prohibit fabricating synthetic candles (P0.7)
+  const rawKlines: Kline[] = klines;
 
   const isMobile = containerWidth < 640;
 
@@ -1146,6 +1132,43 @@ export function SignalChart({
                 strokeWidth="0.8"
                 opacity="0.85"
               />
+
+              {/* Empty / Loading Market Data Overlay (P0.7) */}
+              {rawKlines.length === 0 && (
+                <g>
+                  <rect
+                    x={Math.max(10, chartRight / 2 - 170)}
+                    y={height / 2 - 40}
+                    width={Math.min(340, chartRight - 20)}
+                    height={80}
+                    rx={8}
+                    fill="rgba(19, 15, 35, 0.92)"
+                    stroke="#2A2145"
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={chartRight / 2}
+                    y={height / 2 - 10}
+                    fill="#F1EEFF"
+                    fontSize={isMobile ? "12" : "13"}
+                    fontWeight="600"
+                    textAnchor="middle"
+                    fontFamily="'Plus Jakarta Sans', sans-serif"
+                  >
+                    Дані свічок очікуються...
+                  </text>
+                  <text
+                    x={chartRight / 2}
+                    y={height / 2 + 14}
+                    fill="#8A82A5"
+                    fontSize={isMobile ? "9.5" : "10.5"}
+                    textAnchor="middle"
+                    fontFamily="'JetBrains Mono', monospace"
+                  >
+                    Завантаження історичних барів {symbol}
+                  </text>
+                </g>
+              )}
 
               {/* Horizontal Grid lines */}
               {[0.14, 0.32, 0.50, 0.68, 0.86].map((ratio) => {

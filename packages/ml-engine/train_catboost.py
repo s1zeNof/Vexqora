@@ -19,15 +19,21 @@ DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "
 def load_candles_from_data_lake(symbol: str = "BTCUSDT") -> List[Dict[str, Any]]:
     file_path = os.path.join(DATA_DIR, f"{symbol.upper()}.json.gz")
     if not os.path.exists(file_path):
-        print(f"⚠️ Data file not found at {file_path}. Creating synthetic calibration dataset.")
-        # Fallback synthetic generator for testing
+        allow_synthetic = os.environ.get("TEST_ONLY") == "1" or os.environ.get("ALLOW_SYNTHETIC") == "1"
+        if not allow_synthetic:
+            raise FileNotFoundError(
+                f"❌ Production model training aborted: Real historical data file not found at '{file_path}'. "
+                "Per Vexqora P0 safety rules, training on unverified synthetic data is strictly prohibited in production. "
+                "To download real market data, run: npm run data:download"
+            )
+        print(f"⚠️ [TEST_ONLY] Data file not found at {file_path}. Using synthetic calibration dataset for test suite.")
         candles = []
         base_price = 65000.0
         for i in range(1500):
             noise = (math.sin(i / 10.0) + (i % 7 - 3) * 0.2) * 200
             p = base_price + noise
             candles.append({
-                "time": 1729000000000 + i * 900000,
+                "timestamp": 1729000000000 + i * 900000,
                 "open": p - 50,
                 "high": p + 120,
                 "low": p - 80,

@@ -57,6 +57,15 @@ export interface MLPredictionRequest {
   accountRiskUsd?: number;
 }
 
+export type MLModelType =
+  | "CatBoostClassifier"
+  | "StatisticalBayesian"
+  | "RULE_HEURISTIC"
+  | "MODEL_UNAVAILABLE"
+  | "INSUFFICIENT_DATA";
+
+export type MLStatus = "OK" | "MODEL_UNAVAILABLE" | "INSUFFICIENT_DATA" | "FALLBACK_RULE";
+
 export interface MLPredictionResponse {
   symbol: string;
   side: "long" | "short";
@@ -65,12 +74,15 @@ export interface MLPredictionResponse {
   riskReward: number;
   decision: "TRADE" | "NO_TRADE";
   rejectionReason?: string | null;
-  modelType: string;
+  modelType: MLModelType;
+  isFallback: boolean;
+  status: MLStatus;
   topFeatures: string[];
 }
 
 /**
- * Queries the local CatBoost Python ML service with automatic mathematical fallback.
+ * Queries the CatBoost Python ML inference service with transparent degraded fallback.
+ * Follows Vexqora P0 safety rules: Never masquerades unverified fallbacks as trained models.
  */
 export async function queryMLModelPrediction(
   req: MLPredictionRequest,
@@ -83,12 +95,16 @@ export async function queryMLModelPrediction(
   const riskUsd = req.accountRiskUsd ?? 100;
   const rewardUsd = riskUsd * riskReward;
 
-  // 1. Attempt fast local Python CatBoost microservice (350ms timeout)
+  const mlServiceUrl = (typeof process !== "undefined" && process.env?.ML_SERVICE_URL)
+    ? process.env.ML_SERVICE_URL.replace(/\/+$/, "")
+    : "http://127.0.0.1:8000";
+
+  // 1. Attempt fast Python CatBoost microservice (400ms timeout)
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 350);
+    const timeout = setTimeout(() => controller.abort(), 400);
 
-    const res = await customFetch("http://127.0.0.1:8000/predict", {
+    const res = await customFetch(`${mlServiceUrl}/predict`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -106,14 +122,26 @@ export async function queryMLModelPrediction(
     clearTimeout(timeout);
 
     if (res.ok) {
-      const json = (await res.json()) as MLPredictionResponse;
-      return json;
+      const json = (await res.json()) as Partial<MLPredictionResponse>;
+      return {
+        symbol: normSymbol,
+        side: req.side,
+        winProbabilityPct: typeof json.winProbabilityPct === "number" ? json.winProbabilityPct : 50.0,
+        expectedValueUsd: typeof json.expectedValueUsd === "number" ? json.expectedValueUsd : 0.0,
+        riskReward: typeof json.riskReward === "number" ? json.riskReward : riskReward,
+        decision: json.decision === "TRADE" ? "TRADE" : "NO_TRADE",
+        rejectionReason: json.rejectionReason ?? null,
+        modelType: "CatBoostClassifier",
+        isFallback: false,
+        status: "OK",
+        topFeatures: Array.isArray(json.topFeatures) ? json.topFeatures : []
+      };
     }
   } catch {
-    // Service offline or timeout -> proceed to calibrated fallback
+    // Service offline or timeout -> proceed to transparent degraded fallback
   }
 
-  // 2. Calibrated Mathematical Quantitative Fallback (Zero external dependencies)
+  // 2. Degraded Rule-Based Mode (explicitly marked as fallback, never pretending to be trained ML)
   const adaptive = calculateAdaptiveConfidence({
     symbol: normSymbol,
     side: req.side,
@@ -129,18 +157,11 @@ export async function queryMLModelPrediction(
     entryPrice: req.entryPrice
   });
 
-  let decision: "TRADE" | "NO_TRADE" = "TRADE";
-  let rejectionReason: string | null = null;
+  const decision: "TRADE" | "NO_TRADE" = "NO_TRADE";
+  let rejectionReason: string | null = "ML-сервіс недоступний (сервіс не відповідає на localhost:8000). Захисний режим NO_TRADE.";
 
-  if (winProb < 52) {
-    decision = "NO_TRADE";
-    rejectionReason = `Квантова ML-модель оцінила ймовірність у ${winProb}%, що нижче порогу рентабельності (52%)`;
-  } else if (!ev.isPositiveEv) {
-    decision = "NO_TRADE";
-    rejectionReason = `Математичне сподівання після біржових комісій від'ємне (EV: $${ev.evUsd})`;
-  } else if (adaptive.decision === "NO_TRADE") {
-    decision = "NO_TRADE";
-    rejectionReason = adaptive.rejectionReason ?? "Ризик-фільтр відхилив вхід";
+  if (adaptive.decision === "NO_TRADE") {
+    rejectionReason = adaptive.rejectionReason ?? rejectionReason;
   }
 
   return {
@@ -151,7 +172,9 @@ export async function queryMLModelPrediction(
     riskReward,
     decision,
     rejectionReason,
-    modelType: "AdaptiveQuantitativeBayesian",
-    topFeatures: ["adaptive_wick_penalty", "overextension_factor", "risk_reward_skew"]
+    modelType: "MODEL_UNAVAILABLE",
+    isFallback: true,
+    status: "MODEL_UNAVAILABLE",
+    topFeatures: []
   };
 }
