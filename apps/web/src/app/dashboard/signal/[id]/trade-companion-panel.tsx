@@ -8,6 +8,8 @@ import {
   getLatestTradeAiMessages
 } from "./ai-companion-actions";
 import type { Kline } from "@crypto-bot/shared";
+import { PixelDroneMascot, usePixelDroneMachine } from "../../../../components/pixel-drone-mascot";
+import { QuickQuestionsModal } from "./quick-questions-modal";
 
 interface TradeCompanionPanelProps {
   initialSession: TradeAiSessionData | null;
@@ -213,6 +215,8 @@ export function TradeCompanionPanel({
   const prevMessagesLengthRef = useRef(messages.length);
   const isSendingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const droneMachine = usePixelDroneMachine();
+  const [isQuickQuestionsOpen, setIsQuickQuestionsOpen] = useState(false);
 
   // Sync session if parent updates initialSession
   useEffect(() => {
@@ -303,6 +307,13 @@ export function TradeCompanionPanel({
     }
   }, [activeRun, scrollToBottom]);
 
+  // Auto-scroll to show drone mascot when animation starts
+  useEffect(() => {
+    if (droneMachine.isAnimating && !isUserScrolledUp.current) {
+      scrollToBottom(false);
+    }
+  }, [droneMachine.isAnimating, droneMachine.phase, scrollToBottom]);
+
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
@@ -384,6 +395,32 @@ export function TradeCompanionPanel({
     // Force scroll internal container to bottom on user send
     scrollToBottom(true);
 
+    // P0.1 / P0.2 / Drone: Start synchronized Pixel Drone animation cycle with buffered response reveal
+    droneMachine.startCycle(clientMessageId, (revealedPayload) => {
+      isSendingRef.current = false;
+      inputRef.current?.focus();
+
+      if (
+        !revealedPayload ||
+        (typeof revealedPayload === "object" && "error" in (revealedPayload as Record<string, unknown>))
+      ) {
+        setMessages((prev) =>
+          prev.map((m) => (m.clientMessageId === clientMessageId ? { ...m, status: "failed" } : m))
+        );
+        return;
+      }
+
+      const completedMsg = revealedPayload as TradeAiMessageItem;
+      setMessages((prev) => {
+        const reconciled = prev.map((m) =>
+          m.clientMessageId === clientMessageId ? { ...m, status: "sent" as const } : m
+        );
+        if (reconciled.some((m) => m.id === completedMsg.id)) return reconciled;
+        return [...reconciled, completedMsg];
+      });
+      scrollToBottom(true);
+    });
+
     startTransition(async () => {
       let activeSession = session;
 
@@ -413,10 +450,7 @@ export function TradeCompanionPanel({
       }
 
       if (!activeSession?.id) {
-        isSendingRef.current = false;
-        setMessages((prev) =>
-          prev.map((m) => (m.clientMessageId === clientMessageId ? { ...m, status: "failed" } : m))
-        );
+        droneMachine.finishResponse({ error: true });
         return;
       }
 
@@ -477,20 +511,11 @@ export function TradeCompanionPanel({
                 } else if (event.type === "completed") {
                   const completedMsg = event.message as TradeAiMessageItem;
                   setActiveRun(null);
-
-                  // Replace optimistic user message & append server response
-                  setMessages((prev) => {
-                    const reconciled = prev.map((m) =>
-                      m.clientMessageId === clientMessageId ? { ...m, status: "sent" as const } : m
-                    );
-                    if (reconciled.some((m) => m.id === completedMsg.id)) return reconciled;
-                    return [...reconciled, completedMsg];
-                  });
+                  // Buffer response in drone machine; will reveal after exiting animation completes
+                  droneMachine.finishResponse(completedMsg);
                 } else if (event.type === "failed") {
                   setActiveRun(null);
-                  setMessages((prev) =>
-                    prev.map((m) => (m.clientMessageId === clientMessageId ? { ...m, status: "failed" } : m))
-                  );
+                  droneMachine.finishResponse({ error: true });
                 }
               } catch {
                 // stream json parse error
@@ -498,9 +523,6 @@ export function TradeCompanionPanel({
             }
           }
 
-          isSendingRef.current = false;
-          // Retain focus in composer without jumping
-          inputRef.current?.focus();
           return;
         }
       } catch {
@@ -513,32 +535,16 @@ export function TradeCompanionPanel({
         setActiveRun(null);
 
         if (res) {
-          setMessages((prev) => {
-            const reconciled = prev.map((m) =>
-              m.clientMessageId === clientMessageId ? { ...m, status: "sent" as const } : m
-            );
-            if (reconciled.some((m) => m.id === res.id)) return reconciled;
-            return [...reconciled, res];
-          });
+          droneMachine.finishResponse(res);
+        } else {
+          droneMachine.finishResponse({ error: true });
         }
       } catch {
         setActiveRun(null);
-        setMessages((prev) =>
-          prev.map((m) => (m.clientMessageId === clientMessageId ? { ...m, status: "failed" } : m))
-        );
-      } finally {
-        isSendingRef.current = false;
-        inputRef.current?.focus();
+        droneMachine.finishResponse({ error: true });
       }
     });
   };
-
-  const quickPills = [
-    { label: "📐 Структура тренду", prompt: "Яка поточна структура тренду на 15M/1H?" },
-    { label: "🛡️ Оцінка ризику", prompt: "Який поточний рівень ризику для мого стопу?" },
-    { label: "🌊 Потік CVD та дельта", prompt: "Чи є тиск великих ордерів у CVD стакані?" },
-    { label: "📊 Сценарій закриття", prompt: "Чи варто зараз закрити 50% або вийти в безубиток?" }
-  ];
 
   return (
     <div
@@ -556,12 +562,22 @@ export function TradeCompanionPanel({
         position: "relative"
       }}
     >
-      {/* Header: Clean, quiet, Claude-inspired restraint */}
+      {/* Quick Questions Adaptive Modal */}
+      <QuickQuestionsModal
+        isOpen={isQuickQuestionsOpen}
+        onClose={() => setIsQuickQuestionsOpen(false)}
+        onSelectQuestion={(selectedPrompt) => {
+          handleSend(selectedPrompt);
+        }}
+        disabled={isPending || activeRun !== null || droneMachine.isAnimating}
+      />
+
+      {/* Header: Clean, quiet, Claude / OpenClaw inspired restraint */}
       <div
         style={{
-          padding: "12px 16px",
-          background: "#100D1C",
-          borderBottom: "1px solid rgba(255, 255, 255, 0.07)",
+          padding: "10px 14px",
+          background: "#0E0B1A",
+          borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -570,17 +586,67 @@ export function TradeCompanionPanel({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <img
+            src="/animations/vexqora/vexqora-logo-static.svg"
+            alt="Vexqora Pixel Drone"
+            style={{ width: "24px", height: "20px", objectFit: "contain", flexShrink: 0 }}
+          />
           <div>
-            <div style={{ font: "600 13.5px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>
-              Vexqora AI
+            <div
+              style={{
+                font: "600 13px 'Plus Jakarta Sans', sans-serif",
+                color: "#F1EEFF",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px"
+              }}
+            >
+              <span>Vexqora AI</span>
+              <span
+                style={{
+                  font: "600 9.5px 'JetBrains Mono', monospace",
+                  background: "rgba(124, 77, 255, 0.15)",
+                  color: "#B9A2FF",
+                  padding: "1px 5px",
+                  borderRadius: "4px",
+                  border: "1px solid rgba(124, 77, 255, 0.25)"
+                }}
+              >
+                Pixel Drone
+              </span>
             </div>
-            <div style={{ font: "500 11px 'JetBrains Mono', monospace", color: "#8A82A5" }}>
+            <div style={{ font: "500 10.5px 'JetBrains Mono', monospace", color: "#8A82A5" }}>
               {symbol} · {side.toUpperCase()} @ ${entryPrice}
             </div>
           </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {/* Quick Questions Trigger in Header */}
+          <button
+            type="button"
+            onClick={() => setIsQuickQuestionsOpen(true)}
+            disabled={isPending || activeRun !== null || droneMachine.isAnimating}
+            title="Відкрити 15 готових аналітичних сценаріїв"
+            style={{
+              background: "#161228",
+              color: "#35F2D0",
+              border: "1px solid rgba(53, 242, 208, 0.3)",
+              padding: "3px 9px",
+              borderRadius: "5px",
+              fontSize: "11px",
+              fontWeight: 600,
+              cursor: isPending || activeRun !== null || droneMachine.isAnimating ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              transition: "all 0.15s ease"
+            }}
+          >
+            <span>⚡</span>
+            <span>Запитання (15)</span>
+          </button>
+
           <span
             style={{
               width: "6px",
@@ -862,29 +928,110 @@ export function TradeCompanionPanel({
           </div>
         )}
 
-        {isPending && !activeRun && (
+        {/* Vexqora Pixel Drone Mascot State Machine */}
+        {droneMachine.isAnimating && (
           <div
             style={{
               alignSelf: "flex-start",
+              width: "100%",
+              maxWidth: "92%",
+              background: "#0D0A18",
+              border: "1px solid rgba(124, 77, 255, 0.2)",
+              borderRadius: "12px",
+              padding: "14px 18px",
               display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              padding: "6px 2px",
-              color: "#8A82A5",
-              fontSize: "12px"
+              flexDirection: "column",
+              gap: "10px",
+              boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)"
             }}
           >
-            <span>Аналізую біржові дані Bybit</span>
-            <span
-              style={{
-                display: "inline-flex",
-                gap: "2px",
-                fontSize: "14px",
-                letterSpacing: "1px"
-              }}
-            >
-              ···
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <PixelDroneMascot
+                phase={droneMachine.phase}
+                requestId={droneMachine.activeRequestId}
+                width={105}
+                height={88}
+                showStatusText={false}
+              />
+              <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                <div
+                  style={{
+                    font: "600 13px 'Plus Jakarta Sans', sans-serif",
+                    color: "#F1EEFF",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px"
+                  }}
+                >
+                  <span>Vexqora AI</span>
+                  <span
+                    style={{
+                      font: "600 9.5px 'JetBrains Mono', monospace",
+                      color: "#35F2D0",
+                      background: "rgba(53, 242, 208, 0.12)",
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      border: "1px solid rgba(53, 242, 208, 0.25)"
+                    }}
+                  >
+                    {droneMachine.phase === "entering"
+                      ? "Формування дрона"
+                      : droneMachine.phase === "thinking"
+                      ? "ШІ аналіз"
+                      : "Фіналізація"}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    font: "400 11.5px 'JetBrains Mono', monospace",
+                    color: "#A59CC4"
+                  }}
+                >
+                  {droneMachine.phase === "entering" && "Морфінг логотипа у дрон (2.8с)…"}
+                  {droneMachine.phase === "thinking" && "Аналіз структури 15M/4H та книги ордерів Bybit…"}
+                  {droneMachine.phase === "exiting" && "Повернення дрона у логотип (2.2с)…"}
+                </div>
+              </div>
+            </div>
+
+            {/* Streamed Execution Stages (if any) */}
+            {activeRun && activeRun.steps.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "5px",
+                  paddingTop: "8px",
+                  borderTop: "1px solid rgba(255, 255, 255, 0.05)"
+                }}
+              >
+                {activeRun.steps.map((s, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "11px" }}>
+                    <span
+                      style={{
+                        color: s.status === "completed" ? "#35F2D0" : "#B285FF",
+                        fontWeight: 600,
+                        width: "12px"
+                      }}
+                    >
+                      {s.status === "completed" ? "✓" : "⚡"}
+                    </span>
+                    <span style={{ color: s.status === "active" ? "#F1EEFF" : "#A59CC4" }}>{s.label}</span>
+                    {s.details && (
+                      <span
+                        style={{
+                          color: "#80779E",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: "10.5px"
+                        }}
+                      >
+                        ({s.details})
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -896,7 +1043,7 @@ export function TradeCompanionPanel({
           onClick={() => scrollToBottom(true)}
           style={{
             position: "absolute",
-            bottom: messages.length <= 2 ? "120px" : "75px",
+            bottom: "85px",
             right: "20px",
             zIndex: 10,
             background: "#1E1838",
@@ -918,100 +1065,121 @@ export function TradeCompanionPanel({
         </button>
       )}
 
-      {/* Quick Action Suggestion Pills (Shown only in fresh/empty conversations) */}
-      {messages.length <= 2 && (
-        <div
-          style={{
-            padding: "8px 14px",
-            display: "flex",
-            gap: "6px",
-            overflowX: "auto",
-            background: "#0E0B1A",
-            borderTop: "1px solid rgba(255, 255, 255, 0.05)"
-          }}
-        >
-          {quickPills.map((p, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => handleSend(p.prompt)}
-              disabled={isPending || activeRun !== null}
-              style={{
-                whiteSpace: "nowrap",
-                padding: "4px 9px",
-                borderRadius: "5px",
-                background: "#151222",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                color: "#A59CC4",
-                fontSize: "11px",
-                fontWeight: 500,
-                cursor: isPending || activeRun !== null ? "not-allowed" : "pointer",
-                transition: "all 0.15s"
-              }}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Multiline Composer: Pinned at bottom, single Enter sends, Shift+Enter adds newline */}
+      {/* Multiline Composer: Anthropic Claude / OpenClaw Minimalist Styling */}
       <div
         style={{
           padding: "10px 14px",
-          background: "#100D1C",
+          background: "#0D0B18",
           borderTop: "1px solid rgba(255, 255, 255, 0.07)",
           display: "flex",
-          gap: "8px",
-          alignItems: "flex-end"
+          flexDirection: "column",
+          gap: "8px"
         }}
       >
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          rows={2}
-          placeholder={`Запитайте AI про ${symbol}... (Enter — надіслати, Shift+Enter — новий рядок)`}
-          disabled={isPending || activeRun !== null}
+        {/* Helper Toolbar: Single Quick Questions Trigger */}
+        <div
           style={{
-            flex: 1,
-            padding: "8px 12px",
-            background: "#141120",
-            border: "1px solid rgba(255, 255, 255, 0.09)",
-            borderRadius: "6px",
-            color: "#F1EEFF",
-            fontSize: "12.5px",
-            outline: "none",
-            resize: "none",
-            fontFamily: "inherit",
-            lineHeight: "1.4"
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => handleSend()}
-          disabled={!input.trim() || isPending || activeRun !== null}
-          style={{
-            padding: "8px 14px",
-            height: "36px",
-            background: input.trim() && !isPending && !activeRun ? "#7C4DFF" : "#1F1A2E",
-            border: "none",
-            borderRadius: "6px",
-            color: input.trim() && !isPending && !activeRun ? "#FFFFFF" : "#5F5774",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: input.trim() && !isPending && !activeRun ? "pointer" : "not-allowed",
-            transition: "all 0.15s"
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: "11px"
           }}
         >
-          Надіслати
-        </button>
+          <button
+            type="button"
+            onClick={() => setIsQuickQuestionsOpen((v) => !v)}
+            disabled={isPending || activeRun !== null || droneMachine.isAnimating}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "5px",
+              padding: "4px 10px",
+              background: isQuickQuestionsOpen ? "rgba(124, 77, 255, 0.2)" : "#141024",
+              border: `1px solid ${isQuickQuestionsOpen ? "#7C4DFF" : "rgba(124, 77, 255, 0.25)"}`,
+              borderRadius: "6px",
+              color: isQuickQuestionsOpen ? "#35F2D0" : "#B9A2FF",
+              fontWeight: 600,
+              cursor: isPending || activeRun !== null || droneMachine.isAnimating ? "not-allowed" : "pointer",
+              transition: "all 0.15s ease"
+            }}
+          >
+            <span>⚡</span>
+            <span>Готові запитання (15)</span>
+            <span style={{ fontSize: "9px" }}>▾</span>
+          </button>
+
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              color: "#6B6282",
+              fontSize: "10.5px"
+            }}
+          >
+            Enter ↵ надіслати · Shift+Enter новий рядок
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            rows={2}
+            placeholder={`Запитайте AI про ${symbol}...`}
+            disabled={isPending || activeRun !== null || droneMachine.isAnimating}
+            style={{
+              flex: 1,
+              padding: "9px 12px",
+              background: "#130F22",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "8px",
+              color: "#F1EEFF",
+              fontSize: "12.5px",
+              outline: "none",
+              resize: "none",
+              fontFamily: "inherit",
+              lineHeight: "1.4"
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => handleSend()}
+            disabled={!input.trim() || isPending || activeRun !== null || droneMachine.isAnimating}
+            style={{
+              padding: "8px 16px",
+              height: "38px",
+              background:
+                input.trim() && !isPending && !activeRun && !droneMachine.isAnimating
+                  ? "linear-gradient(135deg, #7C4DFF 0%, #B24BFF 100%)"
+                  : "#1A152B",
+              border: "none",
+              borderRadius: "8px",
+              color:
+                input.trim() && !isPending && !activeRun && !droneMachine.isAnimating
+                  ? "#FFFFFF"
+                  : "#5A5270",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor:
+                input.trim() && !isPending && !activeRun && !droneMachine.isAnimating
+                  ? "pointer"
+                  : "not-allowed",
+              transition: "all 0.15s ease",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px"
+            }}
+          >
+            <span>Надіслати</span>
+            <span>↑</span>
+          </button>
+        </div>
       </div>
     </div>
   );
