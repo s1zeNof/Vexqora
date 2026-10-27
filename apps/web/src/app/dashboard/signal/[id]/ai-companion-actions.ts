@@ -398,7 +398,7 @@ export async function getTradeAiSession(params: {
   // Retrieve the latest 50 messages in chronological order (P1.8 & P0.2)
   const { data: rawMessages } = await supabase
     .from("trade_ai_messages")
-    .select("id, client_message_id, author_kind, agent_id, kind, content, structured_payload, created_at")
+    .select("id, author_kind, agent_id, kind, content, structured_payload, created_at")
     .eq("session_id", existing.id)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -406,7 +406,7 @@ export async function getTradeAiSession(params: {
   const parsedMessages = z.array(messageSchema).safeParse(rawMessages).data ?? [];
   const messages: TradeAiMessageItem[] = parsedMessages.slice().reverse().map((m) => ({
     id: m.id,
-    clientMessageId: m.client_message_id ?? null,
+    clientMessageId: (m.structured_payload as { clientMessageId?: string | null })?.clientMessageId ?? null,
     authorKind: m.author_kind,
     agentId: m.agent_id ?? null,
     kind: m.kind,
@@ -739,7 +739,7 @@ export async function getLatestTradeAiMessages(
 
   let query = supabase
     .from("trade_ai_messages")
-    .select("id, client_message_id, author_kind, agent_id, kind, content, structured_payload, created_at")
+    .select("id, author_kind, agent_id, kind, content, structured_payload, created_at")
     .eq("session_id", sessionId);
 
   // Delta polling: messages created after sinceIso
@@ -753,7 +753,7 @@ export async function getLatestTradeAiMessages(
     const parsedMessages = z.array(messageSchema).safeParse(rawMessages).data ?? [];
     return parsedMessages.map((m) => ({
       id: m.id,
-      clientMessageId: m.client_message_id ?? null,
+      clientMessageId: (m.structured_payload as { clientMessageId?: string | null })?.clientMessageId ?? null,
       authorKind: m.author_kind,
       agentId: m.agent_id ?? null,
       kind: m.kind,
@@ -776,7 +776,7 @@ export async function getLatestTradeAiMessages(
 
   return reversed.map((m) => ({
     id: m.id,
-    clientMessageId: m.client_message_id ?? null,
+    clientMessageId: (m.structured_payload as { clientMessageId?: string | null })?.clientMessageId ?? null,
     authorKind: m.author_kind,
     agentId: m.agent_id ?? null,
     kind: m.kind,
@@ -894,7 +894,6 @@ export async function sendTradeAiMessage(
   // 3. Insert user message with clientMessageId (P0.2)
   await supabase.from("trade_ai_messages").insert({
     session_id: sessionId,
-    client_message_id: clientMessageId ?? null,
     author_kind: "user",
     kind: "text",
     content: userPrompt.trim(),
@@ -1110,7 +1109,7 @@ ${pnlText ? `${pnlText}\n` : ""}
         dataSources: marketCtx.dataSources
       }
     })
-    .select("id, client_message_id, author_kind, agent_id, kind, content, structured_payload, created_at")
+    .select("id, author_kind, agent_id, kind, content, structured_payload, created_at")
     .single();
 
   // 7. Insert ai_agent_runs telemetry with real usage (P1.9)
@@ -1154,7 +1153,7 @@ ${pnlText ? `${pnlText}\n` : ""}
 
   return {
     id: parsedMsg.data.id,
-    clientMessageId: parsedMsg.data.client_message_id ?? null,
+    clientMessageId: (parsedMsg.data.structured_payload as { clientMessageId?: string | null })?.clientMessageId ?? null,
     authorKind: parsedMsg.data.author_kind ?? "lead",
     agentId: parsedMsg.data.agent_id ?? null,
     kind: parsedMsg.data.kind ?? "analysis",

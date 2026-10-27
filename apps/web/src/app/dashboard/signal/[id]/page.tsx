@@ -8,7 +8,7 @@ import {
   buildMarketContextSnapshot,
   evaluateNewsRiskForTrade
 } from "@crypto-bot/trading";
-import { getTradeAiSession } from "./ai-companion-actions";
+import { getTradeAiSession, ensureTradeAiSession } from "./ai-companion-actions";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
@@ -367,11 +367,23 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
 
   const newsRisk = evaluateNewsRiskForTrade(formattedSymbol, [], "UNAVAILABLE");
 
-  const aiSession = await getTradeAiSession({
+  let aiSession = await getTradeAiSession({
     symbol: formattedSymbol,
     tradeId: activePosition?.id ?? null,
     signalId: targetSignalId
   }).catch(() => null);
+
+  if (!aiSession && (activePosition || targetSignalId)) {
+    aiSession = await ensureTradeAiSession({
+      symbol: formattedSymbol,
+      tradeId: activePosition?.id ?? null,
+      signalId: targetSignalId,
+      side,
+      entryPrice: entry,
+      stopLoss,
+      tp1
+    }).catch(() => null);
+  }
 
   const isPaperTrading = account?.exchange === "paper" || account?.environment === "demo";
   const tradingModeLabel = isPaperTrading ? "Paper Trading (Віртуальний рахунок)" : "Bybit Live (Реальний рахунок)";

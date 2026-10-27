@@ -185,7 +185,6 @@ export async function POST(req: NextRequest) {
         // 3. Insert optimistic user message into DB with clientMessageId
         await supabase.from("trade_ai_messages").insert({
           session_id: sessionId,
-          client_message_id: clientMessageId ?? null,
           author_kind: "user",
           kind: "text",
           content: userPrompt.trim(),
@@ -520,7 +519,7 @@ ${pnlText ? `${pnlText}\n` : ""}
               dataSources: marketCtx.dataSources
             }
           })
-          .select("id, client_message_id, author_kind, agent_id, kind, content, structured_payload, created_at")
+          .select("id, author_kind, agent_id, kind, content, structured_payload, created_at")
           .single();
 
         // 10. Telemetry logging
@@ -538,7 +537,7 @@ ${pnlText ? `${pnlText}\n` : ""}
 
         const createdItem: TradeAiMessageItem = {
           id: (rawCreatedMsg as { id?: string })?.id ?? `srv_${Date.now()}`,
-          clientMessageId: (rawCreatedMsg as { client_message_id?: string | null })?.client_message_id ?? null,
+          clientMessageId: clientMessageId ?? null,
           authorKind: "lead",
           agentId: "lead_trade_agent",
           kind: "analysis",
