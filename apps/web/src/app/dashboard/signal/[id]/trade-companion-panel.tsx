@@ -209,6 +209,8 @@ export function TradeCompanionPanel({
   // P0.1: Internal container scroll ref — NEVER call scrollIntoView which affects window.scrollY
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const isUserScrolledUp = useRef(false);
+  const [showScrollBottomPill, setShowScrollBottomPill] = useState(false);
+  const prevMessagesLengthRef = useRef(messages.length);
   const isSendingRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -260,7 +262,9 @@ export function TradeCompanionPanel({
     const el = chatScrollContainerRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    isUserScrolledUp.current = distanceFromBottom > 100;
+    const isUp = distanceFromBottom > 30;
+    isUserScrolledUp.current = isUp;
+    setShowScrollBottomPill(isUp);
   }, []);
 
   const scrollToBottom = useCallback((force = false) => {
@@ -268,12 +272,36 @@ export function TradeCompanionPanel({
     if (!el) return;
     if (force || !isUserScrolledUp.current) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      isUserScrolledUp.current = false;
+      setShowScrollBottomPill(false);
     }
   }, []);
 
+  // Proactive scroll management: only scroll when new messages arrive and user is not reading history
   useEffect(() => {
-    scrollToBottom(false);
-  }, [messages, activeRun, scrollToBottom]);
+    if (messages.length > prevMessagesLengthRef.current) {
+      if (!isUserScrolledUp.current) {
+        scrollToBottom(false);
+      }
+      prevMessagesLengthRef.current = messages.length;
+    } else if (messages.length < prevMessagesLengthRef.current) {
+      prevMessagesLengthRef.current = messages.length;
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // Initial scroll to bottom once session messages are loaded on mount
+  useEffect(() => {
+    if (messages.length > 0 && prevMessagesLengthRef.current === 0) {
+      scrollToBottom(true);
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // Auto-scroll on active run progress updates only if user is at bottom
+  useEffect(() => {
+    if (activeRun && !isUserScrolledUp.current) {
+      scrollToBottom(false);
+    }
+  }, [activeRun, scrollToBottom]);
 
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -351,6 +379,8 @@ export function TradeCompanionPanel({
     };
 
     setMessages((prev) => [...prev, optimisticUserMsg]);
+    isUserScrolledUp.current = false;
+    setShowScrollBottomPill(false);
     // Force scroll internal container to bottom on user send
     scrollToBottom(true);
 
@@ -516,12 +546,14 @@ export function TradeCompanionPanel({
         display: "flex",
         flexDirection: "column",
         height: "100%",
+        maxHeight: "100%",
+        minHeight: 0,
         width: "100%",
-        minHeight: "520px",
         background: "#0C0A14",
         border: "1px solid rgba(255, 255, 255, 0.08)",
         borderRadius: "10px",
-        overflow: "hidden"
+        overflow: "hidden",
+        position: "relative"
       }}
     >
       {/* Header: Clean, quiet, Claude-inspired restraint */}
@@ -587,9 +619,13 @@ export function TradeCompanionPanel({
       <div
         ref={chatScrollContainerRef}
         onScroll={handleContainerScroll}
+        className="companion-chat-scroll"
         style={{
-          flex: 1,
+          flex: "1 1 0%",
+          minHeight: 0,
+          maxHeight: "100%",
           overflowY: "auto",
+          overscrollBehavior: "contain",
           padding: "18px 16px",
           display: "flex",
           flexDirection: "column",
@@ -852,6 +888,35 @@ export function TradeCompanionPanel({
           </div>
         )}
       </div>
+
+      {/* Jump to Bottom Pill (Appears when scrolled up to read older messages) */}
+      {showScrollBottomPill && (
+        <button
+          type="button"
+          onClick={() => scrollToBottom(true)}
+          style={{
+            position: "absolute",
+            bottom: messages.length <= 2 ? "120px" : "75px",
+            right: "20px",
+            zIndex: 10,
+            background: "#1E1838",
+            color: "#B28DFF",
+            border: "1px solid #7C4DFF66",
+            borderRadius: "20px",
+            padding: "5px 12px",
+            fontSize: "11px",
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: "5px",
+            cursor: "pointer",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
+            transition: "all 0.15s ease"
+          }}
+        >
+          <span>↓</span> До нових повідомлень
+        </button>
+      )}
 
       {/* Quick Action Suggestion Pills (Shown only in fresh/empty conversations) */}
       {messages.length <= 2 && (

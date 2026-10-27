@@ -543,9 +543,43 @@ export async function evaluateMarketEvents(supabase: SupabaseClient): Promise<vo
         }
       }
 
-      // 9. Periodic Grounded Trade Briefing (every 30m when active and quiet)
+      // 9. Proactive Profit Milestone Alerts for Active Trades (+2%, +4%, +6%, +10%)
       if (session.trades && session.trades.status === "active" && entry > 0) {
-        const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
+        const isLong = side === "long";
+        const direction = isLong ? 1 : -1;
+        const leverage = Number(session.trades.leverage ?? 5);
+        const pnlPct = ((currentPrice - entry) / entry) * 100 * direction * leverage;
+
+        if (pnlPct >= 2.0) {
+          const tier = pnlPct >= 10 ? 10 : pnlPct >= 6 ? 6 : pnlPct >= 4 ? 4 : 2;
+          const tierBucket = Math.floor(Date.now() / (20 * 60 * 1000));
+          const eventId = `profit_tier_${session.id}_${tier}_${tierBucket}`;
+
+          const qty = Number(session.trades.qty ?? 0);
+          const pnlUsdt = qty > 0 ? (currentPrice - entry) * qty * direction : 0;
+          const pnlUsdtText = pnlUsdt > 0 ? ` (+${pnlUsdt.toFixed(2)} USDT)` : "";
+
+          const profitContent = `🚀 **Прогрес прибутку (${symbol}):**\n\n` +
+            `• Поточний PnL позиції: **+${pnlPct.toFixed(2)}%**${pnlUsdtText} з плечем ${leverage}x.\n` +
+            `• Поточна ціна: **$${currentPrice}** (ціна входу: $${entry}).\n` +
+            `• **Тактична рекомендація AI:** Розгляньте часткову фіксацію 50% об'єму (кнопка [50%] у терміналі) або перенесення Stop Loss на рівень входу (Breakeven) для захисту накопиченого профіту.\n` +
+            `*Ринковий імпульс сприятливий, супровід триває.*`;
+
+          await recordSessionEvent(supabase, session.id, eventId, profitContent, {
+            eventType: "profit_milestone",
+            tier,
+            pnlPct,
+            pnlUsdt,
+            currentPrice,
+            entryPrice: entry,
+            severity: "info"
+          });
+        }
+      }
+
+      // 10. Periodic Grounded Trade Briefing (every 10m when active and quiet)
+      if (session.trades && session.trades.status === "active" && entry > 0) {
+        const bucket = Math.floor(Date.now() / (10 * 60 * 1000));
         const eventId = `pulse_briefing_${session.id}_${bucket}`;
 
         const isLong = side === "long";
@@ -559,7 +593,7 @@ export async function evaluateMarketEvents(supabase: SupabaseClient): Promise<vo
           .from("trade_ai_messages")
           .select("created_at")
           .eq("session_id", session.id)
-          .gte("created_at", new Date(Date.now() - 25 * 60 * 1000).toISOString())
+          .gte("created_at", new Date(Date.now() - 8 * 60 * 1000).toISOString())
           .limit(1);
 
         if (!recentMsgs || recentMsgs.length === 0) {
