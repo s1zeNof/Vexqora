@@ -1,7 +1,8 @@
 # Vexqora Trade — Master AI Memory & Handoff Guide
 
 > **Target Audience**: AI Agents (Antigravity, Claude, ChatGPT, Cursor, Copilot) & Engineers continuing development on a new environment (e.g. laptop).
-> **Last Updated**: 2026-10-23 (Atomic Paper Settlement & Exit Provenance)
+> **Last Updated**: 2026-10-27 (v0.2.0 Release — AI Ensemble, ML Engine, Mobile TradingView & Bybit Execution)
+> **Current Version**: v0.2.0 (Release) -> v0.3.0 (Development)
 > **Repository**: `https://github.com/s1zeNof/Vexqora`
 > **Active Production URL**: `https://vexqora.vercel.app/`
 
@@ -238,6 +239,16 @@ Expected baseline:
 - [x] Custom Paper balance add/remove controls and a dedicated Profile navigation entry.
 - [x] Canonical Immutable Signal Snapshot Architecture (origin_key, signals, /dashboard/signal/[id]) eliminating discrepancy between feed cards and detail terminal.
 - [x] Machine Learning Signal Outcome Monitor (signal-outcome.ts, signal-monitor.ts, signal_outcomes, signal_learning_events) automatically tracking MFE, MAE, TP1/2/3 hits and SL failure reasons 24/7 even without user execution.
+- [x] Real-time Market Data Lake with uv bootstrap & historical archive downloaders (`packages/data-lake`).
+- [x] Python ML Engine with CatBoost classifier, triple-barrier labeling, FreqAI-style 48+ features, and TypeScript ML bridge (`packages/ml-engine`, `ml-bridge.ts`).
+- [x] Event-driven backtesting engine with realistic maker/taker fees, slippage simulation, and trailing stops (`backtester.ts`).
+- [x] 4-Gate Institutional AI Decision Ensemble combining SMC, OrderFlow CVD/Imbalance, Microstructure Sweeps, and ML predictions (`ai-copilot.ts`).
+- [x] Mobile TradingView-grade interactive chart with multi-touch pinch-to-zoom, touch-panning, crosshair, and quick timeframes (`signal-chart.tsx`).
+- [x] Real-time 916-pair universe scanner modal with animated progress bar, remaining time estimate, and instant signals revalidation.
+- [x] Bybit exchange-hosted trailing stop fix (`activePrice = TP1`) preventing premature market-close on entry.
+- [x] Altcoin Stop Loss widening (min 2.2% + 0.5x ATR, 25-candle swing detection) eliminating 15m noise wick shakeouts.
+- [x] Breached signal capital protection (`⛔ Сетап інвалідовано`) preventing entry into invalidated setups.
+- [x] Universe market scanner filtering out mega-caps (BTCUSDT, ETHUSDT) for retail margin optimization.
 
 ### Immediate Next Tasks (Stage 6):
 1. **External Integrations**:
