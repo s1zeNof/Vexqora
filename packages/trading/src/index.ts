@@ -14,3 +14,4 @@ export * from "./backtester";
 export * from "./feature-registry";
 export * from "./market-context";
 export * from "./news";
+export * from "./agent-runtime";

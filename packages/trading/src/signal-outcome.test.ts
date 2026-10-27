@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateSignalOutcome, type SignalOutcomeSnapshot } from "./signal-outcome";
+import {
+  evaluateSignalOutcome,
+  classifyTradeLossRootCause,
+  type SignalOutcomeSnapshot
+} from "./signal-outcome";
 
 const base: SignalOutcomeSnapshot = {
   side: "long", entryPrice: 100, stopLoss: 95, tp1: 109, tp2: 113, tp3: 118,
@@ -30,5 +34,43 @@ describe("signal outcome evaluator", () => {
     expect(result.status).toBe("expired");
     expect(result.outcome).toBe("no_trigger");
     expect(result.failureReason).toBe("expired_without_tp1");
+  });
+
+  it("classifies loss root cause correctly (Phase P5 Continuous Learning)", () => {
+    // Manual intervention
+    expect(classifyTradeLossRootCause({
+      side: "long", entryPrice: 100, exitPrice: 98, stopLoss: 95,
+      maxAdversePct: 2, maxFavorablePct: 0.5, exitReason: "manual"
+    })).toBe("manual_intervention");
+
+    // High impact news
+    expect(classifyTradeLossRootCause({
+      side: "long", entryPrice: 100, exitPrice: 94, stopLoss: 95,
+      maxAdversePct: 6, maxFavorablePct: 0.3, hasActiveCriticalNews: true
+    })).toBe("high_impact_news");
+
+    // Tight Stop Loss
+    expect(classifyTradeLossRootCause({
+      side: "long", entryPrice: 100, exitPrice: 99.4, stopLoss: 99.5, // 0.5% stop distance
+      maxAdversePct: 0.6, maxFavorablePct: 0.2
+    })).toBe("sl_tight");
+
+    // Overextension
+    expect(classifyTradeLossRootCause({
+      side: "long", entryPrice: 100, exitPrice: 94, stopLoss: 95,
+      maxAdversePct: 6, maxFavorablePct: 0.1, entry24hChangePct: 11.5
+    })).toBe("overextension");
+
+    // Liquidity sweep
+    expect(classifyTradeLossRootCause({
+      side: "long", entryPrice: 100, exitPrice: 94, stopLoss: 95,
+      maxAdversePct: 6, maxFavorablePct: 1.2
+    })).toBe("liquidity_sweep");
+
+    // Wrong direction
+    expect(classifyTradeLossRootCause({
+      side: "long", entryPrice: 100, exitPrice: 94, stopLoss: 95,
+      maxAdversePct: 5.5, maxFavorablePct: 0.05
+    })).toBe("wrong_direction");
   });
 });

@@ -26,6 +26,85 @@ export interface SignalOutcomeEvaluation {
   failureReason: string | null;
 }
 
+export type TradeLossRootCause =
+  | "liquidity_sweep"
+  | "wrong_direction"
+  | "overextension"
+  | "sl_tight"
+  | "high_impact_news"
+  | "manual_intervention"
+  | "stop_loss_hit";
+
+export interface TradeLossAttributionParams {
+  side: "long" | "short";
+  entryPrice: number;
+  exitPrice: number;
+  stopLoss: number;
+  maxAdversePct: number;
+  maxFavorablePct: number;
+  entry24hChangePct?: number;
+  atrPct?: number;
+  hasActiveCriticalNews?: boolean;
+  exitReason?: string;
+}
+
+/**
+ * Classifies the specific root cause for a trade loss (Phase P5 Continuous Learning)
+ * Eliminates heuristic blame and accurately maps outcome to empirical market context.
+ */
+export function classifyTradeLossRootCause(params: TradeLossAttributionParams): TradeLossRootCause {
+  if (params.exitReason === "manual") {
+    return "manual_intervention";
+  }
+
+  if (params.hasActiveCriticalNews) {
+    return "high_impact_news";
+  }
+
+  const slDistPct = params.entryPrice > 0
+    ? (Math.abs(params.entryPrice - params.stopLoss) / params.entryPrice) * 100
+    : 2.0;
+
+  if (slDistPct < 1.0 || (params.atrPct && slDistPct < params.atrPct * 1.1)) {
+    return "sl_tight";
+  }
+
+  if (params.entry24hChangePct && Math.abs(params.entry24hChangePct) >= 8.0) {
+    return "overextension";
+  }
+
+  // If maximum favorable move was > 0.8% before stop hit, it was a sweep/reversal
+  if (params.maxFavorablePct >= 0.8 && params.maxFavorablePct < 1.8) {
+    return "liquidity_sweep";
+  }
+
+  // If trade immediately drifted adversely without any favorable move
+  if (params.maxFavorablePct < 0.2 && params.maxAdversePct >= slDistPct) {
+    return "wrong_direction";
+  }
+
+  return "stop_loss_hit";
+}
+
+export interface TradeLearningRecord {
+  id: string;
+  tradeId?: string;
+  signalId?: string;
+  symbol: string;
+  side: "long" | "short";
+  entryPrice: number;
+  exitPrice: number;
+  realizedPnl: number;
+  outcome: "win" | "loss" | "partial" | "breakeven";
+  rootCause: string;
+  isEmpirical: boolean;
+  modelProvenance: {
+    modelVersion: string;
+    featuresSnapshot: Record<string, number>;
+  };
+  createdAt: string;
+}
+
 export function evaluateSignalOutcome(
   signal: SignalOutcomeSnapshot,
   currentPrice: number,

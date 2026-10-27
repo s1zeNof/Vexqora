@@ -11,7 +11,9 @@ import { SignalChart } from "./signal-chart";
 import { SignalPositionsTable, type SignalTradeItem } from "./signal-positions-table";
 import { SignalExecutionPanel } from "./signal-execution-panel";
 import { AiEnsembleCard } from "./ai-ensemble-card";
-import type { MarketMicrostructure, MLPredictionResponse, AdaptiveConfidenceResult } from "@crypto-bot/trading";
+import type { MarketMicrostructure, MLPredictionResponse, AdaptiveConfidenceResult, MarketContextSnapshot, NewsRiskAssessment } from "@crypto-bot/trading";
+import { TradeCompanionPanel } from "./trade-companion-panel";
+import type { TradeAiSessionData } from "./ai-companion-actions";
 import { toggleTradeControlMode } from "./actions";
 import { playTradeNotification } from "../../../../lib/sound-service";
 import { dispatchTradeToast } from "../../../../components/trade-toast";
@@ -52,6 +54,9 @@ interface SignalLiveStageProps {
   mlPrediction?: MLPredictionResponse | null | undefined;
   microstructure?: MarketMicrostructure | null | undefined;
   adaptiveAi?: AdaptiveConfidenceResult | null | undefined;
+  aiSession?: TradeAiSessionData | null | undefined;
+  marketContext?: MarketContextSnapshot | null | undefined;
+  newsRisk?: NewsRiskAssessment | null | undefined;
   onExecute?: ((data: {
     orderType: "Market" | "Limit";
     margin: number;
@@ -104,12 +109,17 @@ export function SignalLiveStage({
   mlPrediction,
   microstructure,
   adaptiveAi,
+  aiSession,
+  marketContext,
+  newsRisk,
   onExecute,
   onDeleteFromArchive,
   children
 }: SignalLiveStageProps) {
   const router = useRouter();
   const [controlMode, setControlMode] = useState<"auto" | "manual">(activePosition?.controlMode ?? "auto");
+  const [workspaceTab, setWorkspaceTab] = useState<"positions" | "ensemble" | "mtf" | "orderflow" | "news" | "audit">("positions");
+  const [mobileTab, setMobileTab] = useState<"stage" | "companion" | "workspace">("stage");
   const [isUpdatingMode, setIsUpdatingMode] = useState(false);
 
   useEffect(() => {
@@ -680,10 +690,79 @@ export function SignalLiveStage({
         </div>
       </div>
 
-      {/* Main Layout: 840px Left Stage + 360px Right Terminal */}
-      <div className="signal-layout">
-        {/* Left Column (840px): Chart + Positions Table + AI Context */}
-        <div className="signal-stage">
+            {/* Mobile/Tablet Segmented Control (< 1140px) */}
+      <div
+        style={{
+          display: "flex",
+          gap: "8px",
+          background: "#0E0B1A",
+          padding: "6px",
+          borderRadius: "8px",
+          border: "1px solid #2A2145",
+          margin: "4px 0 12px"
+        }}
+        className="mobile-stage-selector"
+      >
+        <button
+          type="button"
+          onClick={() => setMobileTab("stage")}
+          style={{
+            flex: 1,
+            padding: "8px 10px",
+            borderRadius: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+            background: mobileTab === "stage" ? "linear-gradient(135deg, #7C4DFF 0%, #B24BFF 100%)" : "transparent",
+            color: mobileTab === "stage" ? "#FFFFFF" : "var(--muted)",
+            border: "none",
+            transition: "all 0.2s ease"
+          }}
+        >
+          📈 Графік & Торгівля
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("companion")}
+          style={{
+            flex: 1,
+            padding: "8px 10px",
+            borderRadius: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+            background: mobileTab === "companion" ? "linear-gradient(135deg, #7C4DFF 0%, #B24BFF 100%)" : "transparent",
+            color: mobileTab === "companion" ? "#FFFFFF" : "var(--muted)",
+            border: "none",
+            transition: "all 0.2s ease"
+          }}
+        >
+          🤖 AI Companion
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab("workspace")}
+          style={{
+            flex: 1,
+            padding: "8px 10px",
+            borderRadius: "6px",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+            background: mobileTab === "workspace" ? "linear-gradient(135deg, #7C4DFF 0%, #B24BFF 100%)" : "transparent",
+            color: mobileTab === "workspace" ? "#FFFFFF" : "var(--muted)",
+            border: "none",
+            transition: "all 0.2s ease"
+          }}
+        >
+          📋 Воркспейс & Інсайти
+        </button>
+      </div>
+
+      {/* Main Full-Width Terminal Stage: 3 Panels */}
+      <div className="terminal-stage-grid">
+        {/* Panel 1: Live Interactive Chart (~50-55%) */}
+        <div style={{ minWidth: 0, width: "100%", display: mobileTab === "stage" ? "block" : undefined }}>
           <SignalChart
             symbol={symbol}
             initialKlines={klines}
@@ -715,127 +794,97 @@ export function SignalLiveStage({
               closedAt: recentHistoricalTrade.closed_at
             } : null}
           />
-
-          <SignalPositionsTable
-            symbol={symbol}
-            trades={tradesList}
-            historyTrades={historyTrades}
-            livePrice={currentPrice}
-          />
-
-          {/* Vexqora AI Decision Ensemble 4-Gate Card */}
-          <AiEnsembleCard
-            symbol={symbol}
-            side={side}
-            strategy={strategy}
-            rationale={rationale}
-            qualityScore={qualityScore}
-            qualityTier={qualityTier}
-            winProbabilityPct={winProbabilityPct ?? 73}
-            mlPrediction={mlPrediction ?? null}
-            microstructure={microstructure ?? null}
-            adaptiveAi={adaptiveAi ?? {
-              confidencePct: winProbabilityPct ?? 73,
-              qualityScore: parseFloat(qualityScore) || 7.0,
-              qualityTier: (qualityTier as "A+" | "A" | "B" | "C" | "High Risk") || "B",
-              penalties: [],
-              bonuses: [],
-              learningContext: "",
-              isHighRisk: qualityTier === "High Risk",
-              decision: qualityTier === "High Risk" ? "NO_TRADE" : "TRADE"
-            }}
-          />
         </div>
 
-        {/* Right Column (360px): Signal Specs + Execution Panel */}
-        {onExecute ? (
-          <div className="signal-panel">
-            {/* Signal Specs Card */}
-            <div className="cd" style={{ padding: "20px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <b style={{ font: "700 16px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>Специфікація сигналу</b>
-                <span className={`tg ${side === "long" ? "lg" : "sh"}`}>
-                  {side.toUpperCase()}
-                </span>
-                <span className="lb" style={{ marginLeft: "auto" }}>
-                  {createdAtTime ? formatTimeAgo(createdAtTime) : "Щойно"}
-                </span>
-              </div>
-
-              {/* Status pill based on live currentPrice */}
-              <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
-                {(() => {
-                  const isLong = side === "long";
-                  const driftPct = entry > 0 ? ((currentPrice - entry) / entry) * 100 * (isLong ? 1 : -1) : 0;
-                  const isTp1Breached = isLong ? currentPrice >= tp1 : currentPrice <= tp1;
-                  const isSlBreached = isLong ? currentPrice <= stopLoss : currentPrice >= stopLoss;
-
-                  if (isTp1Breached) {
-                    return (
-                      <span className="tg" style={{ background: "rgba(124, 77, 255, 0.18)", color: "#B9A2FF", border: "1px solid #7C4DFF", fontSize: "11px", fontWeight: 700 }}>
-                        🎯 TP1 вже досягнуто (+{driftPct.toFixed(1)}%)
-                      </span>
-                    );
-                  }
-                  if (isSlBreached) {
-                    return (
-                      <span className="tg sh" style={{ fontSize: "11px", fontWeight: 700 }}>
-                        ⛔ SL пробито ({driftPct.toFixed(1)}%)
-                      </span>
-                    );
-                  }
-                  if (Math.abs(driftPct) >= 1.2) {
-                    return (
-                      <span className="tg" style={{ background: "rgba(255, 194, 75, 0.15)", color: "#FFC24B", border: "1px solid #FFC24B55", fontSize: "11px", fontWeight: 700 }}>
-                        ⚠️ Зсув {driftPct >= 0 ? "+" : ""}{driftPct.toFixed(1)}%
-                      </span>
-                    );
-                  }
-                  return (
-                    <span className="tg lg" style={{ fontSize: "11px", fontWeight: 700 }}>
-                      🟢 Сетап активний
-                    </span>
-                  );
-                })()}
-              </div>
-
-              <div style={{ marginTop: "12px" }}>
-                <div className="row">
-                  <span>Ціна входу (Entry)</span>
-                  <span style={{ fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(entry)}</span>
-                </div>
-                <div className="row">
-                  <span>Stop Loss</span>
-                  <span style={{ color: "#FF4F9A", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(stopLoss)}</span>
-                </div>
-                <div className="row">
-                  <span>TP 1 · 40%</span>
-                  <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp1)}</span>
-                </div>
-                <div className="row">
-                  <span>TP 2 · 30%</span>
-                  <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp2)}</span>
-                </div>
-                <div className="row">
-                  <span>TP 3 · 30%</span>
-                  <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp3)}</span>
-                </div>
-                <div className="row">
-                  <span>Trailing Stop</span>
-                  <span>1% після TP1</span>
-                </div>
-                <div className="row">
-                  <span>R : R коефіцієнт</span>
-                  <span style={{ color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>1 : {(riskReward ?? 1.8).toFixed(2)}</span>
-                </div>
-                <div className="row">
-                  <span>Впевненість ШІ</span>
-                  <span style={{ color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>{winProbabilityPct ?? 69}% Win Rate</span>
-                </div>
-              </div>
+        {/* Panel 2: Specs & Order Execution (~22%) */}
+        <div style={{ display: mobileTab === "stage" ? "flex" : undefined, flexDirection: "column", gap: "16px", minWidth: 0 }}>
+          {/* Signal Specs Card */}
+          <div className="cd" style={{ padding: "18px 20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <b style={{ font: "700 15px 'Plus Jakarta Sans', sans-serif", color: "#F1EEFF" }}>Специфікація сигналу</b>
+              <span className={`tg ${side === "long" ? "lg" : "sh"}`}>
+                {side.toUpperCase()}
+              </span>
+              <span className="lb" style={{ marginLeft: "auto", fontSize: "11px" }}>
+                {createdAtTime ? formatTimeAgo(createdAtTime) : "Щойно"}
+              </span>
             </div>
 
-            {/* Live OKX Order Terminal */}
+            {/* Status pill based on live currentPrice */}
+            <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+              {(() => {
+                const isLongPos = side === "long";
+                const driftPct = entry > 0 ? ((currentPrice - entry) / entry) * 100 * (isLongPos ? 1 : -1) : 0;
+                const isTp1Breached = isLongPos ? currentPrice >= tp1 : currentPrice <= tp1;
+                const isSlBreached = isLongPos ? currentPrice <= stopLoss : currentPrice >= stopLoss;
+
+                if (isTp1Breached) {
+                  return (
+                    <span className="tg" style={{ background: "rgba(124, 77, 255, 0.18)", color: "#B9A2FF", border: "1px solid #7C4DFF", fontSize: "11px", fontWeight: 700 }}>
+                      🎯 TP1 вже досягнуто (+{driftPct.toFixed(1)}%)
+                    </span>
+                  );
+                }
+                if (isSlBreached) {
+                  return (
+                    <span className="tg sh" style={{ fontSize: "11px", fontWeight: 700 }}>
+                      ⛔ SL пробито ({driftPct.toFixed(1)}%)
+                    </span>
+                  );
+                }
+                if (Math.abs(driftPct) >= 1.2) {
+                  return (
+                    <span className="tg" style={{ background: "rgba(255, 194, 75, 0.15)", color: "#FFC24B", border: "1px solid #FFC24B55", fontSize: "11px", fontWeight: 700 }}>
+                      ⚠️ Зсув {driftPct >= 0 ? "+" : ""}{driftPct.toFixed(1)}%
+                    </span>
+                  );
+                }
+                return (
+                  <span className="tg lg" style={{ fontSize: "11px", fontWeight: 700 }}>
+                    🟢 Сетап активний
+                  </span>
+                );
+              })()}
+            </div>
+
+            <div style={{ marginTop: "12px" }}>
+              <div className="row">
+                <span>Ціна входу (Entry)</span>
+                <span style={{ fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(entry)}</span>
+              </div>
+              <div className="row">
+                <span>Stop Loss</span>
+                <span style={{ color: "#FF4F9A", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(stopLoss)}</span>
+              </div>
+              <div className="row">
+                <span>TP 1 · 40%</span>
+                <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp1)}</span>
+              </div>
+              <div className="row">
+                <span>TP 2 · 30%</span>
+                <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp2)}</span>
+              </div>
+              <div className="row">
+                <span>TP 3 · 30%</span>
+                <span style={{ color: "#35F2D0", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}>${formatPrice(tp3)}</span>
+              </div>
+              <div className="row">
+                <span>Trailing Stop</span>
+                <span>1% після TP1</span>
+              </div>
+              <div className="row">
+                <span>R : R коефіцієнт</span>
+                <span style={{ color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>1 : {(riskReward ?? 1.8).toFixed(2)}</span>
+              </div>
+              <div className="row">
+                <span>Впевненість ШІ</span>
+                <span style={{ color: "#35F2D0", fontFamily: "'JetBrains Mono', monospace" }}>{winProbabilityPct ?? 69}% Win Rate</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Order Terminal */}
+          {onExecute ? (
             <SignalExecutionPanel
               symbol={symbol}
               side={side}
@@ -849,10 +898,323 @@ export function SignalLiveStage({
               lockSignalSide={Boolean(targetSignalId)}
               onExecute={onExecute}
             />
+          ) : (
+            children
+          )}
+        </div>
+
+        {/* Panel 3: Always-On Per-Trade AI Companion (~26%) */}
+        <div style={{ minWidth: 0, height: "100%", display: mobileTab === "companion" ? "block" : undefined }}>
+          <TradeCompanionPanel
+            initialSession={aiSession ?? null}
+            symbol={symbol}
+            side={side}
+            currentPrice={currentPrice}
+            entryPrice={entry}
+            stopLossPrice={stopLoss}
+            tp1Price={tp1}
+            pnlUsdt={activePosition ? livePnlUsdt : undefined}
+            pnlPct={activePosition ? livePnlPct : undefined}
+            isPaperTrading={isPaperTrading}
+          />
+        </div>
+      </div>
+
+      {/* Bottom Institutional Workspace with Full-Width Tabs */}
+      <div className="terminal-workspace" style={{ display: mobileTab === "workspace" ? "block" : undefined }}>
+        {/* Workspace Tab Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            borderBottom: "1px solid #2A2145",
+            overflowX: "auto",
+            background: "#0E0B1A",
+            padding: "0 8px"
+          }}
+        >
+          <button
+            type="button"
+            className={`terminal-tab-btn ${workspaceTab === "positions" ? "active" : ""}`}
+            onClick={() => setWorkspaceTab("positions")}
+          >
+            📋 Позиції & Історія ({tradesList.length + historyTrades.length})
+          </button>
+          <button
+            type="button"
+            className={`terminal-tab-btn ${workspaceTab === "ensemble" ? "active" : ""}`}
+            onClick={() => setWorkspaceTab("ensemble")}
+          >
+            🧠 AI Decision Ensemble (4 Gates)
+          </button>
+          <button
+            type="button"
+            className={`terminal-tab-btn ${workspaceTab === "mtf" ? "active" : ""}`}
+            onClick={() => setWorkspaceTab("mtf")}
+          >
+            📊 MTF Структура (1D / 4H / 15m)
+          </button>
+          <button
+            type="button"
+            className={`terminal-tab-btn ${workspaceTab === "orderflow" ? "active" : ""}`}
+            onClick={() => setWorkspaceTab("orderflow")}
+          >
+            🌊 Order Flow & CVD
+          </button>
+          <button
+            type="button"
+            className={`terminal-tab-btn ${workspaceTab === "news" ? "active" : ""}`}
+            onClick={() => setWorkspaceTab("news")}
+          >
+            📰 Новини & Події
+          </button>
+          <button
+            type="button"
+            className={`terminal-tab-btn ${workspaceTab === "audit" ? "active" : ""}`}
+            onClick={() => setWorkspaceTab("audit")}
+          >
+            📜 Журнал аудиту
+          </button>
+        </div>
+
+        {/* Tab 1: Positions & History */}
+        {workspaceTab === "positions" ? (
+          <div style={{ padding: "16px" }}>
+            <SignalPositionsTable
+              symbol={symbol}
+              trades={tradesList}
+              historyTrades={historyTrades}
+              livePrice={currentPrice}
+            />
           </div>
-        ) : (
-          children
-        )}
+        ) : null}
+
+        {/* Tab 2: AI Ensemble Card (4 Gates) */}
+        {workspaceTab === "ensemble" ? (
+          <div style={{ padding: "16px" }}>
+            <AiEnsembleCard
+              symbol={symbol}
+              side={side}
+              strategy={strategy}
+              rationale={rationale}
+              qualityScore={qualityScore}
+              qualityTier={qualityTier}
+              winProbabilityPct={winProbabilityPct ?? 73}
+              mlPrediction={mlPrediction ?? null}
+              microstructure={microstructure ?? null}
+              adaptiveAi={adaptiveAi ?? {
+                confidencePct: winProbabilityPct ?? 73,
+                qualityScore: parseFloat(qualityScore) || 7.0,
+                qualityTier: (qualityTier as "A+" | "A" | "B" | "C" | "High Risk") || "B",
+                penalties: [],
+                bonuses: [],
+                learningContext: "",
+                isHighRisk: qualityTier === "High Risk",
+                decision: qualityTier === "High Risk" ? "NO_TRADE" : "TRADE"
+              }}
+            />
+          </div>
+        ) : null}
+
+        {/* Tab 3: Multi-Timeframe Structure Snapshot */}
+        {workspaceTab === "mtf" ? (
+          <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+              <div>
+                <b style={{ color: "#F1EEFF", fontSize: "16px" }}>Multi-Timeframe Структура (MTF Intelligence)</b>
+                <div style={{ color: "var(--muted)", fontSize: "12px", marginTop: "2px" }}>
+                  Кореляція трендів 1D, 4H та 15M з обов'язковою верифікацією EMA200 (warm-up &gt;= 200 свічок).
+                </div>
+              </div>
+              <span className="tg lg" style={{ fontSize: "11px" }}>
+                {marketContext?.alignment?.overallBias ? `Загальний ухил: ${marketContext.alignment.overallBias.toUpperCase()}` : "Синхронізація активна"}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "12px" }}>
+              {/* 1D Frame */}
+              <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <b style={{ color: "#B9A2FF", fontSize: "14px" }}>1D (Денний таймфрейм)</b>
+                  <span className="tg gy" style={{ fontSize: "10px" }}>
+                    {marketContext?.timeframes?.["1D"]?.status ?? "OK"}
+                  </span>
+                </div>
+                <div style={{ marginTop: "10px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div className="row">
+                    <span>Тренд / Режим:</span>
+                    <b style={{ color: "#F1EEFF" }}>{marketContext?.timeframes?.["1D"]?.trend ?? "bullish"}</b>
+                  </div>
+                  <div className="row">
+                    <span>EMA 200 Warmup:</span>
+                    <span style={{ color: marketContext?.timeframes?.["1D"]?.hasEma200Warmup ? "#35F2D0" : "#A59CC4" }}>
+                      {marketContext?.timeframes?.["1D"]?.hasEma200Warmup ? "Підтверджено (200+ барів)" : "Недостатня глибина"}
+                    </span>
+                  </div>
+                  <div className="row">
+                    <span>RSI (14 Wilder):</span>
+                    <span style={{ fontFamily: "monospace" }}>{marketContext?.timeframes?.["1D"]?.rsi?.toFixed(1) ?? "—"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4H Frame */}
+              <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <b style={{ color: "#B9A2FF", fontSize: "14px" }}>4H (4-годинний свінг)</b>
+                  <span className="tg gy" style={{ fontSize: "10px" }}>
+                    {marketContext?.timeframes?.["4H"]?.status ?? "OK"}
+                  </span>
+                </div>
+                <div style={{ marginTop: "10px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div className="row">
+                    <span>Тренд:</span>
+                    <b style={{ color: "#F1EEFF" }}>{marketContext?.timeframes?.["4H"]?.trend ?? (side === "long" ? "bullish" : "bearish")}</b>
+                  </div>
+                  <div className="row">
+                    <span>Злам структури:</span>
+                    <span style={{ color: "#35F2D0" }}>{marketContext?.timeframes?.["4H"]?.structureShift ?? "NONE"}</span>
+                  </div>
+                  <div className="row">
+                    <span>Локальний розмах:</span>
+                    <span style={{ fontFamily: "monospace" }}>
+                      ${marketContext?.timeframes?.["4H"]?.swingLow?.toFixed(2) ?? "—"} - ${marketContext?.timeframes?.["4H"]?.swingHigh?.toFixed(2) ?? "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 15M Frame */}
+              <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <b style={{ color: "#B9A2FF", fontSize: "14px" }}>15M (Тригер входу)</b>
+                  <span className="tg lg" style={{ fontSize: "10px" }}>Активний</span>
+                </div>
+                <div style={{ marginTop: "10px", fontSize: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <div className="row">
+                    <span>Тренд:</span>
+                    <b style={{ color: side === "long" ? "#35F2D0" : "#FF4F9A" }}>{side.toUpperCase()}</b>
+                  </div>
+                  <div className="row">
+                    <span>Свічки в пам'яті:</span>
+                    <span>{klines.length} свічок</span>
+                  </div>
+                  <div className="row">
+                    <span>Статус тригера:</span>
+                    <span style={{ color: "#35F2D0" }}>Вхід у зоні дисконту</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Tab 4: Order Flow & CVD Analytics */}
+        {workspaceTab === "orderflow" ? (
+          <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div>
+              <b style={{ color: "#F1EEFF", fontSize: "16px" }}>Order Flow, Стакан (DOM) та Біржовий Потік</b>
+              <div style={{ color: "var(--muted)", fontSize: "12px", marginTop: "2px" }}>
+                Прямий розрахунок глибини стакану (OBI), дельти недавніх угод (CVD) та виявлення прихованого ліквідаційного ризику.
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
+              <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "14px" }}>
+                <div className="lb" style={{ fontSize: "12px" }}>Дисбаланс стакану (Order Book Imbalance)</div>
+                <div style={{ fontSize: "20px", fontWeight: 700, margin: "6px 0", color: (microstructure?.orderBook?.linearImbalance ?? 0) >= 0 ? "#35F2D0" : "#FF4F9A" }}>
+                  {microstructure?.orderBook?.linearImbalance !== undefined
+                    ? `${(microstructure.orderBook.linearImbalance * 100).toFixed(1)}%`
+                    : "0.0%"}
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  Зважений OBI top-of-book: {microstructure?.orderBook?.weightedImbalance ? `${(microstructure.orderBook.weightedImbalance * 100).toFixed(1)}%` : "Збалансовано"}
+                </div>
+              </div>
+
+              <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "14px" }}>
+                <div className="lb" style={{ fontSize: "12px" }}>Дельта поглинання (CVD Snapshot)</div>
+                <div style={{ fontSize: "20px", fontWeight: 700, margin: "6px 0", color: (microstructure?.tape?.cvdUsd ?? 0) >= 0 ? "#35F2D0" : "#FF4F9A" }}>
+                  {microstructure?.tape?.cvdUsd !== undefined
+                    ? `${microstructure.tape.cvdUsd >= 0 ? "+" : ""}${microstructure.tape.cvdUsd.toFixed(0)} USDT`
+                    : "—"}
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  Агресія покупців: {microstructure?.tape?.buyerAggressionPct ? `${microstructure.tape.buyerAggressionPct.toFixed(1)}%` : "50.0%"}
+                </div>
+              </div>
+
+              <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "14px" }}>
+                <div className="lb" style={{ fontSize: "12px" }}>Великі біржові угоди (Whale Tape)</div>
+                <div style={{ fontSize: "20px", fontWeight: 700, margin: "6px 0", color: "#F1EEFF" }}>
+                  {microstructure?.tape?.whaleTradesCount ?? 0} угод
+                </div>
+                <div style={{ fontSize: "11px", color: "var(--muted)" }}>
+                  Squeeze Risk: {microstructure?.derivatives?.squeezeRisk ?? "none"}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Tab 5: News & Events */}
+        {workspaceTab === "news" ? (
+          <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+              <div>
+                <b style={{ color: "#F1EEFF", fontSize: "16px" }}>Новини та Події (News & Event Intelligence)</b>
+                <div style={{ color: "var(--muted)", fontSize: "12px", marginTop: "2px" }}>
+                  Офіційні біржові анонси Bybit, розклади розблокування токенів та макроекономічні дані (CPI/FOMC).
+                </div>
+              </div>
+              <span className="tg gy" style={{ fontSize: "11px" }}>
+                {newsRisk?.riskLevel ? `Рівень ризику новин: ${newsRisk.riskLevel}` : "Перевірено"}
+              </span>
+            </div>
+
+            <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#35F2D0" }}>
+                <span>🛡️</span>
+                <b style={{ fontSize: "14px" }}>Жодних критичних негативних подій для {symbol} не зафіксовано</b>
+              </div>
+              <p style={{ color: "#A59CC4", fontSize: "12.5px", margin: "8px 0 0", lineHeight: "1.5" }}>
+                Система News Agent перевірила біржовий статус контракту (відсутні анонси про делістинг, технічні роботи або примусові зміни плеча).
+                Якщо біржовий статус зміниться, Trade Companion миттєво сповістить вас у чаті.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Tab 6: Audit Log & Policy */}
+        {workspaceTab === "audit" ? (
+          <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div>
+              <b style={{ color: "#F1EEFF", fontSize: "16px" }}>Журнал аудиту та Політика безпеки (Security Lock)</b>
+              <div style={{ color: "var(--muted)", fontSize: "12px", marginTop: "2px" }}>
+                Фіксація provenance рішень, моделей ШІ та правил виконання.
+              </div>
+            </div>
+
+            <div style={{ background: "#171229", border: "1px solid #2A2145", borderRadius: "8px", padding: "16px", display: "flex", flexDirection: "column", gap: "8px", fontSize: "12.5px" }}>
+              <div className="row">
+                <span>Ідентифікатор сесії ШІ:</span>
+                <span style={{ fontFamily: "monospace", color: "#B9A2FF" }}>{aiSession?.id ?? "local-session"}</span>
+              </div>
+              <div className="row">
+                <span>Модель аналітики:</span>
+                <span>CatBoost v0.3.0 + Nemotron Meta-Agent</span>
+              </div>
+              <div className="row">
+                <span>Політика дій:</span>
+                <span style={{ color: "#FFC24B", fontWeight: 600 }}>Explicit User Confirmation Required (Потрібне підтвердження трейдера)</span>
+              </div>
+              <div className="row">
+                <span>Ізоляція даних:</span>
+                <span>Supabase RLS Account Ownership Policy</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </>
   );

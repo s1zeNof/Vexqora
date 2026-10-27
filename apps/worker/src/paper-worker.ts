@@ -32,6 +32,33 @@ interface DbTarget {
   status: "open" | "filled" | "cancelled";
 }
 
+async function dispatchTradeAiEvent(
+  supabase: SupabaseClient,
+  tradeId: string,
+  content: string,
+  payload?: Record<string, unknown>
+): Promise<void> {
+  try {
+    const { data: session } = await supabase
+      .from("trade_ai_sessions")
+      .select("id")
+      .eq("trade_id", tradeId)
+      .maybeSingle();
+
+    if (session?.id) {
+      await supabase.from("trade_ai_messages").insert({
+        session_id: session.id,
+        author_kind: "system",
+        kind: "event",
+        content,
+        structured_payload: payload ?? null
+      });
+    }
+  } catch {
+    // best-effort event dispatch
+  }
+}
+
 /**
  * 24/7 Paper Matching Engine Background Worker
  * Continuously matches active paper positions against live market prices:
@@ -207,6 +234,13 @@ export function startPaperWorker(
               content: `🎯 Paper TP${action.targetIdx} досягнуто! Зафіксовано ${action.closedQty} ${trade.symbol} @ $${action.targetPrice}. Прибуток: +${action.realizedPnl.toFixed(2)} USDT.${action.targetIdx === 1 ? " Трейлінг-стоп активовано (1% від піку)." : ""}`,
               payload: { tradeId: trade.id, symbol: trade.symbol, pnl: action.realizedPnl, targetIdx: action.targetIdx }
             });
+
+            await dispatchTradeAiEvent(
+              supabase,
+              trade.id,
+              `🎯 Біржа підтвердила виконання часткового тейку TP${action.targetIdx}! Зафіксовано ${action.closedQty} ${trade.symbol} @ $${action.targetPrice}. Прибуток: +${action.realizedPnl.toFixed(2)} USDT.${action.targetIdx === 1 ? " Трейлінг-стоп активовано (1% від піку)." : ""}`,
+              { action: "tp_filled", targetIdx: action.targetIdx, pnl: action.realizedPnl, price: action.targetPrice }
+            );
           } else if (action.type === "TRAILING_STOP_TRIGGERED") {
             await supabase.from("orders").insert({
               trade_id: trade.id,
@@ -228,6 +262,13 @@ export function startPaperWorker(
               content: `⚡ Paper Trailing Stop спрацював! Закрито залишок ${action.closedQty} ${trade.symbol} @ $${currentPrice} (відкат 1% від піку $${action.highestPrice ?? action.lowestPrice}). Прибуток: ${action.realizedPnl >= 0 ? "+" : ""}${action.realizedPnl.toFixed(2)} USDT.`,
               payload: { tradeId: trade.id, symbol: trade.symbol, pnl: action.realizedPnl }
             });
+
+            await dispatchTradeAiEvent(
+              supabase,
+              trade.id,
+              `⚡ Trailing Stop спрацював: позицію закрито @ $${currentPrice}. Прибуток: ${action.realizedPnl >= 0 ? "+" : ""}${action.realizedPnl.toFixed(2)} USDT. Post-mortem готовий.`,
+              { action: "trailing_stop_triggered", pnl: action.realizedPnl, exitPrice: currentPrice }
+            );
           } else if (action.type === "STOP_LOSS_TRIGGERED") {
             await supabase.from("orders").insert({
               trade_id: trade.id,
@@ -249,6 +290,13 @@ export function startPaperWorker(
               content: `🛑 Paper Stop Loss спрацював для ${trade.symbol} @ $${currentPrice}. Позицію закрито для захисту депозиту. Результат: ${action.realizedPnl.toFixed(2)} USDT.`,
               payload: { tradeId: trade.id, symbol: trade.symbol, pnl: action.realizedPnl }
             });
+
+            await dispatchTradeAiEvent(
+              supabase,
+              trade.id,
+              `🛑 Stop Loss виконано біржею @ $${currentPrice}. Позицію закрито для збереження капіталу. Результат: ${action.realizedPnl.toFixed(2)} USDT. Аналізую root-cause для датасету навчання.`,
+              { action: "stop_loss_triggered", pnl: action.realizedPnl, exitPrice: currentPrice }
+            );
           } else if (action.type === "ENTRY_FILLED") {
             await supabase.from("trades").update({
               opened_at: new Date().toISOString(),
@@ -266,6 +314,13 @@ export function startPaperWorker(
               content: `⚡ Limit вхід для ${trade.symbol} спрацював @ $${action.fillPrice}. Позицію активовано.`,
               payload: { tradeId: trade.id, symbol: trade.symbol, fillPrice: action.fillPrice }
             });
+
+            await dispatchTradeAiEvent(
+              supabase,
+              trade.id,
+              `⚡ Limit вхід підтверджено @ $${action.fillPrice}! Позицію активовано, захисні рівні TP/SL встановлено.`,
+              { action: "entry_filled", fillPrice: action.fillPrice }
+            );
           }
         }
       }

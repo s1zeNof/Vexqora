@@ -1,7 +1,14 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { fetchRecentKlines, fetchOrderBook, fetchRecentTrades, fetchOpenInterest } from "@crypto-bot/exchange";
-import { calculateAdaptiveConfidence, evaluateMarketMicrostructure, queryMLModelPrediction } from "@crypto-bot/trading";
+import {
+  calculateAdaptiveConfidence,
+  evaluateMarketMicrostructure,
+  queryMLModelPrediction,
+  buildMarketContextSnapshot,
+  evaluateNewsRiskForTrade
+} from "@crypto-bot/trading";
+import { getOrCreateTradeAiSession } from "./ai-companion-actions";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { formatPrice } from "../../../../lib/format";
@@ -314,7 +321,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     ? `${rationale} — ${adaptiveAi.learningContext}`
     : rationale;
 
-  const [mlPrediction, microstructure] = await Promise.all([
+  const [mlPrediction, microstructure, klines4H, klines1D] = await Promise.all([
     queryMLModelPrediction({
       symbol: formattedSymbol,
       side,
@@ -341,13 +348,39 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
       } catch {
         return null;
       }
-    })()
+    })(),
+    fetchRecentKlines(formattedSymbol, "240", 25).catch(() => []),
+    fetchRecentKlines(formattedSymbol, "D", 25).catch(() => [])
   ]);
+
+  const targetSignalId = signalRecord?.id ?? null;
+
+  const marketContext = buildMarketContextSnapshot({
+    symbol: formattedSymbol,
+    timeframeKlines: {
+      "1D": klines1D,
+      "4H": klines4H,
+      "15M": klines
+    },
+    asOfMs: Date.now()
+  });
+
+  const newsRisk = evaluateNewsRiskForTrade(formattedSymbol, [], "ONLINE");
+
+  const aiSession = await getOrCreateTradeAiSession({
+    symbol: formattedSymbol,
+    tradeId: activePosition?.id ?? null,
+    signalId: targetSignalId,
+    side,
+    entryPrice: entry,
+    stopLoss,
+    tp1
+  }).catch(() => null);
 
   const isPaperTrading = account?.exchange === "paper" || account?.environment === "demo";
   const tradingModeLabel = isPaperTrading ? "Paper Trading (Віртуальний рахунок)" : "Bybit Live (Реальний рахунок)";
 
-  const targetSignalId = signalRecord?.id ?? null;
+
 
   const handleExecuteAction = async (data: {
     orderType: "Market" | "Limit";
@@ -378,7 +411,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%", maxWidth: "1232px", margin: "0 auto", paddingBottom: "40px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", width: "100%", maxWidth: "100%", margin: "0", padding: "0 clamp(8px, 1.5vw, 24px) 40px" }}>
       <SignalLiveStage
         symbol={formattedSymbol}
         side={side}
@@ -415,6 +448,9 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
         mlPrediction={mlPrediction}
         microstructure={microstructure}
         adaptiveAi={adaptiveAi}
+        aiSession={aiSession}
+        marketContext={marketContext}
+        newsRisk={newsRisk}
         onExecute={handleExecuteAction}
         onDeleteFromArchive={handleDeleteFromArchive}
       />

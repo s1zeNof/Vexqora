@@ -528,14 +528,14 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   gap: 16px;
   width: 100%;
-  max-width: 1232px;
+  max-width: 100%;
   margin: 0 auto;
 }
 
 .signal-stage {
   flex: 1;
   min-width: 0;
-  max-width: 840px;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -953,4 +953,63 @@ input:focus, select:focus, textarea:focus {
 
 .spin-anim {
   animation: spin 0.85s linear infinite;
+}
+
+
+/* Full-Width Institutional Terminal Stage Grid (Phase P2) */
+.terminal-stage-grid {
+  display: grid;
+  grid-template-columns: minmax(500px, 1.45fr) minmax(310px, 0.75fr) minmax(330px, 0.85fr);
+  gap: 16px;
+  width: 100%;
+  align-items: stretch;
+}
+
+@media (max-width: 1360px) {
+  .terminal-stage-grid {
+    grid-template-columns: minmax(440px, 1.3fr) minmax(300px, 0.8fr) minmax(310px, 0.85fr);
+  }
+}
+
+@media (max-width: 1140px) {
+  .terminal-stage-grid {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.terminal-workspace {
+  width: 100%;
+  background: #0E0B1A;
+  border: 1px solid #2A2145;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+
+.terminal-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.terminal-tab-btn:hover {
+  color: #F1EEFF;
+  background: rgba(124, 77, 255, 0.05);
+}
+
+.terminal-tab-btn.active {
+  color: #F1EEFF;
+  border-bottom-color: #7C4DFF;
+  background: rgba(124, 77, 255, 0.08);
 }
