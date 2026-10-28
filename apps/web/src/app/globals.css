@@ -1047,9 +1047,11 @@ input:focus, select:focus, textarea:focus {
 .terminal-top-stage {
   display: grid;
   grid-template-columns: minmax(0, 1.857fr) minmax(350px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
   width: 100%;
   align-items: stretch;
+  min-height: 520px;
 }
 
 .terminal-stage-chart {
@@ -1057,6 +1059,7 @@ input:focus, select:focus, textarea:focus {
   width: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .terminal-stage-companion {
@@ -1064,10 +1067,11 @@ input:focus, select:focus, textarea:focus {
   width: 100%;
   display: flex;
   flex-direction: column;
+  position: relative !important;
   height: 100%;
   min-height: 0;
   max-height: 100%;
-  overflow: hidden;
+  overflow: hidden !important;
 }
 
 .companion-chat-scroll {
@@ -1158,8 +1162,12 @@ input:focus, select:focus, textarea:focus {
 
   .terminal-stage-wrapper.mobile-view-companion .terminal-stage-companion {
     display: flex !important;
+    position: relative !important;
     height: 75vh !important;
+    max-height: 75vh !important;
     min-height: 520px;
+    width: 100%;
+    overflow: hidden !important;
   }
   .terminal-stage-wrapper.mobile-view-companion .terminal-stage-chart,
   .terminal-stage-wrapper.mobile-view-companion .terminal-mid-stage,

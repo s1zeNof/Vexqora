@@ -549,6 +549,8 @@ export function TradeCompanionPanel({
   return (
     <div
       style={{
+        position: "absolute",
+        inset: 0,
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -558,8 +560,7 @@ export function TradeCompanionPanel({
         background: "#0C0A14",
         border: "1px solid rgba(255, 255, 255, 0.08)",
         borderRadius: "10px",
-        overflow: "hidden",
-        position: "relative"
+        overflow: "hidden"
       }}
     >
       {/* Quick Questions Adaptive Modal */}

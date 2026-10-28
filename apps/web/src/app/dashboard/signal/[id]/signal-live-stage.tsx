@@ -591,7 +591,7 @@ export function SignalLiveStage({
           </div>
 
           {/* AI Companion Section (35%) */}
-          <div className="terminal-stage-companion">
+          <div className="terminal-stage-companion" style={{ position: "relative", height: "100%", minHeight: 0, maxHeight: "100%", overflow: "hidden" }}>
             <TradeCompanionPanel
               initialSession={aiSession ?? null}
               symbol={symbol}
