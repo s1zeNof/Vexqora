@@ -119,8 +119,6 @@ export async function processJob(
   // 4b. Enforce 4-Gate Decision Ensemble verification on backend execution path
   const signalObj = signal as unknown as { metadata?: Record<string, unknown> };
   const signalMeta = signalObj.metadata ?? {};
-  const isPaper = job.exchange_kind === "paper";
-
   const gateCheck = verifyExecutionGates({
     symbol: signal.symbol,
     side: signal.side,
@@ -135,12 +133,7 @@ export async function processJob(
     mlEvidence: signalMeta.mlEvidence as GateEvidence | undefined,
     hasCriticalNews: signalMeta.hasCriticalNews as boolean | undefined,
     newsStatus: signalMeta.newsStatus as ("OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE") | undefined,
-    newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined,
-    policy: isPaper ? {
-      allowUnknownStructureForEntry: true,
-      allowUnknownMlForEntry: true,
-      allowUnknownNewsForEntry: true
-    } : undefined
+    newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined
   });
 
   if (!gateCheck.passed) {
@@ -202,12 +195,7 @@ export async function processJob(
       hasCriticalNews: signalMeta.hasCriticalNews as boolean | undefined,
       newsStatus: signalMeta.newsStatus as ("OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE") | undefined,
       newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined
-    },
-    policy: isPaper ? {
-      allowUnknownStructureForEntry: true,
-      allowUnknownMlForEntry: true,
-      allowUnknownNewsForEntry: true
-    } : undefined
+    }
   });
 
   // Persist entry order

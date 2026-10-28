@@ -626,6 +626,7 @@ export async function executeLeadTraderDynamicLoop(
 
   let replanningCycles = 0;
   let llmDrovePlan = false;
+  let llmFinalSynthesis: string | null = null;
   const maxCycles = req.maxCycles ?? 3;
   let currentCycle = 0;
 
@@ -642,6 +643,7 @@ export async function executeLeadTraderDynamicLoop(
     if (!response || !response.toolCalls || response.toolCalls.length === 0) {
       if (response?.content) {
         llmDrovePlan = true;
+        llmFinalSynthesis = response.content.trim();
       }
       break;
     }
@@ -752,6 +754,17 @@ export async function executeLeadTraderDynamicLoop(
   // ==========================================
   let leadVerdict: DynamicToolLoopResult["leadVerdict"] = "HOLD";
 
+  // The model's post-tool synthesis may drive the advisory verdict. The
+  // deterministic checks below are safety overrides and can only make it stricter.
+  if (llmFinalSynthesis) {
+    const verdictMatch = llmFinalSynthesis.match(/\b(RECOMMEND_CLOSE|RECOMMEND_REDUCE|NO_TRADE|REVIEW|WAIT|HOLD|NO_ACTION|LONG|SHORT)\b/i);
+    if (verdictMatch?.[1]) {
+      leadVerdict = verdictMatch[1].toUpperCase() as DynamicToolLoopResult["leadVerdict"];
+    } else {
+      warnings.push("The model returned a final synthesis without a machine-readable verdict; deterministic safety synthesis was used.");
+    }
+  }
+
   if (req.stopLoss && currentPrice > 0) {
     const slBreached = isLong ? currentPrice <= req.stopLoss : currentPrice >= req.stopLoss;
     if (slBreached) {
@@ -759,7 +772,7 @@ export async function executeLeadTraderDynamicLoop(
     }
   }
 
-  if (leadVerdict !== "RECOMMEND_CLOSE") {
+  if (leadVerdict !== "RECOMMEND_CLOSE" && leadVerdict !== "NO_TRADE") {
     if (contradictionsFound.length >= 2) {
       leadVerdict = "RECOMMEND_REDUCE";
     } else if (contradictionsFound.length === 1) {
@@ -776,12 +789,15 @@ export async function executeLeadTraderDynamicLoop(
         : "Зміна 4H ринкової структури на протилежну");
 
   const indTag = indicatorResult ? ` [${indicatorResult.indicator}: ${indicatorResult.value}]` : "";
-  const summary = `Lead Trader Agent синтез для ${symbol}: ` +
+  const deterministicSummary = `Lead Trader Agent синтез для ${symbol}: ` +
     `Виконано ${traces.length} викликів інструментів (${traces.map(t => t.toolName).join(", ")})${indTag}. ` +
     (contradictionsFound.length > 0
       ? `Виявлено суперечності: ${contradictionsFound.join(" ")} `
       : "Доказова база цілісна. ") +
     `Вердикт: ${leadVerdict}.`;
+  const summary = llmFinalSynthesis
+    ? `${llmFinalSynthesis}\n\nSafety verdict: ${leadVerdict}.`
+    : deterministicSummary;
 
   const tradeThesis: TradeThesis = {
     thesisId: `thesis-${symbol.toLowerCase()}-${Date.now()}`,
