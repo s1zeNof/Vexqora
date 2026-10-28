@@ -41,10 +41,8 @@ export default async function ProfilePage({
   const activeAccount = accountRes.data ? profileAccountSchema.safeParse(accountRes.data).data ?? null : null;
 
   if (activeAccount) {
-    const healRes = await autoHealPaperAccount(supabase, activeAccount.id);
-    if (healRes.balanceRestored) {
-      activeAccount.paper_balance = 400.00;
-    }
+    await autoHealPaperAccount(supabase, activeAccount.id);
+    
   }
 
   const tradesRes = activeAccount

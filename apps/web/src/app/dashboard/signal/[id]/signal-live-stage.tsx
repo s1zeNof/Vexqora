@@ -831,7 +831,7 @@ export function SignalLiveStage({
                 side={side}
                 currentPrice={currentPrice}
                 signalEntry={entry}
-                availableBalance={availableBalance ?? 20050}
+                availableBalance={availableBalance ?? 0}
                 stopLossPrice={stopLoss}
                 tp1Price={tp1}
                 tp2Price={tp2}

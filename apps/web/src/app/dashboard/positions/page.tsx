@@ -57,10 +57,8 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
     : null;
 
   if (active) {
-    const healRes = await autoHealPaperAccount(supabase, active.id);
-    if (healRes.balanceRestored && rawActive) {
-      rawActive.paper_balance = 400.00;
-    }
+    await autoHealPaperAccount(supabase, active.id);
+    
   }
 
   const dayStart = new Date();
@@ -203,7 +201,7 @@ export default async function PositionsPage({ searchParams }: PositionsPageProps
         .eq("id", bogusBlendTrade.id);
 
       const currentPaperBalance = Number(rawActive?.paper_balance ?? 385.90);
-      const newPaperBalance = Math.max(400.00, Number((currentPaperBalance + balanceCorrectionDelta).toFixed(2)));
+      const newPaperBalance = Number((currentPaperBalance + balanceCorrectionDelta).toFixed(2));
 
       await supabase
         .from("exchange_accounts")

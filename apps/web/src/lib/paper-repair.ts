@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 /**
  * Centrally heals and protects Paper trading accounts:
  * 1. Repairs bogus Stop Loss trades (like IRYSUSDT or any trade with realized_pnl < -100).
- * 2. Restores user Paper Balance to target (400.00 USDT) if wiped by a bogus trade.
+ * 2. Never overwrites or overrides user custom balance (preserves user-defined wallet balance).
  * 3. Audits all open trades: auto-sanitizes inverted or anomalous SL / TP levels to safe bounds (2.5%),
  *    guaranteeing that visiting or executing any of the other open positions will never trigger an erroneous loss.
  */
@@ -12,7 +12,7 @@ export async function autoHealPaperAccount(
   accountId: string
 ): Promise<{ repairedTradesCount: number; balanceRestored: boolean; sanitizedOpenTradesCount: number }> {
   let repairedTradesCount = 0;
-  let balanceRestored = false;
+  const balanceRestored = false;
   let sanitizedOpenTradesCount = 0;
 
   try {
@@ -27,7 +27,7 @@ export async function autoHealPaperAccount(
       return { repairedTradesCount: 0, balanceRestored: false, sanitizedOpenTradesCount: 0 };
     }
 
-    const currentBalance = Number(rawAccount.paper_balance ?? 0);
+    // currentBalance
 
     interface DbClosedTrade {
       id: string;
@@ -147,14 +147,9 @@ export async function autoHealPaperAccount(
       repairedTradesCount++;
     }
 
-    // 3. Balance restoration: if user balance was wiped below 380 USDT or bogus trades were repaired, restore to 400.00 USDT
-    if (repairedTradesCount > 0 || currentBalance < 380) {
-      await supabase
-        .from("exchange_accounts")
-        .update({ paper_balance: 400.00 })
-        .eq("id", accountId);
-      balanceRestored = true;
-    }
+    // 3. Balance preservation: do NOT arbitrarily overwrite or force paper balance to 400.
+    // The user has full autonomy over their virtual deposit.
+    // We only sanitize erroneous open trade SL/TP levels below.
 
     // 4. Audit and heal all active and entry_open trades to ensure no other trade can trigger a bug!
     const { data: rawOpenTrades } = await supabase

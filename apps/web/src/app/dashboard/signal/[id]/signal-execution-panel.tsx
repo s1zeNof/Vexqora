@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { formatCryptoPrice } from "../../../../lib/format";
 
@@ -49,8 +49,20 @@ export function SignalExecutionPanel({
   const [side, setSide] = useState<"long" | "short">(initialSide);
   const [orderType, setOrderType] = useState<"Market" | "Limit">("Market");
   const [leverage, setLeverage] = useState<number>(defaultLeverage);
-  const [margin, setMargin] = useState<number>(100);
-  const [customMarginInput, setCustomMarginInput] = useState<string>("100");
+  const initialMargin = availableBalance > 0 ? Number(availableBalance.toFixed(2)) : 10;
+  const [margin, setMargin] = useState<number>(initialMargin);
+  const [customMarginInput, setCustomMarginInput] = useState<string>(
+    availableBalance > 0 ? availableBalance.toFixed(2) : "10"
+  );
+  const isCustomMarginEdited = useRef(false);
+
+  useEffect(() => {
+    if (!isCustomMarginEdited.current && availableBalance > 0) {
+      const val = Number(availableBalance.toFixed(2));
+      setMargin(val);
+      setCustomMarginInput(availableBalance.toFixed(2));
+    }
+  }, [availableBalance]);
   const [limitPriceInput, setLimitPriceInput] = useState<string>(
     signalEntry && signalEntry > 0 ? signalEntry.toString() : currentPrice.toString()
   );
@@ -112,21 +124,32 @@ export function SignalExecutionPanel({
   const effectiveRR = curRiskDist > 0 ? curRewardDist / curRiskDist : 0;
 
   // Preset handlers
-  const presets = [25, 50, 100, 250, 500, 1000];
+  const presets = availableBalance > 0 && availableBalance <= 100
+    ? [
+        Math.max(1, Number((availableBalance * 0.25).toFixed(2))),
+        Math.max(1, Number((availableBalance * 0.50).toFixed(2))),
+        Math.max(1, Number((availableBalance * 0.75).toFixed(2))),
+        Number(availableBalance.toFixed(2))
+      ]
+    : [25, 50, 100, 250, 500, 1000];
   const percentPresets = [10, 25, 50, 100];
 
   const handleSelectPreset = (val: number) => {
+    isCustomMarginEdited.current = true;
     setMargin(val);
     setCustomMarginInput(val.toString());
   };
 
   const handleSelectPercent = (pct: number) => {
-    const val = Math.max(10, Math.floor(availableBalance * (pct / 100)));
+    isCustomMarginEdited.current = true;
+    const rawVal = availableBalance * (pct / 100);
+    const val = Math.max(0.1, Number(rawVal.toFixed(2)));
     setMargin(val);
     setCustomMarginInput(val.toString());
   };
 
   const handleCustomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    isCustomMarginEdited.current = true;
     const val = e.target.value;
     setCustomMarginInput(val);
     const parsed = parseFloat(val);
@@ -641,9 +664,9 @@ export function SignalExecutionPanel({
         <div style={{ position: "relative", marginBottom: "8px" }}>
           <input
             type="number"
-            min="5"
+            min="0.1"
             max="100000"
-            step="5"
+            step="any"
             value={customMarginInput}
             onChange={handleCustomChange}
             placeholder="Введіть суму"

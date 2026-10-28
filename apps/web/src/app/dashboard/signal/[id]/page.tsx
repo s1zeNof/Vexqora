@@ -48,7 +48,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     await autoHealPaperAccount(supabase, account.id);
   }
 
-  let availableBalance = 20050;
+  let availableBalance = account ? Number(account.paper_balance ?? 0) : 0;
   if (account) {
     try {
       const b = await createAccountClient(account).getBalance();
