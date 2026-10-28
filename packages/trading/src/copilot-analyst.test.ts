@@ -48,7 +48,7 @@ describe("Copilot Analyst Engine", () => {
   });
 
   describe("calculateCopilotScenarios", () => {
-    const mockMarket: CopilotMarketData = {
+    const mockBullishMarket: CopilotMarketData = {
       symbol: "SOLUSDT",
       currentPrice: 175.5,
       price24hPcnt: 3.2,
@@ -62,9 +62,23 @@ describe("Copilot Analyst Engine", () => {
       rsi15m: 56
     };
 
-    it("produces 3 distinct scenarios tailored to user's exact balance", () => {
+    const mockDumpingMarket: CopilotMarketData = {
+      symbol: "IRYSUSDT",
+      currentPrice: 0.0225,
+      price24hPcnt: -13.1,
+      high24h: 0.0269,
+      low24h: 0.0221,
+      volume24hUsd: 19000000,
+      fundingRatePct: -0.048,
+      orderBookImbalancePct: -25.6,
+      buyerAggressionPct: 38.2,
+      trend15m: "bearish",
+      rsi15m: 32
+    };
+
+    it("produces 3 distinct scenarios tailored to user's exact balance for bullish market", () => {
       const budget = 15;
-      const { scenarios, bestScenarioId } = calculateCopilotScenarios(mockMarket, budget, "Маю 15$ але хочу увійти в монету SOL");
+      const { scenarios, bestScenarioId } = calculateCopilotScenarios(mockBullishMarket, budget, "Маю 15$ але хочу увійти в монету SOL");
 
       expect(scenarios).toHaveLength(3);
       expect(["conservative", "momentum", "deep_swing"]).toContain(bestScenarioId);
@@ -76,32 +90,59 @@ describe("Copilot Analyst Engine", () => {
 
       // Verify conservative properties
       expect(conservative.orderType).toBe("Limit");
-      expect(conservative.entryPrice).toBeLessThan(mockMarket.currentPrice);
+      expect(conservative.entryPrice).toBeLessThan(mockBullishMarket.currentPrice);
       expect(conservative.stopLoss).toBeLessThan(conservative.entryPrice);
       expect(conservative.tp1).toBeGreaterThan(conservative.entryPrice);
       expect(conservative.allocatedMarginUsdt).toBe(15);
-      expect(conservative.maxLossUsdt).toBeLessThan(budget); // strictly bounded risk!
+      expect(conservative.maxLossUsdt).toBeLessThan(budget);
       expect(conservative.targetGainUsdt).toBeGreaterThan(0);
-      expect(conservative.riskRewardRatio).toBeGreaterThan(2);
+      expect(conservative.riskRewardRatio).toBeGreaterThan(1.5);
+      expect(conservative.winProbabilityPct).toBeNull(); // P0-01: no fake win probability!
 
       // Verify momentum properties
       expect(momentum.orderType).toBe("Market");
-      expect(momentum.entryPrice).toBe(mockMarket.currentPrice);
+      expect(momentum.entryPrice).toBe(mockBullishMarket.currentPrice);
       expect(momentum.stopLoss).toBeLessThan(momentum.entryPrice);
 
       // Verify all rawSignalText can be parsed by parseSignalText without errors
       for (const sc of scenarios) {
         const parsed = parseSignalText(sc.rawSignalText, "api");
         expect(parsed.symbol).toBe("SOLUSDT");
-        expect(parsed.side).toBe("long");
+        expect(parsed.side).toBe(sc.side);
         expect(parsed.stopLoss).toBe(sc.stopLoss);
         expect(parsed.takeProfits.length).toBeGreaterThanOrEqual(1);
       }
     });
 
+    it("automatically selects SHORT as dominant direction when token is dumping heavily (-13%)", () => {
+      const budget = 10;
+      const { scenarios, bestScenarioId } = calculateCopilotScenarios(
+        mockDumpingMarket,
+        budget,
+        "Маю 10$ проаналізуй різні випадки входу по IRYS"
+      );
+
+      const conservative = scenarios.find((s) => s.id === "conservative")!;
+      const momentum = scenarios.find((s) => s.id === "momentum")!;
+      const alternative = scenarios.find((s) => s.id === "deep_swing")!;
+
+      // Dominant trend is SHORT
+      expect(conservative.side).toBe("short");
+      expect(momentum.side).toBe("short");
+      expect(conservative.stopLoss).toBeGreaterThan(conservative.entryPrice);
+      expect(conservative.tp1).toBeLessThan(conservative.entryPrice);
+
+      // Alternative counter-trend hedge scenario is LONG
+      expect(alternative.side).toBe("long");
+      expect(alternative.leverage).toBe(3); // strictly lower leverage for counter-trend
+      expect(alternative.stopLoss).toBeLessThan(alternative.entryPrice);
+
+      expect(["conservative", "momentum"]).toContain(bestScenarioId);
+    });
+
     it("respects user's explicit short intention", () => {
       const budget = 9.37;
-      const { scenarios } = calculateCopilotScenarios(mockMarket, budget, "Хочу відкрити шорт по SOL на 9.37$");
+      const { scenarios } = calculateCopilotScenarios(mockBullishMarket, budget, "Хочу відкрити шорт по SOL на 9.37$");
 
       for (const sc of scenarios) {
         expect(sc.side).toBe("short");

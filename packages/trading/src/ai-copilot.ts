@@ -75,7 +75,7 @@ export function calculateSMCContext(
       ema20: isBearish24h ? currentPrice * 1.01 : currentPrice * 0.99,
       ema50: isBearish24h ? currentPrice * 1.02 : currentPrice * 0.98,
       trend: isBearish24h ? "bearish" : "bullish",
-      sweptLiquidity: true
+      sweptLiquidity: false
     };
   }
 
@@ -96,7 +96,7 @@ export function calculateSMCContext(
     : currentPrice * 0.022;
 
   // 2. Swing High and Low of recent structure
-  const recentBars = klines.slice(-25);
+  const recentBars = klines.length > 1 ? klines.slice(-26, -1) : klines;
   const swingHigh = Math.max(...recentBars.map(k => k.high));
   const swingLow = Math.min(...recentBars.map(k => k.low));
 

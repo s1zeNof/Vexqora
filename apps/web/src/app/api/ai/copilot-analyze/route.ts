@@ -34,11 +34,14 @@ export async function POST(req: NextRequest) {
       ? body.customBalance
       : (activeBalance > 0 ? activeBalance : 15);
 
+    const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_VISION_API_KEY;
+    const model = process.env.OPENROUTER_MODEL;
+
     const result = await analyzePairWithCopilot({
       query,
       userBalance: balanceToUse,
-      openRouterApiKey: process.env.OPENROUTER_API_KEY,
-      openRouterModel: process.env.OPENROUTER_MODEL
+      ...(apiKey ? { openRouterApiKey: apiKey } : {}),
+      ...(model ? { openRouterModel: model } : {})
     });
 
     return NextResponse.json(result);

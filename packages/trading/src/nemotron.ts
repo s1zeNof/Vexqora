@@ -10,13 +10,13 @@ import { queryMLModelPrediction } from "./ml-bridge";
 
 export interface NemotronResponse {
   content: string;
-  reasoning?: string;
-  model?: string;
+  reasoning?: string | undefined;
+  model?: string | undefined;
   usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-  };
+    promptTokens?: number | undefined;
+    completionTokens?: number | undefined;
+    totalTokens?: number | undefined;
+  } | undefined;
 }
 
 export interface NemotronVisionAnalysis {
@@ -61,6 +61,22 @@ function getAvailableKeys(preferredKey?: string): string[] {
   return Array.from(new Set(keys));
 }
 
+interface RawOpenRouterChatResponse {
+  id?: string;
+  model?: string;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      reasoning?: string | null;
+    };
+  }>;
+}
+
 export async function callNemotron(
   messages: Array<{ role: string; content: string }>,
   options?: {
@@ -97,14 +113,56 @@ export async function callNemotron(
             model,
             messages,
             temperature: options?.temperature ?? 0.3,
-            max_tokens: options?.maxTokens ?? 800
+            max_tokens: options?.maxTokens ?? 350
           })
         });
 
         if (!response.ok) {
           const errorText = await response.text();
+          // If 402 mentions "can only afford X", dynamically retry with affordable budget
+          if (response.status === 402) {
+            const affordMatch = /can only afford (\d+)/i.exec(errorText);
+            const affordableTokens = affordMatch?.[1] ? parseInt(affordMatch[1], 10) : 0;
+            if (affordableTokens >= 35) {
+              const adjustedTokens = Math.max(30, affordableTokens - 5);
+              const retryRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${apiKey}`,
+                  "Content-Type": "application/json",
+                  "HTTP-Referer": "https://vexqora.vercel.app",
+                  "X-Title": "Vexqora Trade"
+                },
+                body: JSON.stringify({
+                  model,
+                  messages,
+                  temperature: options?.temperature ?? 0.3,
+                  max_tokens: adjustedTokens
+                })
+              });
+              if (retryRes.ok) {
+                const retryData = (await retryRes.json()) as RawOpenRouterChatResponse;
+                const choice = retryData.choices?.[0]?.message;
+                const content = choice?.content?.trim() || "";
+                const reasoning = choice?.reasoning?.trim() || "";
+                const retryUsageObj: { promptTokens?: number; completionTokens?: number; totalTokens?: number } = {};
+                if (typeof retryData.usage?.prompt_tokens === "number") retryUsageObj.promptTokens = retryData.usage.prompt_tokens;
+                if (typeof retryData.usage?.completion_tokens === "number") retryUsageObj.completionTokens = retryData.usage.completion_tokens;
+                if (typeof retryData.usage?.total_tokens === "number") retryUsageObj.totalTokens = retryData.usage.total_tokens;
+
+                return {
+                  content: content || reasoning,
+                  ...(reasoning ? { reasoning } : {}),
+                  model: String(retryData.model || model || "deepseek/deepseek-chat"),
+                  ...(Object.keys(retryUsageObj).length > 0 ? { usage: retryUsageObj } : {})
+                };
+              }
+            }
+            lastError = new Error(`Model ${model} unavailable (402): ${errorText}`);
+            continue;
+          }
           // If rate limited or quota exceeded, try next model or key
-          if (response.status === 429 || response.status === 402 || response.status === 404 || response.status === 503) {
+          if (response.status === 429 || response.status === 404 || response.status === 503) {
             lastError = new Error(`Model ${model} unavailable (${response.status}): ${errorText}`);
             continue;
           }
@@ -529,10 +587,10 @@ risk ${risk}%`;
             rationale: adaptive.penalties.length > 0
               ? `${parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep.`} [ML: ${adaptive.learningContext}]`
               : (parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep and volume absorption.`),
-            riskReward: rr >= 1 ? rr : 2.2,
+            riskReward: rr,
+            decision: rr < 1.0 ? "NO_TRADE" : adaptive.decision,
+            rejectionReason: rr < 1.0 ? "Unfavorable Risk-to-Reward ratio (< 1:1.0)" : adaptive.rejectionReason,
             winProbabilityPct: finalWinProb,
-            decision: adaptive.decision,
-            rejectionReason: adaptive.rejectionReason,
             rawSignal,
             parsedSignal,
             entryPrice: currentPrice,

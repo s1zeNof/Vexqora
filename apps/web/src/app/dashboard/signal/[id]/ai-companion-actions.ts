@@ -967,7 +967,13 @@ export async function sendTradeAiMessage(
 3. Якщо денний ліміт збитків на акаунті спрацював від попередніх невдалих угод:
    • Не вимагай закривати поточну прибуткову позицію! Вона відновлює баланс депозиту. Денний ліміт захищає від відкриття НОВИХ угод, а не ліквідує поточний профіт.
 4. Форматуй відповідь чисто за правилами Markdown: невеликі абзаци, чіткі списки з булетами (•), для чисел і цін використовуй жирний шрифт.
-5. Спирайся на точні фактологічні дані біржі Bybit: поточна ціна, вхід, PnL, рівні підтримки/опору, стакан.`;
+5. Спирайся на точні фактологічні дані біржі Bybit: поточна ціна, вхід, PnL, рівні підтримки/опору, стакан.
+6. Якщо трейдер запитує або висловлює сумніви щодо напрямку (наприклад "чому не SHORT?", "там же FVG внизу", "тренд же вниз"):
+   • Надай вичерпне, аргументоване порівняння LONG vs SHORT на поточному рівні.
+   • Поясни ризик продажу в підтримку/дно на локальній консолідації та невигідний R:R для зустрічного шорта.
+   • Безпосередньо розкрий роль FVG (Fair Value Gap): Stop Loss встановлено саме як рівень інвалідації перед заповненням FVG, а шортити перед ним ризиковано через відскоки.
+   • Визнай контекст на старших таймфреймах (4H/1D), пояснивши, що поточна позиція — це тактичний відскок від перепроданості з жорстким стопом, а не заперечення спадного тренду.
+   • Дай конкретні практичні рекомендації.`;
 
       const factsContext = `
 ФАКТИ ПО УГОДІ ТА СУБАГЕНТАХ (${symbol}) станом на ${asOfDateStr}:
@@ -990,7 +996,7 @@ ${pnlText ? `- ${pnlText}` : "- Активної біржової позиції
         { role: "user", content: `${factsContext}\nЗапит користувача: "${userPrompt.trim()}"` }
       ], {
         temperature: 0.3,
-        maxTokens: 650
+        maxTokens: 350
       });
 
       if (nemotronResponse?.content && nemotronResponse.content.trim().length > 0) {
@@ -1004,9 +1010,137 @@ ${pnlText ? `- ${pnlText}` : "- Активної біржової позиції
     }
   }
 
-  // Deterministic Fallback if LLM unavailable
+  // Deterministic Contextual Fallback if LLM unavailable
   if (!replyText) {
-    if (lower.includes("вийти") || lower.includes("закрити") || lower.includes("exit") || lower.includes("close") || lower.includes("безубиток")) {
+    const swingH = typeof structDetail?.swingHigh === "number" ? structDetail.swingHigh.toString() : "н/д";
+    const swingL = typeof structDetail?.swingLow === "number" ? structDetail.swingLow.toString() : "н/д";
+    const cvdUsd = typeof ofDetail?.cvdUsd === "number" ? ofDetail.cvdUsd.toFixed(0) : null;
+    const obi = typeof ofDetail?.weightedImbalance === "number" ? (ofDetail.weightedImbalance * 100).toFixed(1) : null;
+    const buyerAgg = typeof ofDetail?.buyerAggressionPct === "number" ? ofDetail.buyerAggressionPct.toFixed(1) : null;
+
+    // Intent 1: Directional Question / Short vs Long Dilemma / Invalidation / FVG Entry Question
+    const isQuestioningDirection =
+      lower.includes("чому не шорт") ||
+      lower.includes("чому не short") ||
+      lower.includes("чому не лонг") ||
+      lower.includes("чому не long") ||
+      lower.includes("чому шорт") ||
+      lower.includes("чому лонг") ||
+      lower.includes("краще шорт") ||
+      lower.includes("краще б шорт") ||
+      lower.includes("краще лонг") ||
+      lower.includes("чи не краще") ||
+      lower.includes("чи не шорт") ||
+      lower.includes("чи не зашортити") ||
+      lower.includes("чи не залонгити") ||
+      lower.includes("проти тренду") ||
+      lower.includes("чому вхід") ||
+      lower.includes("чому обрали") ||
+      lower.includes("чому обрано") ||
+      (lower.includes("шорт") && (lower.includes("чому") || lower.includes("нащо") || lower.includes("краще") || lower.includes("тренд") || lower.includes("fvg"))) ||
+      (lower.includes("fvg") && (lower.includes("шорт") || lower.includes("вниз") || lower.includes("чому")));
+
+    // Intent 2: Target / Take Profit Probability / Dynamics
+    const isAskingTargetOrTp =
+      lower.includes("ймовірність") ||
+      lower.includes("динаміка") ||
+      lower.includes("tp1") ||
+      lower.includes("tp2") ||
+      lower.includes("тейк") ||
+      lower.includes("ціл") ||
+      lower.includes("дійде") ||
+      lower.includes("досягнення");
+
+    // Intent 3: Exit / Risk Reduction / Breakeven
+    const isAskingExit =
+      lower.includes("вийти") ||
+      lower.includes("закрити") ||
+      lower.includes("exit") ||
+      lower.includes("close") ||
+      lower.includes("безубиток");
+
+    // Intent 4: FVG / Liquidity / SMC specifics
+    const isAskingFvgOrLiquidity =
+      lower.includes("fvg") ||
+      lower.includes("fair value gap") ||
+      lower.includes("імбаланс") ||
+      lower.includes("дисбаланс") ||
+      lower.includes("ліквідн") ||
+      lower.includes("ордерблок") ||
+      lower.includes("order block");
+
+    // Intent 5: Technical indicators
+    const isAskingIndicator =
+      lower.includes("rsi") ||
+      lower.includes("індикатор") ||
+      lower.includes("indicator") ||
+      lower.includes("ема") ||
+      lower.includes("ema");
+
+    // Intent 6: Order flow / CVD / Depth
+    const isAskingOrderFlow =
+      lower.includes("потік") ||
+      lower.includes("cvd") ||
+      lower.includes("кит") ||
+      lower.includes("стакан") ||
+      lower.includes("дельта") ||
+      lower.includes("order flow") ||
+      lower.includes("агресивність");
+
+    // Intent 7: Risk / Stop Loss specifics
+    const isAskingRisk =
+      lower.includes("ризик") ||
+      lower.includes("стоп") ||
+      lower.includes("sl") ||
+      lower.includes("stop loss");
+
+    // Intent 8: Market Structure (when explicitly inquiring about structure regime)
+    const isAskingStructure =
+      lower.includes("яка структура") ||
+      lower.includes("опиши структуру") ||
+      lower.includes("bos") ||
+      lower.includes("choch") ||
+      lower.includes("режим");
+
+    if (isQuestioningDirection) {
+      const isLong = side === "long";
+      replyText = `**Аналіз вибору напрямку позиції (${symbol} ${side.toUpperCase()} vs ${isLong ? "SHORT" : "LONG"}):**
+
+• **Чому було відкрито саме ${side.toUpperCase()} (Вхід: ${entryPrice}):**
+  - **Зона реакції:** Вхід здійснено від зони локальної підтримки (Swing Low: **${swingL}**). На молодших таймфреймах виникла локальна перепроданість.
+  - **Математичний R:R:** Рівень Stop Loss встановлений на **${stopLoss}** (дистанція до стопу: **${distToSl}%**). Це забезпечує суворо контрольований ризик і вигідне співвідношення до першої цілі TP1 (${tp1}, **+${distToTp1}%**).
+
+• **Чому входити в ${isLong ? "SHORT" : "LONG"} у цій точці — підвищений ризик:**
+  - **Продаж у підтримку:** ${isLong ? `Відкривати SHORT на самому дні після імпульсного падіння (біля Swing Low ${swingL}) — це класична пастка запізнілих продавців (sell into support). Потенціал короткого руху вниз обмежений, а ризик різкого відскоку (short squeeze) на консолідації є максимальним.` : `Відкривати LONG на піку після сильного росту — ризик купівлі в опір.`}
+  - **Невигідний R:R для зустрічної угоди:** Для відкриття безпечного шорта Stop Loss довелося б виносити за локальний опір (Swing High ${swingH}$), що робить ризик значно більшим за потенційний прибуток до найближчого дна.
+
+• **Аналіз FVG (Fair Value Gap / Імбалансу) внизу:**
+  - **Магніт ліквідності:** Нижній FVG дійсно притягує ціну. Проте ціна часто не перекриває його негайно, а спочатку дає технічний відскок від верхньої межі підтримки або забирає ліквідність у шортистів.
+  - **Роль нашого Stop Loss (${stopLoss}):** Stop Loss розташований саме як системний захист від заповнення FVG. Якщо продавці продавлять підтримку ${swingL}$ і підуть заповнювати нижній імбаланс — спрацює системний стоп, обмеживши збиток розрахунковими **${distToSl}%**.
+  - **Коли SHORT стане дійсно валідним:** Шорт стане технічно виправданим лише у разі впевненого закриття свічки НИЖЧЕ підтримки ${swingL}$ із закріпленням та наступним ретестом знизу як опору (Break of Structure / BOS), або при відбої від верхнього опору ${swingH}$.
+
+• **Щодо спадного тренду (мультитаймфреймова картина):**
+  - Ви абсолютно правильно помітили спадний контекст на старших таймфреймах (4H/1D).
+  - Поточна позиція — це **тактичний відскок від перепроданості (mean reversion)** з короткостроковими цілями, а не заява про глобальну зміну макро-тренду.
+
+• **Тактична порада:**
+  - Якщо ви хочете зменшити ризик від можливого продавлювання до FVG — зафіксуйте **50% позиції** або підтягніть Stop Loss ближче до входу в правому торговому блоці.`;
+    } else if (isAskingTargetOrTp) {
+      replyText = `**Аналіз імовірності та динаміки досягнення TP1 (${tp1}) для ${symbol}:**
+
+• **Цільовий орієнтир:** Поточна ціна: **${currentPrice}**, Take Profit 1: **${tp1}** (потрібний рух: **+${distToTp1}%**).
+• **Стан стакана (Order Book Resistance):**
+  - Дисбаланс стакана (OBI, 50 рівнів): **${obi !== null ? `${obi}%` : "Нейтральний"}**
+  - Агресивність у стрічці угод: **${buyerAgg !== null ? `${buyerAgg}% покупців` : "н/д"}**
+  - CVD (дельта останніх 50 угод): **${cvdUsd !== null ? `${Number(cvdUsd) >= 0 ? "+" : ""}${cvdUsd} USD` : "н/д"}**
+• **Оцінка консолідації:**
+  - Поки ціна утримується вище локальної підтримки (${swingL}$), триває фаза накопичення об'єму для виходу до зони ліквідності над найближчим локальним екстремумом.
+  - Найближчий локальний опір розташований на рівні Swing High (**${swingH}**). Закріплення над ним відкриває прямий шлях до фіксації першої цілі на ${tp1}$.
+• **Ризик інвалідації сценарію:**
+  - Пробиття Stop Loss **${stopLoss}** скасовує бичачий імпульс. Дистанція до стопу складає **${distToSl}%**.
+• **Тактика дій:**
+  - Рекомендується утримувати позицію. При досягненні 50% дистанції до TP1 доцільно перевести Stop Loss на рівень входу (${entryPrice}) для безризикового супроводу.`;
+    } else if (isAskingExit) {
       const isGreen = (typeof pnlUsdt === "number" && pnlUsdt > 0) || (currentPrice > entryPrice && side === "long") || (currentPrice < entryPrice && side === "short");
       if (isGreen) {
         replyText = `**Тактична оцінка фіксації прибутку (${symbol}):**\n\n` +
@@ -1017,36 +1151,27 @@ ${pnlText ? `- ${pnlText}` : "- Активної біржової позиції
           `*AI Companion продовжує штатний моніторинг позиції.*`;
       } else {
         replyText = `**Оцінка супроводу позиції (${symbol}):**\n\n` +
-          `• **Поточна ціна:** **$${currentPrice}** (Вхід: $${entryPrice}, Stop Loss: $${stopLoss}).\n` +
+          `• **Поточна ціна:** **${currentPrice}** (Вхід: ${entryPrice}, Stop Loss: ${stopLoss}).\n` +
           `• **Дистанція до стопу:** **${distToSl}%**.\n` +
           `• **Аналіз:** Позиція перебуває в межах розрахункового ризику. Переведення в безубиток наразі може призвести до передчасного вибиття стопу звичайним ринковим шумом.\n` +
           `• **Дія:** Якщо ви бажаєте достроково скоротити експозицію — скористайтеся кнопками [50%] або [Close] у правому торговому терміналі.\n\n` +
           `*AI Companion продовжує моніторинг ринкової структури 24/7.*`;
       }
-    } else if (lower.includes("структур") || lower.includes("тренд") || lower.includes("trend") || lower.includes("bos") || lower.includes("choch")) {
-      const trendText = typeof structDetail?.regime === "string" ? structDetail.regime.toUpperCase() : "UNKNOWN";
-      const swingH = typeof structDetail?.swingHigh === "number" ? structDetail.swingHigh.toFixed(4) : "—";
-      const swingL = typeof structDetail?.swingLow === "number" ? structDetail.swingLow.toFixed(4) : "—";
+    } else if (isAskingFvgOrLiquidity) {
+      replyText = `**Аналіз дисбалансу FVG та ліквідності (${symbol}):**
 
-      replyText = `**Ринкова структура (${symbol}) [15M / 4H / 1D]:**
-
-• **Визначений режим:** **${trendText}**
-• **Підтверджений Swing High:** $${swingH}
-• **Підтверджений Swing Low:** $${swingL}
-• **Аналіз структури:** ${structRes?.analysis ?? "Недостатньо закритих свічок для повного MTF прогріву."}
-• **Біржа та час:** ${marketCtx.exchange} · ${asOfDateStr}`;
-    } else if (lower.includes("ризик") || lower.includes("стоп") || lower.includes("sl") || lower.includes("stop")) {
+• **Локальні структурні екстремуми:** Swing High: **${swingH}**, Swing Low: **${swingL}**.
+• **Fair Value Gap (FVG):** У спадному русі імбаланси внизу виступають зонами притягання ціни. Stop Loss на **${stopLoss}** встановлено як бар'єр інвалідації перед повним перекриттям цього діапазону.
+• **Зняття ліквідності:** Трейдери часто потрапляють у пастку, відкриваючи шорти прямо перед FVG — замість швидкого пробою ціна часто дає різкий викид (wick) у зворотний бік.
+• **Статус:** Час аналізу: ${asOfDateStr}.`;
+    } else if (isAskingRisk) {
       replyText = `**Оцінка капіталу та ризику (${symbol}):**
 
-• **Поточний Stop Loss:** $${stopLoss} (дистанція до стопу: **${distToSl}%**)
+• **Поточний Stop Loss:** ${stopLoss} (дистанція до стопу: **${distToSl}%**)
 • **Стан позиції:** ${riskRes?.analysis ?? "Стоп-лосс виставлений на біржі."}
 • **Денні ліміти втрат:** ${marketCtx.lossStatus.checked ? (marketCtx.lossStatus.limitBreached ? "⚠️ Перевищено ліміт збитків" : "В межах норми") : "[CHECK_SKIPPED / НЕ ПЕРЕВІРЕНО]"}
 • **Час верифікації:** ${asOfDateStr}`;
-    } else if (lower.includes("потік") || lower.includes("cvd") || lower.includes("кит") || lower.includes("стакан") || lower.includes("дельта") || lower.includes("order flow")) {
-      const cvdUsd = typeof ofDetail?.cvdUsd === "number" ? ofDetail.cvdUsd.toFixed(0) : null;
-      const obi = typeof ofDetail?.weightedImbalance === "number" ? (ofDetail.weightedImbalance * 100).toFixed(1) : null;
-      const buyerAgg = typeof ofDetail?.buyerAggressionPct === "number" ? ofDetail.buyerAggressionPct.toFixed(1) : null;
-
+    } else if (isAskingOrderFlow) {
       replyText = `**Потік ордерів та біржовий стакан (${symbol} · Bybit Linear):**
 
 • **Кумулятивна дельта (CVD snapshot):** ${cvdUsd !== null ? `**${Number(cvdUsd) >= 0 ? "+" : ""}${cvdUsd} USD**` : "[DATA_UNAVAILABLE]"} *(знімок останніх 50 угод)*
@@ -1054,19 +1179,13 @@ ${pnlText ? `- ${pnlText}` : "- Активної біржової позиції
 • **Агресивність покупців vs продавців:** ${buyerAgg !== null ? `**${buyerAgg}% покупців** / ${(100 - Number(buyerAgg)).toFixed(1)}% продавців` : "[DATA_UNAVAILABLE]"}
 • **Аналіз стрічки:** ${orderFlowRes?.analysis ?? "[DATA_UNAVAILABLE] Потік ордерів недоступний."}
 • **Час зрізу:** ${asOfDateStr}`;
-    } else if (lower.includes("новин") || lower.includes("news") || lower.includes("анонс")) {
-      replyText = `**Новинний контекст (${symbol}):**
-
-• **Статус стрічки новин:** [DATA_UNAVAILABLE: зовнішній новинний фід відключено]
-• **Оцінка новинного фону:** ${newsRes?.analysis ?? "Новинний фід тимчасово недоступний. Торгівля ведеться суто за технічною структурою та біржовим стаканом."}
-• **Час:** ${asOfDateStr}`;
-    } else if (lower.includes("rsi") || lower.includes("індикатор") || lower.includes("indicator")) {
+    } else if (isAskingIndicator) {
       if (marketCtx.klines15M.length < 15) {
         replyText = `**Технічні індикатори (${symbol}):**
 
 • **RSI (14):** [DATA_UNAVAILABLE] — недостатньо завантажених свічок (наразі ${marketCtx.klines15M.length}, потрібно >=15).
 • **EMA (20/50):** [DATA_UNAVAILABLE] — бракує свічкових даних для прогріву.
-• **Статус перевірки:** Відмова через брак даних (No hallucinated indicators). Час: ${asOfDateStr}.`;
+• **Час перевірки:** ${asOfDateStr}.`;
       } else {
         const closes = marketCtx.klines15M.map((k) => k.close);
         const rsiArr = calculateRSI(closes, 14);
@@ -1080,6 +1199,15 @@ ${pnlText ? `- ${pnlText}` : "- Активної біржової позиції
 • **Кількість свічок у розрахунку:** ${marketCtx.klines15M.length}
 • **Час розрахунку:** ${asOfDateStr}`;
       }
+    } else if (isAskingStructure) {
+      const trendText = typeof structDetail?.regime === "string" ? structDetail.regime.toUpperCase() : "UNKNOWN";
+      replyText = `**Ринкова структура (${symbol}) [15M / 4H / 1D]:**
+
+• **Визначений режим:** **${trendText}**
+• **Підтверджений Swing High:** ${swingH}
+• **Підтверджений Swing Low:** ${swingL}
+• **Інтерпретація для поточної угоди:** Локальний діапазон становить [${swingL} - ${swingH}]. Утримання вище Swing Low зберігає шанси на технічний відскок до верхньої межі діапазону.
+• **Час:** ${asOfDateStr}`;
     } else {
       replyText = `**Аналіз угоди (${symbol} · Bybit Linear):**
 ${pnlText ? `${pnlText}\n` : ""}
