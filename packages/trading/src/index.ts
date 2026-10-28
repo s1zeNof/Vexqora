@@ -16,3 +16,4 @@ export * from "./market-context";
 export * from "./news";
 export * from "./agent-runtime";
 export * from "./ensemble-gate";
+export * from "./copilot-analyst";

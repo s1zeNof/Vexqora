@@ -74,6 +74,7 @@ export function TopNav({
   }, []);
 
   const isPulse = pathname === "/dashboard/pulse";
+  const isCopilot = pathname.startsWith("/dashboard/copilot");
   const isSignals =
     pathname.startsWith("/dashboard/signals") ||
     pathname.startsWith("/dashboard/signal") ||
@@ -137,6 +138,14 @@ export function TopNav({
         <nav className="desktop-nav">
           <Link href="/dashboard/pulse" className={`nav-link ${isPulse ? "active" : ""}`}>
             Pulse
+          </Link>
+          <Link
+            href="/dashboard/copilot"
+            className={`nav-link ${isCopilot ? "active" : ""}`}
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            <span>🧠</span>
+            <span>AI Copilot</span>
           </Link>
           <Link href="/dashboard/signals" className={`nav-link ${isSignals ? "active" : ""}`}>
             Signals
@@ -594,9 +603,28 @@ export function TopNav({
                 }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                 </svg>
                 Pulse (Скринер)
+              </Link>
+
+              <Link
+                href="/dashboard/copilot"
+                onClick={() => setMobileDrawerOpen(false)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  background: isCopilot ? "#1A1A1A" : "transparent",
+                  color: isCopilot ? "#42F5B9" : "#FFFFFF",
+                  fontWeight: 600,
+                  fontSize: "14px"
+                }}
+              >
+                <span style={{ fontSize: "16px" }}>🧠</span>
+                AI Copilot (Аналітик)
               </Link>
 
               <Link
