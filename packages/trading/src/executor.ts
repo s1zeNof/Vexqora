@@ -1,6 +1,6 @@
 import type { ExchangeClient, OrderAck } from "@crypto-bot/shared";
 import { roundToStep, type TradePreview } from "./risk";
-import { verifyExecutionGates } from "./ensemble-gate";
+import { verifyExecutionGates, type ExecutionGateParams, type GatePolicy } from "./ensemble-gate";
 
 export type TradeStatus = "pending" | "entry_open" | "active" | "closed" | "cancelled" | "failed";
 
@@ -32,14 +32,33 @@ function orderLinkId(prefix: string, tradeId: string, suffix: string): string {
   return `${prefix}-${safe}-${suffix}`.slice(0, 36);
 }
 
-export async function submitEntry(client: ExchangeClient, preview: TradePreview, tradeId: string): Promise<EntrySubmission> {
+export async function submitEntry(
+  client: ExchangeClient,
+  preview: TradePreview,
+  tradeId: string,
+  options?: {
+    evidence?: Partial<ExecutionGateParams> | undefined;
+    policy?: GatePolicy | undefined;
+  }
+): Promise<EntrySubmission> {
   const gateCheck = verifyExecutionGates({
     symbol: preview.signal.symbol,
     side: preview.signal.side,
     entryPrice: preview.entryPrice,
     stopLoss: preview.signal.stopLoss,
     tp1: preview.signal.takeProfits[0]?.price ?? preview.entryPrice,
-    riskReward: preview.weightedRewardRisk
+    riskReward: preview.weightedRewardRisk,
+    operationType: "NEW_ENTRY",
+    structureTrend: options?.evidence?.structureTrend,
+    structureEvidence: options?.evidence?.structureEvidence,
+    mlDecision: options?.evidence?.mlDecision,
+    mlEvidence: options?.evidence?.mlEvidence,
+    winProbabilityPct: options?.evidence?.winProbabilityPct,
+    evUsd: options?.evidence?.evUsd,
+    hasCriticalNews: options?.evidence?.hasCriticalNews,
+    newsStatus: options?.evidence?.newsStatus,
+    newsEvidence: options?.evidence?.newsEvidence,
+    policy: options?.policy
   });
 
   if (!gateCheck.passed) {

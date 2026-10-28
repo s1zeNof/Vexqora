@@ -22,6 +22,12 @@ import {
   type ToolStatus,
   type TradeThesis
 } from "./tool-registry";
+import {
+  callNemotronWithTools,
+  LEAD_TRADER_TOOLS,
+  type OpenRouterToolCall,
+  type NemotronToolCallResponse
+} from "./nemotron";
 
 export type AgentKey =
   | "lead_trade_agent"
@@ -103,6 +109,10 @@ export interface OrchestrateTradeAnalysisParams {
   stopLoss: number;
   tp1: number;
   klines?: Kline[] | undefined;
+  btcKlines?: Kline[] | undefined;
+  ethKlines?: Kline[] | undefined;
+  trades?: Array<{ price: number; qty: number; side: "buy" | "sell"; time: number }> | undefined;
+  userQuery?: string | undefined;
   mtfSnapshot?: MarketContextSnapshot | null | undefined;
   microstructure?: MarketMicrostructure | null | undefined;
   newsEvents?: NewsEvent[] | undefined;
@@ -475,6 +485,12 @@ export async function runSubagent(
 
 /**
  * Executes dynamic Agentic Lead Trader tool loop.
+ *
+ * Implements:
+ * 1. True LLM-directed tool calling via OpenRouter tools schema when API key is configured.
+ * 2. Model decides which read-only tools to call, observes outputs, resolves contradictions.
+ * 3. Transparent deterministic fallback execution when OPENROUTER_API_KEY is absent (offline test/CI).
+ * 4. Stateful thesis persistence with revision history via DurableTradeThesisStore.
  */
 export async function executeLeadTraderDynamicLoop(
   req: DynamicToolLoopRequest
@@ -491,23 +507,7 @@ export async function executeLeadTraderDynamicLoop(
   const contradictionsFound: string[] = [];
   const warnings: string[] = [];
 
-  // ==========================================
-  // Phase 1: Planning based on task & prompt
-  // ==========================================
-  const query = (req.userQuery ?? "").toLowerCase();
-
-  if (query.includes("adx") || query.includes("індикатор") || query.includes("divergence")) {
-    plan.push("list_indicators", "compute_indicator:ADX");
-  } else if (req.objective === "whale_check" || query.includes("whale") || query.includes("absorption") || query.includes("кит")) {
-    plan.push("get_orderflow", "compute_indicator:VWAP", "get_market_structure");
-  } else if (req.objective === "btc_regime_impact" || query.includes("btc") || query.includes("біткоїн")) {
-    plan.push("get_global_market_regime", "get_btc_dependency", "get_market_structure");
-  } else {
-    // Default initial research plan
-    plan.push("get_global_market_regime", "get_market_structure", "get_orderflow", "search_verified_news");
-  }
-
-  // Helper to run and record a tool call
+  // Helper to record a tool call execution
   const recordToolCall = <T>(
     toolName: string,
     args: Record<string, unknown>,
@@ -525,80 +525,225 @@ export async function executeLeadTraderDynamicLoop(
         status: res.status,
         dataAsOfMs: res.asOfMs,
         source: res.source,
-        summary: res.status === "OK" ? `Executed successfully with source ${res.source}` : `Status ${res.status}: ${res.error ?? "No data"}`
+        summary: res.status === "OK"
+          ? `Executed successfully with source ${res.source}`
+          : `Status ${res.status}: ${res.error ?? "No data"}`
       });
       if (res.qualityWarnings.length > 0) warnings.push(...res.qualityWarnings);
       return res;
     });
   };
 
-  // ==========================================
-  // Phase 2: Execution Cycle 1
-  // ==========================================
-  let btcRegimeData: { btcTrend: string; ethTrend: string; riskEnvironment: string } | null = null;
-  let smcData: ReturnType<LeadTraderToolRegistry["getMarketStructure"]>["data"] = null;
-  let orderFlowData: ReturnType<LeadTraderToolRegistry["getOrderflow"]>["data"] = null;
-  let newsData: NewsEvent[] | null = null;
-  let indicatorResult: { indicator: string; value: number | null } | null = null;
-
-  for (const item of plan) {
-    if (item === "list_indicators") {
-      await recordToolCall("list_indicators", {}, () => registry.listIndicators());
-    } else if (item.startsWith("compute_indicator:")) {
-      const ind = item.split(":")[1]!;
-      const res = await recordToolCall("compute_indicator", { symbol, indicator: ind }, () =>
-        registry.computeIndicator(symbol, ind, klines, { period: 14 })
-      );
-      if (res.data) indicatorResult = res.data;
-    } else if (item === "get_global_market_regime") {
-      const res = await recordToolCall("get_global_market_regime", {}, () =>
-        registry.getGlobalMarketRegime(btcKlines, ethKlines)
-      );
-      if (res.data) btcRegimeData = res.data;
-    } else if (item === "get_market_structure") {
-      const res = await recordToolCall("get_market_structure", { symbol, currentPrice }, () =>
-        registry.getMarketStructure(symbol, klines, currentPrice)
-      );
-      if (res.data) smcData = res.data;
-    } else if (item === "get_orderflow") {
-      const res = await recordToolCall("get_orderflow", { symbol, tradesCount: trades.length }, () =>
-        registry.getOrderflow(symbol, trades)
-      );
-      if (res.data) orderFlowData = res.data;
-    } else if (item === "search_verified_news") {
-      const res = await recordToolCall("search_verified_news", { symbol }, () =>
-        registry.searchVerifiedNews(symbol)
-      );
-      if (res.data) newsData = res.data;
+  // Dispatcher executing validated read-only tools
+  const dispatchTool = async (name: string, args: Record<string, unknown>): Promise<ToolResultEnvelope<unknown>> => {
+    switch (name) {
+      case "get_global_market_regime":
+        return recordToolCall("get_global_market_regime", args, () =>
+          registry.getGlobalMarketRegime(btcKlines, ethKlines)
+        );
+      case "get_btc_dependency":
+        return recordToolCall("get_btc_dependency", args, () =>
+          registry.getBtcDependency(symbol, klines, btcKlines)
+        );
+      case "list_indicators":
+        return recordToolCall("list_indicators", args, () =>
+          registry.listIndicators()
+        );
+      case "compute_indicator": {
+        const ind = typeof args.indicator === "string" ? args.indicator.toUpperCase() : "ADX";
+        const period = typeof args.period === "number" ? args.period : 14;
+        return recordToolCall("compute_indicator", { symbol, indicator: ind, period }, () =>
+          registry.computeIndicator(symbol, ind, klines, { period })
+        );
+      }
+      case "get_market_structure":
+        return recordToolCall("get_market_structure", args, () =>
+          registry.getMarketStructure(symbol, klines, currentPrice)
+        );
+      case "get_orderflow":
+        return recordToolCall("get_orderflow", args, () =>
+          registry.getOrderflow(symbol, trades)
+        );
+      case "search_verified_news":
+        return recordToolCall("search_verified_news", args, () =>
+          registry.searchVerifiedNews(symbol)
+        );
+      case "get_economic_calendar":
+        return recordToolCall("get_economic_calendar", args, () =>
+          registry.getEconomicCalendar()
+        );
+      default:
+        return {
+          toolName: name,
+          status: "ERROR",
+          exchange: "Bybit",
+          marketType: "linear",
+          symbol,
+          source: "ToolDispatcher",
+          asOfMs: Date.now(),
+          receivedAtMs: Date.now(),
+          qualityWarnings: [`Unknown tool requested: ${name}`],
+          data: null,
+          error: `Tool ${name} is not recognized by LeadTraderToolRegistry.`
+        };
     }
+  };
+
+  type BtcRegimeDataType = { btcTrend: string; ethTrend: string; riskEnvironment: string; marketBreadthPct: number | null };
+  type SmcDataType = NonNullable<ReturnType<LeadTraderToolRegistry["getMarketStructure"]>["data"]>;
+  type OrderFlowDataType = NonNullable<ReturnType<LeadTraderToolRegistry["getOrderflow"]>["data"]>;
+  type IndicatorDataType = { indicator: string; value: number | null };
+
+  let btcRegimeData: BtcRegimeDataType | null = null;
+  let smcData: SmcDataType | null = null;
+  let orderFlowData: OrderFlowDataType | null = null;
+  let newsData: NewsEvent[] | null = null;
+  let indicatorResult: IndicatorDataType | null = null;
+
+  // ==========================================
+  // Phase 1 & 2: Genuine LLM Tool-Calling Loop (or Transparent Fallback)
+  // ==========================================
+  const messages: Array<{
+    role: string;
+    content?: string | null;
+    tool_call_id?: string;
+    tool_calls?: OpenRouterToolCall[];
+  }> = [
+    {
+      role: "system",
+      content:
+        `You are the Vexqora Lead Trade Agent. You independently plan, investigate, and verify market conditions for ${symbol} (${req.side ?? "neutral"}). ` +
+        `Current price is $${currentPrice}. ` +
+        `You have access to strictly read-only analytical tools. Choose the tools you need to assess trend structure, order flow, BTC correlation, volatility, or news. ` +
+        `If you see contradictions between different tools, call follow-up tools to resolve them. ` +
+        `When you have sufficient evidence, provide your final synthesis, verdict (HOLD, REVIEW, RECOMMEND_REDUCE, RECOMMEND_CLOSE), and trade thesis.`
+    },
+    {
+      role: "user",
+      content: req.userQuery ?? `Evaluate trade setup for ${symbol} (${req.side ?? "neutral"}). Objective: ${req.objective}.`
+    }
+  ];
+
+  let replanningCycles = 0;
+  let llmDrovePlan = false;
+  const maxCycles = req.maxCycles ?? 3;
+  let currentCycle = 0;
+
+  // Real LLM Tool-Calling loop if OpenRouter API is available
+  while (currentCycle < maxCycles) {
+    currentCycle++;
+    let response: NemotronToolCallResponse | null;
+    try {
+      response = await callNemotronWithTools(messages, { tools: LEAD_TRADER_TOOLS });
+    } catch {
+      response = null;
+    }
+
+    if (!response || !response.toolCalls || response.toolCalls.length === 0) {
+      if (response?.content) {
+        llmDrovePlan = true;
+      }
+      break;
+    }
+
+    llmDrovePlan = true;
+    replanningCycles = currentCycle;
+
+    messages.push({
+      role: "assistant",
+      content: response.content ?? "",
+      tool_calls: response.toolCalls
+    });
+
+    for (const tc of response.toolCalls) {
+      plan.push(tc.function.name);
+      let parsedArgs: Record<string, unknown>;
+      try {
+        parsedArgs = JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>;
+      } catch {
+        parsedArgs = {};
+      }
+
+      const toolRes = await dispatchTool(tc.function.name, parsedArgs);
+      if (tc.function.name === "get_global_market_regime" && toolRes.data) {
+        btcRegimeData = toolRes.data as unknown as BtcRegimeDataType;
+      } else if (tc.function.name === "get_market_structure" && toolRes.data) {
+        smcData = toolRes.data as unknown as SmcDataType;
+      } else if (tc.function.name === "get_orderflow" && toolRes.data) {
+        orderFlowData = toolRes.data as unknown as OrderFlowDataType;
+      } else if (tc.function.name === "search_verified_news" && toolRes.data) {
+        newsData = toolRes.data as unknown as NewsEvent[];
+      } else if (tc.function.name === "compute_indicator" && toolRes.data) {
+        indicatorResult = toolRes.data as unknown as IndicatorDataType;
+      }
+
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        content: JSON.stringify(toolRes.data)
+      });
+    }
+  }
+
+  // Transparent fallback if LLM API is unavailable (offline test, CI, no key)
+  if (!llmDrovePlan || traces.length === 0) {
+    warnings.push("Tool execution used deterministic fallback engine (OPENROUTER_API_KEY not configured).");
+    const query = (req.userQuery ?? "").toLowerCase();
+    const fallbackTools: string[] = [];
+
+    if (query.includes("adx") || query.includes("індикатор") || query.includes("divergence")) {
+      fallbackTools.push("list_indicators", "compute_indicator:ADX");
+    } else if (req.objective === "whale_check" || query.includes("whale") || query.includes("absorption")) {
+      fallbackTools.push("get_orderflow", "compute_indicator:VWAP", "get_market_structure");
+    } else if (req.objective === "btc_regime_impact" || query.includes("btc") || query.includes("біткоїн")) {
+      fallbackTools.push("get_global_market_regime", "get_btc_dependency", "get_market_structure");
+    } else {
+      fallbackTools.push("get_global_market_regime", "get_market_structure", "get_orderflow", "search_verified_news");
+      if (klines.length >= 28) {
+        fallbackTools.push("compute_indicator:ADX");
+      }
+    }
+
+    for (const item of fallbackTools) {
+      plan.push(item);
+      if (item.startsWith("compute_indicator:")) {
+        const ind = item.split(":")[1]!;
+        const res = await dispatchTool("compute_indicator", { symbol, indicator: ind, period: 14 });
+        if (res.data) indicatorResult = res.data as unknown as IndicatorDataType;
+      } else {
+        const res = await dispatchTool(item, { symbol, currentPrice });
+        if (item === "get_global_market_regime" && res.data) btcRegimeData = res.data as unknown as BtcRegimeDataType;
+        else if (item === "get_market_structure" && res.data) smcData = res.data as unknown as SmcDataType;
+        else if (item === "get_orderflow" && res.data) orderFlowData = res.data as unknown as OrderFlowDataType;
+        else if (item === "search_verified_news" && res.data) newsData = res.data as unknown as NewsEvent[];
+      }
+    }
+    replanningCycles = 1;
   }
 
   // ==========================================
   // Phase 3: Observe & Contradiction Evaluation (Replanning)
   // ==========================================
-  let replanningCycles = 1;
   const isLong = req.side === "long";
 
   // Check 1: Contradiction between Bullish Structure and Bearish BTC
   if (btcRegimeData?.btcTrend === "bearish_trend" && (isLong || smcData?.trend === "bullish")) {
     contradictionsFound.push("BTC перебуває у спадному (BEARISH) режимі, тоді як альткоїн показує бичачі ознаки.");
-    // Re-plan: call get_btc_dependency to evaluate decoupling/beta
-    replanningCycles++;
-    await recordToolCall("get_btc_dependency", { symbol }, () =>
-      registry.getBtcDependency(symbol, klines, btcKlines)
-    );
+    if (!plan.includes("get_btc_dependency")) {
+      replanningCycles++;
+      plan.push("get_btc_dependency");
+      await dispatchTool("get_btc_dependency", { symbol });
+    }
   }
 
   // Check 2: Contradiction between Long and negative CVD tape
   if (isLong && orderFlowData && orderFlowData.cvdUsd < -500) {
     contradictionsFound.push(`Потік ордерів показує домінування агресивних продажів (CVD = ${orderFlowData.cvdUsd} USD).`);
-    // Re-plan: compute ADX to see if downtrend momentum is overwhelming
-    if (!plan.includes("compute_indicator:ADX") && klines.length >= 28) {
+    if (!plan.some(p => p.includes("ADX")) && klines.length >= 28) {
       replanningCycles++;
-      const res = await recordToolCall("compute_indicator", { symbol, indicator: "ADX" }, () =>
-        registry.computeIndicator(symbol, "ADX", klines, { period: 14 })
-      );
-      if (res.data) indicatorResult = res.data;
+      plan.push("compute_indicator:ADX");
+      const res = await dispatchTool("compute_indicator", { symbol, indicator: "ADX", period: 14 });
+      if (res.data) indicatorResult = res.data as unknown as IndicatorDataType;
     }
   }
 
@@ -607,7 +752,6 @@ export async function executeLeadTraderDynamicLoop(
   // ==========================================
   let leadVerdict: DynamicToolLoopResult["leadVerdict"] = "HOLD";
 
-  // Check Stop Loss breach
   if (req.stopLoss && currentPrice > 0) {
     const slBreached = isLong ? currentPrice <= req.stopLoss : currentPrice >= req.stopLoss;
     if (slBreached) {
@@ -655,7 +799,7 @@ export async function executeLeadTraderDynamicLoop(
     updatedAtMs: Date.now()
   };
 
-  registry.saveTradeThesis(tradeThesis);
+  await registry.saveTradeThesis(tradeThesis);
 
   return {
     toolTraces: traces,
@@ -695,6 +839,9 @@ export async function orchestrateTradeAnalysis(
     stopLoss: params.stopLoss,
     tp1: params.tp1,
     klines: params.klines ?? [],
+    btcKlines: params.btcKlines ?? [],
+    ethKlines: params.ethKlines ?? [],
+    trades: params.trades ?? [],
     mtfSnapshot: params.mtfSnapshot ?? null,
     microstructure: params.microstructure ?? null,
     newsEvents: params.newsEvents ?? [],
@@ -715,7 +862,11 @@ export async function orchestrateTradeAnalysis(
       entryPrice: params.entryPrice,
       stopLoss: params.stopLoss,
       tp1: params.tp1,
-      ...(params.klines ? { klines: params.klines } : {})
+      userQuery: params.userQuery,
+      trades: params.trades,
+      ...(params.klines ? { klines: params.klines } : {}),
+      ...(params.btcKlines ? { btcKlines: params.btcKlines } : {}),
+      ...(params.ethKlines ? { ethKlines: params.ethKlines } : {})
     })
   ]);
 
@@ -732,14 +883,21 @@ export async function orchestrateTradeAnalysis(
     ? Math.min(1, validEvidenceCount / subagentResults.length)
     : 0;
 
+  // Master verdict directly integrates dynamic Lead Agent decision + Risk Guardian safety
   let leadVerdict: LeadTradeSynthesis["leadVerdict"] = "HOLD";
 
-  if (riskRes.recommendation === "RECOMMEND_CLOSE") {
+  if (riskRes.recommendation === "RECOMMEND_CLOSE" || dynamicLoop.leadVerdict === "RECOMMEND_CLOSE") {
     leadVerdict = "RECOMMEND_CLOSE";
-  } else if (newsRes.recommendation === "RECOMMEND_REDUCE" || orderFlowRes.recommendation === "REVIEW") {
+  } else if (
+    dynamicLoop.leadVerdict === "RECOMMEND_REDUCE" ||
+    newsRes.recommendation === "RECOMMEND_REDUCE" ||
+    orderFlowRes.recommendation === "REVIEW"
+  ) {
     leadVerdict = "RECOMMEND_REDUCE";
-  } else if (structureRes.recommendation === "REVIEW") {
+  } else if (dynamicLoop.leadVerdict === "REVIEW" || structureRes.recommendation === "REVIEW") {
     leadVerdict = "REVIEW";
+  } else if (dynamicLoop.leadVerdict === "HOLD") {
+    leadVerdict = "HOLD";
   }
 
   const confidencePct = Math.round(40 + 50 * evidenceCompleteness);
@@ -747,7 +905,7 @@ export async function orchestrateTradeAnalysis(
     "УВАГА: Оцінка надійності є евристичним зведенням доказів субагентів, а не статистично каліброваною байєсівською ймовірністю.";
 
   const summary = `Lead Trade Agent синтез для ${params.symbol}: ` +
-    `Структура (${structureRes.recommendation}), Потік ордерів (${orderFlowRes.recommendation}), ` +
+    `Lead Вердикт (${dynamicLoop.leadVerdict}), Структура (${structureRes.recommendation}), Потік ордерів (${orderFlowRes.recommendation}), ` +
     `Ризик (${riskRes.recommendation}), Новини (${newsRes.recommendation}). Вердикт: ${leadVerdict}.`;
 
   return {

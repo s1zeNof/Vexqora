@@ -26,7 +26,7 @@ describe("Decision Ensemble Gate (P0-06)", () => {
     expect(result.rejectionReasons).toHaveLength(0);
   });
 
-  it("marks missing evidence as UNKNOWN, never as a fake PASS", () => {
+  it("marks missing evidence as UNKNOWN and fails-closed by default for NEW_ENTRY", () => {
     const result = verifyExecutionGates({
       symbol: "SOLUSDT",
       side: "long",
@@ -37,15 +37,18 @@ describe("Decision Ensemble Gate (P0-06)", () => {
       // structureTrend, evUsd, hasCriticalNews omitted
     });
 
+    expect(result.passed).toBe(false);
+    expect(result.verdict).toBe("GATE_REJECTED");
     expect(result.gates.gate1Structure.status).toBe("UNKNOWN");
     expect(result.gates.gate2MlEv.status).toBe("UNKNOWN");
     expect(result.gates.gate3Risk.status).toBe("PASS");
     expect(result.gates.gate4ExecutionGuard.status).toBe("UNKNOWN");
-    // Under default permissive policy, warnings are recorded instead of faking PASS
-    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.rejectionReasons.some(r => r.includes("Gate 1 (Structure)"))).toBe(true);
+    expect(result.rejectionReasons.some(r => r.includes("Gate 2 (ML/EV)"))).toBe(true);
+    expect(result.rejectionReasons.some(r => r.includes("Gate 4 (News)"))).toBe(true);
   });
 
-  it("enforces fail-closed entry blocking under strict policy when evidence is missing", () => {
+  it("permits entry with warnings only when caller explicitly configures permissive paper policy", () => {
     const result = verifyExecutionGates({
       symbol: "SOLUSDT",
       side: "long",
@@ -54,17 +57,16 @@ describe("Decision Ensemble Gate (P0-06)", () => {
       tp1: 160.0,
       riskReward: 2.0,
       policy: {
-        allowUnknownStructureForEntry: false,
-        allowUnknownMlForEntry: false,
-        allowUnknownNewsForEntry: false
+        allowUnknownStructureForEntry: true,
+        allowUnknownMlForEntry: true,
+        allowUnknownNewsForEntry: true
       }
     });
 
-    expect(result.passed).toBe(false);
-    expect(result.verdict).toBe("GATE_REJECTED");
-    expect(result.rejectionReasons.some(r => r.includes("Gate 1 (Structure)"))).toBe(true);
-    expect(result.rejectionReasons.some(r => r.includes("Gate 2 (ML/EV)"))).toBe(true);
-    expect(result.rejectionReasons.some(r => r.includes("Gate 4 (News)"))).toBe(true);
+    expect(result.passed).toBe(true);
+    expect(result.verdict).toBe("PASS");
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.rejectionReasons).toHaveLength(0);
   });
 
   it("blocks new entry if negative EV or mlDecision NO_TRADE", () => {

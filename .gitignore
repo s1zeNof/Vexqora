@@ -12,4 +12,5 @@ supabase/.temp/
 data/
 .venv/
 *.parquet
-
+packages/data-lake/theses/*.json
+!packages/data-lake/theses/.gitkeep

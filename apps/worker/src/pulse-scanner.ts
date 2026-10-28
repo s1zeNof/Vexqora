@@ -3,6 +3,8 @@ import {
   VexqoraPulseScanner,
   evaluateMarketMicrostructure,
   classifyKlinesRegime,
+  calculateBtcDependency,
+  defaultThesisStore,
   type BybitTickerItem
 } from "@crypto-bot/trading";
 import {
@@ -14,6 +16,25 @@ import {
 import type { Kline } from "@crypto-bot/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
+
+interface WorkerActiveTradeRow {
+  id: string;
+  account_id: string;
+  symbol: string;
+  side: "long" | "short";
+  entry_avg?: number | string | null;
+  sl?: number | string | null;
+  trailing_stop?: unknown;
+  status: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+interface WorkerPendingSignalRow {
+  id: string;
+  symbol: string;
+  side: "long" | "short";
+  metadata?: Record<string, unknown> | null;
+}
 
 export function startPulseScanner(
   supabase: SupabaseClient,
@@ -43,6 +64,137 @@ export function startPulseScanner(
             const currentBtcRegime = classifyKlinesRegime(btcKlines, "15M").trend;
             if (lastBtcRegime && lastBtcRegime !== currentBtcRegime) {
               logger.info({ from: lastBtcRegime, to: currentBtcRegime }, "BTC Global Regime Shift detected by Worker");
+
+              // A. Real per-position re-evaluation (P0-05)
+              try {
+                const { data: activeTrades } = await supabase
+                  .from("trades")
+                  .select("id, account_id, symbol, side, entry_avg, sl, trailing_stop, status, metadata")
+                  .eq("status", "active");
+
+                const tradeList = (activeTrades ?? []) as unknown as WorkerActiveTradeRow[];
+                if (tradeList.length > 0) {
+                  for (const trade of tradeList) {
+                    const tradeSymbol = String(trade.symbol);
+                    const altKlines = await fetchRecentKlines(tradeSymbol, "15", 30).catch(() => []);
+                    const dependency = calculateBtcDependency(tradeSymbol, altKlines, btcKlines);
+
+                    const isLong = trade.side === "long";
+                    const btcTurnedBearish = currentBtcRegime === "bearish_trend";
+                    const btcTurnedBullish = currentBtcRegime === "bullish_trend";
+                    const hasContradiction = (isLong && btcTurnedBearish) || (!isLong && btcTurnedBullish);
+
+                    const thesisKey = `thesis-trade-${trade.id}`;
+                    const existingThesis = await defaultThesisStore.getThesis(thesisKey);
+                    const updatedStatus: "VALID" | "WEAKENED" | "INVALIDATED" = hasContradiction ? "WEAKENED" : "VALID";
+
+                    await defaultThesisStore.saveThesis({
+                      thesisId: thesisKey,
+                      tradeId: trade.id,
+                      accountId: trade.account_id,
+                      symbol: tradeSymbol,
+                      side: trade.side,
+                      status: updatedStatus,
+                      revision: existingThesis ? existingThesis.revision + 1 : 1,
+                      entryPrice: Number(trade.entry_avg ?? 0),
+                      invalidationPrice: Number(trade.sl ?? 0),
+                      primaryRationale: `BTC Regime Shift ${lastBtcRegime} -> ${currentBtcRegime}. Dependency Beta: ${dependency.betaToBtc ?? "unknown"}.`,
+                      invalidationTrigger: `Підтверджене пробиття Stop Loss: $${String(trade.sl ?? "N/A")}`,
+                      supportingEvidence: [
+                        `BTC regime: ${currentBtcRegime}`,
+                        `Symbol correlation: ${dependency.rollingCorrelation1h ?? "N/A"}`
+                      ],
+                      opposingEvidence: hasContradiction ? [`BTC flipped to ${currentBtcRegime} (anti-position momentum)`] : [],
+                      createdAtMs: existingThesis?.createdAtMs ?? Date.now(),
+                      updatedAtMs: Date.now()
+                    });
+
+                    // Update trade record with reassessment audit
+                    const existingMeta: Record<string, unknown> = typeof trade.metadata === "object" && trade.metadata ? trade.metadata : {};
+                    await supabase.from("trades").update({
+                      metadata: {
+                        ...existingMeta,
+                        btc_regime_reassessed_at: Date.now(),
+                        btc_regime_from: lastBtcRegime,
+                        btc_regime_to: currentBtcRegime,
+                        regime_contradiction: hasContradiction,
+                        beta_to_btc: dependency.betaToBtc,
+                        requires_reassessment: hasContradiction
+                      }
+                    }).eq("id", trade.id);
+
+                    // Insert AI companion analysis for this specific trade
+                    const { data: session } = await supabase
+                      .from("trade_ai_sessions")
+                      .select("id")
+                      .eq("trade_id", trade.id)
+                      .maybeSingle();
+
+                    if (session && typeof session.id === "string") {
+                      const tradeSideStr = String(trade.side).toUpperCase();
+                      await supabase.from("trade_ai_messages").insert({
+                        session_id: session.id,
+                        author_kind: "lead",
+                        agent_id: "lead_trade_agent",
+                        kind: "analysis",
+                        content: hasContradiction
+                          ? `⚠️ **Lead Agent Re-Assessment:** Виявлено глобальну зміну режиму BTC (${lastBtcRegime.toUpperCase()} → ${currentBtcRegime.toUpperCase()}).\n` +
+                            `Позиція ${tradeSymbol} (${tradeSideStr}) має бета-чутливість до BTC ${dependency.betaToBtc ?? "N/A"}. ` +
+                            `Гіпотезу угоди переведено у статус WEAKENED. Рекомендується захисне підтягування Stop Loss або часткове скорочення об'єму.`
+                          : `ℹ️ **Lead Agent BTC Context:** Режим BTC перейшов у ${currentBtcRegime.toUpperCase()}. ` +
+                            `Позиція ${tradeSymbol} (${tradeSideStr}) узгоджена з динамікою ринку. Гіпотеза залишається валідною.`,
+                        structured_payload: {
+                          event: "BTC_REGIME_REASSESSMENT",
+                          tradeId: trade.id,
+                          symbol: tradeSymbol,
+                          side: trade.side,
+                          fromRegime: lastBtcRegime,
+                          toRegime: currentBtcRegime,
+                          betaToBtc: dependency.betaToBtc,
+                          correlation: dependency.rollingCorrelation1h,
+                          thesisStatus: updatedStatus,
+                          timestampMs: Date.now()
+                        }
+                      });
+                    }
+                  }
+                }
+              } catch (reassessErr) {
+                logger.warn({ err: reassessErr }, "Error during per-trade BTC shift re-evaluation");
+              }
+
+              // B. Per-signal pending review
+              try {
+                const { data: pendingSignals } = await supabase
+                  .from("signals")
+                  .select("id, symbol, side, metadata")
+                  .eq("status", "pending");
+
+                const signalList = (pendingSignals ?? []) as unknown as WorkerPendingSignalRow[];
+                if (signalList.length > 0) {
+                  for (const sig of signalList) {
+                    const isContradiction =
+                      (sig.side === "long" && currentBtcRegime === "bearish_trend") ||
+                      (sig.side === "short" && currentBtcRegime === "bullish_trend");
+
+                    if (isContradiction) {
+                      const sigMeta: Record<string, unknown> = typeof sig.metadata === "object" && sig.metadata ? sig.metadata : {};
+                      await supabase.from("signals").update({
+                        metadata: {
+                          ...sigMeta,
+                          btc_regime_conflict: true,
+                          regime_at_review: currentBtcRegime,
+                          reassessed_at: Date.now()
+                        }
+                      }).eq("id", sig.id);
+                    }
+                  }
+                }
+              } catch (sigErr) {
+                logger.warn({ err: sigErr }, "Error during pending signals BTC shift review");
+              }
+
+              // C. Account broadcast notification
               const { data: accounts } = await supabase
                 .from("exchange_accounts")
                 .select("id")
@@ -54,7 +206,7 @@ export function startPulseScanner(
                     account_id: account.id,
                     role: "system",
                     kind: "market_pulse",
-                    content: `⚠️ BTC REGIME SHIFT: Біткоїн перейшов із ${lastBtcRegime.toUpperCase()} у ${currentBtcRegime.toUpperCase()}. Всі активні гіпотези альткоїнів проходять переоцінку.`,
+                    content: `⚠️ BTC REGIME SHIFT: Біткоїн перейшов із ${lastBtcRegime.toUpperCase()} у ${currentBtcRegime.toUpperCase()}. Всі активні гіпотези альткоїнів переоцінено 24/7 воркером.`,
                     payload: {
                       event: "BTC_REGIME_CHANGE",
                       from: lastBtcRegime,

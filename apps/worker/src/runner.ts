@@ -1,6 +1,6 @@
 import { createBybitClient, createPaperExchangeClient, decryptSecret } from "@crypto-bot/exchange";
 import type { RiskSettingsRow, Signal } from "@crypto-bot/shared";
-import { createTradePreview, protectFilledPosition, submitEntry, verifyExecutionGates, type TradePreview } from "@crypto-bot/trading";
+import { createTradePreview, protectFilledPosition, submitEntry, verifyExecutionGates, type TradePreview, type GateEvidence } from "@crypto-bot/trading";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
 import { sendDiscordAlert } from "./notifications";
@@ -117,6 +117,10 @@ export async function processJob(
   );
 
   // 4b. Enforce 4-Gate Decision Ensemble verification on backend execution path
+  const signalObj = signal as unknown as { metadata?: Record<string, unknown> };
+  const signalMeta = signalObj.metadata ?? {};
+  const isPaper = job.exchange_kind === "paper";
+
   const gateCheck = verifyExecutionGates({
     symbol: signal.symbol,
     side: signal.side,
@@ -124,7 +128,19 @@ export async function processJob(
     stopLoss: signal.stopLoss,
     tp1: signal.takeProfits[0]?.price ?? preview.entryPrice,
     riskReward: preview.weightedRewardRisk,
-    killSwitchActive: Boolean(riskSettings.kill_switch)
+    killSwitchActive: Boolean(riskSettings.kill_switch),
+    structureTrend: signalMeta.structureTrend as ("bullish" | "bearish" | "ranging" | "unknown") | undefined,
+    structureEvidence: signalMeta.structureEvidence as GateEvidence | undefined,
+    mlDecision: signalMeta.mlDecision as ("TRADE" | "NO_TRADE" | "WAIT" | "UNKNOWN") | undefined,
+    mlEvidence: signalMeta.mlEvidence as GateEvidence | undefined,
+    hasCriticalNews: signalMeta.hasCriticalNews as boolean | undefined,
+    newsStatus: signalMeta.newsStatus as ("OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE") | undefined,
+    newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined,
+    policy: isPaper ? {
+      allowUnknownStructureForEntry: true,
+      allowUnknownMlForEntry: true,
+      allowUnknownNewsForEntry: true
+    } : undefined
   });
 
   if (!gateCheck.passed) {
@@ -177,7 +193,22 @@ export async function processJob(
 
   // 6. Submit Entry Order
   logger.info({ tradeId, symbol: signal.symbol, qty: preview.qty, exchange: job.exchange_kind }, "Submitting entry order");
-  const entryResult = await submitEntry(client, preview, tradeId);
+  const entryResult = await submitEntry(client, preview, tradeId, {
+    evidence: {
+      structureTrend: signalMeta.structureTrend as ("bullish" | "bearish" | "ranging" | "unknown") | undefined,
+      structureEvidence: signalMeta.structureEvidence as GateEvidence | undefined,
+      mlDecision: signalMeta.mlDecision as ("TRADE" | "NO_TRADE" | "WAIT" | "UNKNOWN") | undefined,
+      mlEvidence: signalMeta.mlEvidence as GateEvidence | undefined,
+      hasCriticalNews: signalMeta.hasCriticalNews as boolean | undefined,
+      newsStatus: signalMeta.newsStatus as ("OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE") | undefined,
+      newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined
+    },
+    policy: isPaper ? {
+      allowUnknownStructureForEntry: true,
+      allowUnknownMlForEntry: true,
+      allowUnknownNewsForEntry: true
+    } : undefined
+  });
 
   // Persist entry order
   await supabase.from("orders").insert({

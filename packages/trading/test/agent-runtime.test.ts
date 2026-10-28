@@ -215,4 +215,34 @@ describe("Multi-Agent Runtime & Dynamic Tool Loop Engine (Phase P0-08, AT-02, AT
     expect(result.tradeThesis?.status).toBe("WEAKENED");
     expect(result.tradeThesis?.invalidationTrigger).toBeDefined();
   });
+
+  it("orchestrateTradeAnalysis passes BTC/ETH klines to dynamic loop and reflects dynamic loop verdict", async () => {
+    // 60 candles of falling BTC (bearish trend)
+    const btcFalling = Array.from({ length: 60 }, (_, i) => ({
+      time: 1000 + i * 60000,
+      open: 65000 - i * 100,
+      high: 65100 - i * 100,
+      low: 64900 - i * 100,
+      close: 64950 - i * 100,
+      volume: 1000
+    }));
+
+    const synthesis = await orchestrateTradeAnalysis({
+      sessionId: "test_dynamic_integration",
+      symbol: "SOLUSDT",
+      currentPrice: 150,
+      side: "long",
+      entryPrice: 148,
+      stopLoss: 142,
+      tp1: 160,
+      klines: dummyKlines,
+      btcKlines: btcFalling,
+      ethKlines: btcFalling
+    });
+
+    // The dynamic loop detected the BTC contradiction and weakened the trade verdict
+    expect(["REVIEW", "RECOMMEND_REDUCE"]).toContain(synthesis.leadVerdict);
+    expect(synthesis.summary).toContain("Lead Вердикт");
+    expect(synthesis.toolTraces?.some(t => t.toolName === "get_btc_dependency")).toBe(true);
+  });
 });

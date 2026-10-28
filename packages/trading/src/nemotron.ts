@@ -209,6 +209,222 @@ export async function callNemotron(
   throw lastError ?? new Error("All OpenRouter API keys failed");
 }
 
+export interface OpenRouterToolFunction {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export interface OpenRouterToolDefinition {
+  type: "function";
+  function: OpenRouterToolFunction;
+}
+
+export interface OpenRouterToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface NemotronToolCallResponse {
+  content: string | null;
+  reasoning?: string | undefined;
+  toolCalls?: OpenRouterToolCall[] | undefined;
+  model?: string | undefined;
+}
+
+export const LEAD_TRADER_TOOLS: OpenRouterToolDefinition[] = [
+  {
+    type: "function",
+    function: {
+      name: "get_global_market_regime",
+      description: "Inspect BTC and ETH 4H trend, multi-timeframe risk environment, and altcoin market breadth.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_btc_dependency",
+      description: "Calculate rolling correlation, beta, and decoupling status of altcoin against BTC.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "Trading pair symbol, e.g. SOLUSDT" }
+        },
+        required: ["symbol"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_indicators",
+      description: "List available technical indicators with required bar lookbacks and parameters.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "compute_indicator",
+      description: "Compute mathematical indicator on verified candle history (ADX, ATR, RSI, VWAP, EMA, SMA).",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "Trading pair symbol" },
+          indicator: { type: "string", enum: ["ADX", "ATR", "RSI", "VWAP", "EMA", "SMA"], description: "Indicator name" },
+          period: { type: "number", description: "Lookback period (e.g. 14 for ADX/RSI, 20/50 for EMA)" }
+        },
+        required: ["symbol", "indicator"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_market_structure",
+      description: "Analyze swing highs/lows, market structure breaks (BOS/CHOCH), and order blocks.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "Trading pair symbol" },
+          currentPrice: { type: "number", description: "Current market price" }
+        },
+        required: ["symbol"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_orderflow",
+      description: "Analyze institutional trade aggression, cumulative volume delta (CVD), and order book imbalance.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "Trading pair symbol" }
+        },
+        required: ["symbol"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_verified_news",
+      description: "Search official exchange announcements, delisting alerts, and macroeconomic news.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", description: "Trading pair symbol" }
+        },
+        required: ["symbol"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_economic_calendar",
+      description: "Retrieve verified macroeconomic calendar events.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  }
+];
+
+export async function callNemotronWithTools(
+  messages: Array<{ role: string; content?: string | null; tool_call_id?: string; tool_calls?: OpenRouterToolCall[] }>,
+  options?: {
+    apiKey?: string;
+    model?: string;
+    tools?: OpenRouterToolDefinition[];
+    temperature?: number;
+    maxTokens?: number;
+  }
+): Promise<NemotronToolCallResponse | null> {
+  const keys = getAvailableKeys(options?.apiKey);
+  if (keys.length === 0) {
+    return null;
+  }
+
+  const requestedModel = (options?.model ?? process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL).trim();
+  const modelsToTry: string[] = typeof requestedModel === "string" && requestedModel.length > 0
+    ? [requestedModel, ...CANDIDATE_MODELS.filter((m) => m !== requestedModel)]
+    : CANDIDATE_MODELS;
+
+  const tools = options?.tools ?? LEAD_TRADER_TOOLS;
+
+  for (const apiKey of keys) {
+    for (const model of modelsToTry) {
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://vexqora.vercel.app",
+            "X-Title": "Vexqora Trade"
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            tools,
+            temperature: options?.temperature ?? 0.2,
+            max_tokens: options?.maxTokens ?? 500
+          })
+        });
+
+        if (!response.ok) continue;
+
+        const data = (await response.json()) as {
+          model?: string;
+          choices?: Array<{
+            message?: {
+              content?: string | null;
+              reasoning?: string | null;
+              tool_calls?: OpenRouterToolCall[];
+            };
+          }>;
+        };
+
+        const choice = data.choices?.[0]?.message;
+        if (!choice) continue;
+
+        return {
+          content: choice.content ?? null,
+          reasoning: choice.reasoning ?? undefined,
+          toolCalls: choice.tool_calls ?? undefined,
+          model: data.model ?? model
+        };
+      } catch {
+        // Try next candidate
+      }
+    }
+  }
+
+  return null;
+}
+
 export async function callNemotronVision(
   imageUrlOrBase64: string,
   prompt?: string,

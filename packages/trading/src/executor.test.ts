@@ -28,14 +28,31 @@ const preview: TradePreview = {
 };
 
 describe("executor", () => {
+  const verifiedOptions = {
+    evidence: {
+      structureTrend: "bullish" as const,
+      evUsd: 15.0,
+      hasCriticalNews: false,
+      newsStatus: "OK" as const
+    }
+  };
+
   it("uses the exact same execution sequence for demo and live clients", async () => {
     const demo = mockClient("demo");
     const live = mockClient("live");
-    await submitEntry(demo.client, preview, "trade-1");
+    await submitEntry(demo.client, preview, "trade-1", verifiedOptions);
     await protectFilledPosition(demo.client, preview, "trade-1");
-    await submitEntry(live.client, preview, "trade-1");
+    await submitEntry(live.client, preview, "trade-1", verifiedOptions);
     await protectFilledPosition(live.client, preview, "trade-1");
     expect(demo.calls).toEqual(live.calls);
+  });
+
+  it("fails-closed by default if caller provides no verified evidence, and does not call placeOrder", async () => {
+    const mock = mockClient("live");
+    await expect(submitEntry(mock.client, preview, "trade-no-evidence")).rejects.toThrow(
+      "Execution blocked by Decision Ensemble Gate: Gate 1 (Structure)"
+    );
+    expect(mock.calls).toHaveLength(0);
   });
 
   it("places stop protection before reduce-only targets", async () => {

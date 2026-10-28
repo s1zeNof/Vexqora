@@ -37,27 +37,27 @@ export interface ExecutionGateParams {
   stopLoss: number;
   tp1: number;
   riskReward: number;
-  operationType?: OperationType;
-  policy?: GatePolicy;
+  operationType?: OperationType | undefined;
+  policy?: GatePolicy | undefined;
 
   // Gate 1: Structure Alignment
   structureTrend?: "bullish" | "bearish" | "ranging" | "unknown" | undefined;
-  structureEvidence?: GateEvidence;
+  structureEvidence?: GateEvidence | undefined;
 
   // Gate 2: ML & Quantitative EV
   evUsd?: number | undefined;
   winProbabilityPct?: number | null | undefined;
   mlDecision?: "TRADE" | "NO_TRADE" | "WAIT" | "UNKNOWN" | undefined;
-  mlEvidence?: GateEvidence;
+  mlEvidence?: GateEvidence | undefined;
 
   // Gate 3: Risk Guardian & Account Safety (Deterministic)
-  killSwitchActive?: boolean;
-  dailyLossBreached?: boolean;
+  killSwitchActive?: boolean | undefined;
+  dailyLossBreached?: boolean | undefined;
 
   // Gate 4: News & Execution Guard
   hasCriticalNews?: boolean | undefined;
   newsStatus?: "OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE" | undefined;
-  newsEvidence?: GateEvidence;
+  newsEvidence?: GateEvidence | undefined;
 }
 
 export interface ExecutionGateResult {
@@ -75,9 +75,9 @@ export interface ExecutionGateResult {
 }
 
 const DEFAULT_POLICY: Required<GatePolicy> = {
-  allowUnknownStructureForEntry: true,
-  allowUnknownMlForEntry: true,
-  allowUnknownNewsForEntry: true
+  allowUnknownStructureForEntry: false,
+  allowUnknownMlForEntry: false,
+  allowUnknownNewsForEntry: false
 };
 
 /**

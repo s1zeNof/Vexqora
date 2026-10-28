@@ -61,32 +61,100 @@ export class VerifiedNewsFeedService implements NewsFeedProvider {
       return await this.customProvider();
     }
 
-    // Default provider reads current macro fixtures & active exchange state
-    const now = new Date();
-    const asOfMs = now.getTime();
+    const now = Date.now();
+    const asOfMs = now;
 
+    // Real upstream fetch from Bybit public announcements API
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const resp = await fetch("https://api.bybit.com/v5/announcements/index?locale=en-US&limit=10", {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        const body = (await resp.json()) as {
+          retCode?: number;
+          result?: {
+            list?: Array<{
+              title?: string;
+              description?: string;
+              type?: { title?: string; key?: string };
+              url?: string;
+              dateTimestamp?: number | string;
+            }>;
+          };
+        };
+
+        if (body.retCode === 0 && Array.isArray(body.result?.list)) {
+          const events: NewsEvent[] = body.result.list.map((item, idx) => {
+            const dateNum = Number(item.dateTimestamp) || now;
+            const title = item.title ?? "Bybit Announcement";
+            const lowerTitle = title.toLowerCase();
+            const typeKey = item.type?.key?.toLowerCase() ?? "";
+
+            let impactLevel: NewsEvent["impactLevel"] = "low";
+            const eventType: NewsEvent["eventType"] = "exchange_announcement";
+
+            if (typeKey.includes("delist") || lowerTitle.includes("delist")) {
+              impactLevel = "critical";
+            } else if (
+              lowerTitle.includes("maintenance") ||
+              lowerTitle.includes("upgrade") ||
+              lowerTitle.includes("system outage")
+            ) {
+              impactLevel = "high";
+            } else if (typeKey.includes("new_crypto") || lowerTitle.includes("launch")) {
+              impactLevel = "medium";
+            }
+
+            // Extract uppercase crypto pairs from title
+            const symbolMatches = title.match(/[A-Z0-9]{2,10}(?:USDT|PERP)/g);
+            const symbols = symbolMatches && symbolMatches.length > 0 ? Array.from(new Set(symbolMatches)) : ["ALL_MARKETS"];
+
+            return {
+              id: `bybit-ann-${dateNum}-${idx}`,
+              sourceUrl: item.url ?? "https://announcements.bybit.com",
+              sourceType: "official_announcement",
+              publishedAt: new Date(dateNum).toISOString(),
+              firstSeenAt: new Date(now).toISOString(),
+              receivedAt: new Date(now).toISOString(),
+              symbols,
+              eventType,
+              verificationStatus: "verified",
+              confidenceInRelevance: 0.95,
+              impactLevel,
+              title,
+              summary: item.description ?? title
+            };
+          });
+
+          return {
+            status: "ONLINE",
+            source: "BybitAnnouncementsAPI",
+            asOfMs,
+            eventsCount: events.length,
+            events,
+            economicCalendar: [],
+            qualityWarnings: []
+          };
+        }
+      }
+    } catch {
+      // Upstream failed or network offline in test
+    }
+
+    // Honest fallback: if real upstream could not be reached, return UNAVAILABLE. Zero synthetic data!
     return {
-      status: "ONLINE",
-      source: "VexqoraVerifiedNewsService",
+      status: "UNAVAILABLE",
+      source: "BybitAnnouncementsAPI",
       asOfMs,
       eventsCount: 0,
       events: [],
-      economicCalendar: [
-        {
-          id: "econ-cpi-upcoming",
-          name: "US Consumer Price Index (YoY)",
-          country: "US",
-          category: "CPI",
-          scheduledAtIso: new Date(asOfMs + 24 * 3600 * 1000).toISOString(),
-          forecast: "2.8%",
-          previous: "2.9%",
-          impactLevel: "high",
-          affectedSymbols: ["BTCUSDT", "ETHUSDT", "XAUUSDT", "ALL_MARKETS"],
-          sourceUrl: "https://www.bls.gov/cpi/",
-          asOfIso: now.toISOString()
-        }
-      ],
-      qualityWarnings: []
+      economicCalendar: [],
+      qualityWarnings: ["Upstream news provider is unreachable or unconfigured (UNAVAILABLE). No synthetic data generated."]
     };
   }
 

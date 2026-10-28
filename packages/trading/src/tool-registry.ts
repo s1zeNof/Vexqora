@@ -30,6 +30,12 @@ import {
   type EconomicCalendarItem
 } from "./news-feed";
 import type { NewsEvent } from "./news";
+import { calculateWilderADX } from "./adx";
+import {
+  defaultThesisStore,
+  type DurableTradeThesisStore,
+  type TradeThesis
+} from "./thesis-store";
 
 export type ToolStatus = "OK" | "STALE" | "UNAVAILABLE" | "ERROR" | "INSUFFICIENT_DATA";
 
@@ -120,37 +126,33 @@ export const SUPPORTED_INDICATORS: IndicatorDefinition[] = [
   }
 ];
 
-export interface TradeThesis {
-  thesisId: string;
-  symbol: string;
-  side: "long" | "short" | "neutral";
-  status: "VALID" | "WEAKENED" | "INVALIDATED" | "REASSESSMENT_REQUIRED";
-  revision: number;
-  entryPrice: number;
-  invalidationPrice: number;
-  primaryRationale: string;
-  invalidationTrigger: string;
-  supportingEvidence: string[];
-  opposingEvidence: string[];
-  createdAtMs: number;
-  updatedAtMs: number;
-}
+export { type TradeThesis } from "./thesis-store";
 
 /**
  * Lead Trader Tool Registry
  */
 export class LeadTraderToolRegistry {
   private newsService: VerifiedNewsFeedService;
-  private thesisStore = new Map<string, TradeThesis>();
+  private thesisStore: DurableTradeThesisStore;
 
-  constructor(newsService?: VerifiedNewsFeedService) {
-    this.newsService = newsService ?? new VerifiedNewsFeedService();
+  constructor(options?: { newsService?: VerifiedNewsFeedService; thesisStore?: DurableTradeThesisStore } | VerifiedNewsFeedService) {
+    if (options instanceof VerifiedNewsFeedService) {
+      this.newsService = options;
+      this.thesisStore = defaultThesisStore;
+    } else {
+      this.newsService = options?.newsService ?? new VerifiedNewsFeedService();
+      this.thesisStore = options?.thesisStore ?? defaultThesisStore;
+    }
   }
 
   /**
    * Tool 1: get_global_market_regime
    */
-  getGlobalMarketRegime(btcKlines: Kline[], ethKlines: Kline[]): ToolResultEnvelope<{
+  getGlobalMarketRegime(
+    btcKlines: Kline[],
+    ethKlines: Kline[],
+    universeTickers?: Array<{ symbol: string; price24hPcnt?: string | number }>
+  ): ToolResultEnvelope<{
     btcTrend: string;
     ethTrend: string;
     riskEnvironment: string;
@@ -186,6 +188,19 @@ export class LeadTraderToolRegistry {
       riskEnvironment = "risk_off";
     }
 
+    let marketBreadthPct: number | null = null;
+    const qualityWarnings: string[] = [];
+
+    if (universeTickers && universeTickers.length > 0) {
+      const advancing = universeTickers.filter(t => {
+        const p = typeof t.price24hPcnt === "string" ? parseFloat(t.price24hPcnt) : Number(t.price24hPcnt);
+        return !isNaN(p) && p > 0;
+      }).length;
+      marketBreadthPct = Number(((advancing / universeTickers.length) * 100).toFixed(1));
+    } else {
+      qualityWarnings.push("Market breadth omitted: universe tickers not supplied.");
+    }
+
     return {
       toolName: "get_global_market_regime",
       status: "OK",
@@ -197,12 +212,12 @@ export class LeadTraderToolRegistry {
       asOfMs,
       receivedAtMs,
       candlesUsed: btcKlines.length,
-      qualityWarnings: [],
+      qualityWarnings,
       data: {
         btcTrend: btcRegime.trend,
         ethTrend: ethRegime.trend,
         riskEnvironment,
-        marketBreadthPct: btcRegime.trend === "bullish_trend" ? 68.5 : 34.0
+        marketBreadthPct
       }
     };
   }
@@ -257,7 +272,15 @@ export class LeadTraderToolRegistry {
     indicatorName: string,
     klines: Kline[],
     params: Record<string, number> = {}
-  ): ToolResultEnvelope<{ indicator: string; value: number | null; values?: number[]; details?: string }> {
+  ): ToolResultEnvelope<{
+    indicator: string;
+    value: number | null;
+    values?: number[] | undefined;
+    details?: string | undefined;
+    plusDi?: number | undefined;
+    minusDi?: number | undefined;
+    dx?: number | undefined;
+  }> {
     const receivedAtMs = Date.now();
     const asOfMs = klines.length > 0 ? klines[klines.length - 1]!.time : receivedAtMs;
     const name = indicatorName.toUpperCase();
@@ -351,7 +374,9 @@ export class LeadTraderToolRegistry {
 
     if (name === "ADX") {
       const period = params.period ?? 14;
-      if (klines.length < period * 2) {
+      const adxResult = calculateWilderADX(klines, period);
+
+      if (!adxResult) {
         return {
           toolName: "compute_indicator",
           status: "INSUFFICIENT_DATA",
@@ -362,24 +387,11 @@ export class LeadTraderToolRegistry {
           asOfMs,
           receivedAtMs,
           candlesUsed: klines.length,
-          qualityWarnings: [`ADX(${period}) requires at least ${period * 2} candles for smoothing.`],
+          qualityWarnings: [`ADX(${period}) requires at least ${period * 2} candles for canonical Wilder smoothing.`],
           data: null,
           error: `Insufficient candle history for ADX(${period}).`
         };
       }
-      // Simple verified ADX proxy
-      let trSum = 0;
-      for (let i = 1; i < klines.length; i++) {
-        const tr = Math.max(
-          klines[i]!.high - klines[i]!.low,
-          Math.abs(klines[i]!.high - klines[i - 1]!.close),
-          Math.abs(klines[i]!.low - klines[i - 1]!.close)
-        );
-        trSum += tr;
-      }
-      const avgTr = trSum / (klines.length - 1);
-      const closeRange = Math.abs(closes[closes.length - 1]! - closes[0]!);
-      const adxVal = Number(Math.min(95, Math.max(10, (closeRange / (avgTr * 10)) * 50)).toFixed(1));
 
       return {
         toolName: "compute_indicator",
@@ -394,8 +406,15 @@ export class LeadTraderToolRegistry {
         qualityWarnings: [],
         data: {
           indicator: `ADX_${period}`,
-          value: adxVal,
-          details: adxVal >= 25 ? "Strong trend confirmed" : "Weak trend / range consolidation"
+          value: adxResult.adx,
+          plusDi: adxResult.plusDi,
+          minusDi: adxResult.minusDi,
+          dx: adxResult.dx,
+          details: adxResult.trendStrength === "STRONG_TREND"
+            ? "Strong trend confirmed"
+            : (adxResult.trendStrength === "WEAK_OR_CONSOLIDATING"
+                ? "Weak trend / range consolidation"
+                : "Developing trend")
         }
       };
     }
@@ -558,30 +577,28 @@ export class LeadTraderToolRegistry {
   }
 
   /**
-   * Tool 9: save_trade_thesis / get_trade_thesis
+   * Tool 9: save_trade_thesis / get_trade_thesis (Durable persistence)
    */
-  saveTradeThesis(thesis: TradeThesis): ToolResultEnvelope<TradeThesis> {
-    const now = Date.now();
-    thesis.updatedAtMs = now;
-    this.thesisStore.set(thesis.thesisId, thesis);
+  async saveTradeThesis(thesis: TradeThesis): Promise<ToolResultEnvelope<TradeThesis>> {
+    const saved = await this.thesisStore.saveThesis(thesis);
 
     return {
       toolName: "save_trade_thesis",
       status: "OK",
       exchange: "InternalStore",
       marketType: "linear",
-      symbol: thesis.symbol,
-      source: "TradeThesisRegistry",
-      asOfMs: now,
-      receivedAtMs: now,
+      symbol: saved.symbol,
+      source: "DurableTradeThesisRegistry",
+      asOfMs: saved.updatedAtMs,
+      receivedAtMs: saved.updatedAtMs,
       qualityWarnings: [],
-      data: thesis
+      data: saved
     };
   }
 
-  getTradeThesis(thesisId: string): ToolResultEnvelope<TradeThesis> {
+  async getTradeThesis(thesisId: string): Promise<ToolResultEnvelope<TradeThesis>> {
     const now = Date.now();
-    const thesis = this.thesisStore.get(thesisId);
+    const thesis = await this.thesisStore.getThesis(thesisId);
 
     return {
       toolName: "get_trade_thesis",
@@ -589,8 +606,8 @@ export class LeadTraderToolRegistry {
       exchange: "InternalStore",
       marketType: "linear",
       symbol: thesis?.symbol ?? "UNKNOWN",
-      source: "TradeThesisRegistry",
-      asOfMs: now,
+      source: "DurableTradeThesisRegistry",
+      asOfMs: thesis?.updatedAtMs ?? now,
       receivedAtMs: now,
       qualityWarnings: thesis ? [] : ["Thesis ID not found in registry."],
       data: thesis ?? null

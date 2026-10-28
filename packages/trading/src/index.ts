@@ -21,3 +21,5 @@ export * from "./global-regime";
 export * from "./news-feed";
 export * from "./tool-registry";
 export * from "./model-registry";
+export * from "./adx";
+export * from "./thesis-store";

@@ -85,7 +85,7 @@ describe("Unified Tool Registry (P0-08, P0-12, AT-05, AT-08)", () => {
     expect(res.qualityWarnings).toContain("Upstream offline");
   });
 
-  it("saves and retrieves stateful trade thesis with revision tracking", () => {
+  it("saves and retrieves stateful trade thesis with revision tracking and durable persistence", async () => {
     const thesis = {
       thesisId: "thesis-sol-1",
       symbol: "SOLUSDT",
@@ -102,12 +102,35 @@ describe("Unified Tool Registry (P0-08, P0-12, AT-05, AT-08)", () => {
       updatedAtMs: Date.now()
     };
 
-    const saved = registry.saveTradeThesis(thesis);
+    const saved = await registry.saveTradeThesis(thesis);
     expect(saved.status).toBe("OK");
 
-    const retrieved = registry.getTradeThesis("thesis-sol-1");
+    const retrieved = await registry.getTradeThesis("thesis-sol-1");
     expect(retrieved.status).toBe("OK");
     expect(retrieved.data?.symbol).toBe("SOLUSDT");
     expect(retrieved.data?.invalidationPrice).toBe(147.5);
+  });
+
+  it("calculates real market breadth from universe tickers or returns null without fabrication", () => {
+    const btcKlines = makeKlines(25, 60000);
+    const ethKlines = makeKlines(25, 3000);
+
+    // 1. Without universe tickers -> marketBreadthPct is null, no fake 68.5%
+    const withoutTickers = registry.getGlobalMarketRegime(btcKlines, ethKlines);
+    expect(withoutTickers.status).toBe("OK");
+    expect(withoutTickers.data?.marketBreadthPct).toBeNull();
+    expect(withoutTickers.qualityWarnings[0]).toContain("Market breadth omitted");
+
+    // 2. With real universe tickers -> calculates true percentage
+    const tickers = [
+      { symbol: "BTCUSDT", price24hPcnt: "0.05" },
+      { symbol: "ETHUSDT", price24hPcnt: "0.02" },
+      { symbol: "SOLUSDT", price24hPcnt: "-0.01" },
+      { symbol: "DOGEUSDT", price24hPcnt: "0.03" }
+    ];
+    const withTickers = registry.getGlobalMarketRegime(btcKlines, ethKlines, tickers);
+    expect(withTickers.status).toBe("OK");
+    // 3 out of 4 advancing = 75%
+    expect(withTickers.data?.marketBreadthPct).toBe(75);
   });
 });

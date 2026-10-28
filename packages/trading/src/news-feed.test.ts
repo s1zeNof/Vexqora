@@ -143,4 +143,23 @@ describe("Verified News Intelligence & Economic Calendar (P0-09, AT-03, AT-04)",
     expect(deduplicated).toHaveLength(1);
     expect(deduplicated[0]?.id).toBe("1");
   });
+
+  it("default provider never fabricates synthetic upcoming CPI calendar dates", async () => {
+    const realService = new VerifiedNewsFeedService();
+    const res = await realService.fetchLatestEvents();
+
+    // Must be either ONLINE (live Bybit announcements) or UNAVAILABLE (offline/restricted)
+    expect(["ONLINE", "UNAVAILABLE"]).toContain(res.status);
+
+    // ZERO fake CPI economic calendar entries
+    const fakeCpi = res.economicCalendar.find(c => c.id === "econ-cpi-upcoming");
+    expect(fakeCpi).toBeUndefined();
+
+    if (res.status === "UNAVAILABLE") {
+      expect(res.events).toHaveLength(0);
+      expect(res.qualityWarnings[0]).toContain("UNAVAILABLE");
+    } else {
+      expect(res.source).toBe("BybitAnnouncementsAPI");
+    }
+  });
 });
