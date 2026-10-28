@@ -1,15 +1,18 @@
 import type { Kline } from "@crypto-bot/shared";
 
+export type PatternProvenance = "heuristic" | "calibrated";
+
 export interface HistoricalPatternMatch {
   patternId: string;
   patternName: string;
   marketRegime: "High Volatility" | "Trend Continuation" | "Range Consolidation" | "Liquidity Hunt";
-  sampleCount: number;
-  winRatePct: number;
-  avgRewardRisk: number;
+  sampleCount: number | null;
+  winRatePct: number | null;
+  avgRewardRisk: number | null;
   typicalDurationMin: number;
   historicalContext: string;
   isEmpirical: boolean;
+  provenance: PatternProvenance;
 }
 
 export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
@@ -17,45 +20,49 @@ export const HISTORICAL_PATTERNS: HistoricalPatternMatch[] = [
     patternId: "pat-liq-sweep-choch",
     patternName: "Liquidity Sweep + Bullish CHOCH",
     marketRegime: "Liquidity Hunt",
-    sampleCount: 37,
-    winRatePct: 73.0,
-    avgRewardRisk: 2.8,
+    sampleCount: null,
+    winRatePct: null,
+    avgRewardRisk: null,
     typicalDurationMin: 35,
     isEmpirical: false,
-    historicalContext: "Price swept liquidity below local low, returned into value range and triggered structural shift. In 27 of 37 historical episodes, price achieved TP2 prior to invalidation."
+    provenance: "heuristic",
+    historicalContext: "Price swept liquidity below local low, returned into value range and triggered structural shift. Heuristic setup: target value area high with stop below sweep wick."
   },
   {
     patternId: "pat-vol-expansion",
     patternName: "Momentum Breakout & Volume Expansion",
     marketRegime: "Trend Continuation",
-    sampleCount: 42,
-    winRatePct: 71.4,
-    avgRewardRisk: 2.6,
+    sampleCount: null,
+    winRatePct: null,
+    avgRewardRisk: null,
     typicalDurationMin: 45,
     isEmpirical: false,
-    historicalContext: "Sharp volume surge exceeding 3.5x baseline during Bollinger Band expansion. 30 of 42 historical episodes sustained trend to second target."
+    provenance: "heuristic",
+    historicalContext: "Sharp volume surge exceeding baseline during Bollinger Band expansion. Heuristic setup: momentum continuation towards next key liquidity pool."
   },
   {
     patternId: "pat-order-block-abs",
     patternName: "Order Block Sweep & Delta Absorption",
     marketRegime: "High Volatility",
-    sampleCount: 29,
-    winRatePct: 75.8,
-    avgRewardRisk: 3.1,
+    sampleCount: null,
+    winRatePct: null,
+    avgRewardRisk: null,
     typicalDurationMin: 28,
     isEmpirical: false,
-    historicalContext: "Institutional limit absorption confirmed by positive delta divergence against falling price. 22 of 29 historical episodes produced clean continuation."
+    provenance: "heuristic",
+    historicalContext: "Institutional limit absorption identified by positive delta divergence against falling price. Heuristic setup: bounce towards volume point of control."
   },
   {
     patternId: "pat-exhaustion-revert",
     patternName: "Volume Climax & Mean Reversion",
     marketRegime: "Range Consolidation",
-    sampleCount: 34,
-    winRatePct: 70.6,
-    avgRewardRisk: 2.4,
+    sampleCount: null,
+    winRatePct: null,
+    avgRewardRisk: null,
     typicalDurationMin: 20,
     isEmpirical: false,
-    historicalContext: "Parabolic exhaustion spike (>4% in 30s) followed by immediate bid exhaustion. 24 of 34 historical cases reverted back to VWAP."
+    provenance: "heuristic",
+    historicalContext: "Parabolic exhaustion spike followed by immediate bid exhaustion. Heuristic setup: mean reversion towards volume-weighted average price."
   }
 ];
 
@@ -115,11 +122,12 @@ export function findHistoricalPatternMatch(
     patternId: "pat-discretionary",
     patternName: "Discretionary Market Structure",
     marketRegime: "Range Consolidation",
-    sampleCount: 0,
-    winRatePct: 50.0,
-    avgRewardRisk: 2.0,
+    sampleCount: null,
+    winRatePct: null,
+    avgRewardRisk: null,
     typicalDurationMin: 30,
     isEmpirical: false,
+    provenance: "heuristic",
     historicalContext: "No validated SMC liquidity sweep or volume breakout pattern identified. Market structure is discretionary."
   };
 }

@@ -936,7 +936,9 @@ export function SignalLiveStage({
                 bonuses: [],
                 learningContext: "",
                 isHighRisk: qualityTier === "High Risk",
-                decision: qualityTier === "High Risk" ? "NO_TRADE" : "TRADE"
+                decision: qualityTier === "High Risk" ? "NO_TRADE" : "TRADE",
+                provenance: "heuristic",
+                calibratedProbability: null
               }}
             />
           </div>

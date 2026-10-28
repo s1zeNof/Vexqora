@@ -4,6 +4,8 @@ export interface AdaptiveConfidenceInput {
   symbol: string;
   side: "long" | "short";
   change24hPct?: number | undefined;
+  baseScore?: number | undefined;
+  /** @deprecated Use baseScore instead. Heuristic quality baseline, not empirical win rate. */
   baseWinRate?: number | undefined;
   recentLossesCount?: number | undefined;
   recentWinsCount?: number | undefined;
@@ -20,19 +22,24 @@ export interface AdaptiveConfidenceResult {
   isHighRisk: boolean;
   decision: "TRADE" | "NO_TRADE" | "WAIT_FOR_CONFIRMATION";
   rejectionReason?: string | undefined;
+  provenance: "heuristic" | "calibrated";
+  calibratedProbability: number | null;
 }
 
 /**
- * Machine Learning & Adaptive Confidence Engine.
- * Dynamically adjusts AI confidence based on:
- * 1. Overextension risk (entering long after a 30%+ 24h pump or short after 30%+ dump).
+ * Adaptive Heuristic Confidence & Risk Engine.
+ * Note: This produces a heuristic quality score (0..100), NOT a calibrated out-of-sample ML probability.
+ * Provenance is tagged as "heuristic" and calibratedProbability is explicitly null.
+ *
+ * Dynamically adjusts heuristic confidence based on:
+ * 1. Overextension risk (entering long after extreme 24h pump or short after dump).
  * 2. Recent loss feedback loop (penalizes symbols with recent immediate stop loss triggers).
  * 3. Candlestick wick absorption and exhaustion signals.
  */
 export function calculateAdaptiveConfidence(
   input: AdaptiveConfidenceInput
 ): AdaptiveConfidenceResult {
-  const base = input.baseWinRate ?? 72;
+  const base = input.baseScore ?? input.baseWinRate ?? 72;
   const penalties: Array<{ reason: string; deltaPct: number }> = [];
   const bonuses: Array<{ reason: string; deltaPct: number }> = [];
 
@@ -66,12 +73,12 @@ export function calculateAdaptiveConfidence(
   const losses = input.recentLossesCount ?? 0;
   if (losses >= 2) {
     penalties.push({
-      reason: `ML Memory: ${losses} нещодавні інвалідації по Stop Loss на ${input.symbol}. Пастка ліквідності`,
+      reason: `Memory Feedback: ${losses} нещодавні інвалідації по Stop Loss на ${input.symbol}. Пастка ліквідності`,
       deltaPct: 18
     });
   } else if (losses === 1) {
     penalties.push({
-      reason: `ML Memory: попередня угода по ${input.symbol} завершилась розворотом у Stop Loss`,
+      reason: `Memory Feedback: попередня угода по ${input.symbol} завершилась розворотом у Stop Loss`,
       deltaPct: 10
     });
   }
@@ -153,11 +160,11 @@ export function calculateAdaptiveConfidence(
     rejectionReason = `Підвищена невизначеність структури (впевненість ${calculatedConfidence}%). Рекомендовано дочекатись додаткового свічкового підтвердження.`;
   }
 
-  let learningContext = "Vexqora Memory & ML: параметри в нормі.";
+  let learningContext = "Vexqora Memory: параметри в нормі.";
   if (penalties.length > 0) {
-    learningContext = `ML Адаптація: Впевненість знижено на -${totalPenalty}% через ${penalties.map(p => p.reason).join("; ")}.`;
+    learningContext = `Евристична адаптація ризику: Впевненість знижено на -${totalPenalty}% через ${penalties.map(p => p.reason).join("; ")}.`;
   } else if (bonuses.length > 0) {
-    learningContext = `ML Адаптація: Підвищена стабільність сетапу (+${totalBonus}%).`;
+    learningContext = `Евристична адаптація ризику: Підвищена стабільність сетапу (+${totalBonus}%).`;
   }
 
   return {
@@ -169,6 +176,8 @@ export function calculateAdaptiveConfidence(
     learningContext,
     isHighRisk,
     decision,
-    rejectionReason
+    rejectionReason,
+    provenance: "heuristic",
+    calibratedProbability: null
   };
 }

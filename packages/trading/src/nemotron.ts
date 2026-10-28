@@ -1,6 +1,6 @@
 import { formatCryptoPrice, type Kline } from "@crypto-bot/shared";
 import type { AISignalOpportunity, EnhancedSignalResult, SMCAnalysis } from "./ai-copilot";
-import { generateOpportunityFromTicker, getSensibleTickSize } from "./ai-copilot";
+import { getSensibleTickSize } from "./ai-copilot";
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
@@ -567,7 +567,9 @@ risk ${risk}%`;
             : 8.5;
 
           const finalScore = Number(Math.min(rawScore, adaptive.qualityScore).toFixed(1));
-          const finalWinProb = Math.min(parsedJSON.winProbabilityPct ?? 65, mlPrediction.winProbabilityPct, adaptive.confidencePct);
+          const finalWinProb = mlPrediction.winProbabilityPct !== null
+            ? Math.min(parsedJSON.winProbabilityPct ?? 65, mlPrediction.winProbabilityPct, adaptive.confidencePct)
+            : null;
 
           const smcAnalysis: SMCAnalysis = {
             timeframe1D: parsedJSON.smc1D || (side === "long" ? "Bullish Institutional Accumulation" : "Bearish Distribution"),
@@ -609,14 +611,52 @@ risk ${risk}%`;
       }
     }
   } catch (error) {
-    console.warn("Nemotron call failed, using high-precision quantitative SMC engine:", error);
+    console.warn("Nemotron call failed, returning protective NO_TRADE:", error);
+    return {
+      symbol: normSymbol,
+      side: "no_trade",
+      currentPrice,
+      qualityScore: 3.0,
+      qualityTier: "High Risk",
+      strategy: "Lead AI Offline / Limited Mode",
+      rationale: "LLM / AI аналітик недоступний (помилка API або квоти). Створення сигналу заблоковано для захисту капіталу (AT-10 fail-closed).",
+      riskReward: 0,
+      winProbabilityPct: null,
+      decision: "NO_TRADE",
+      rejectionReason: "LLM сервіс недоступний. Автоматична генерація сигналу без схвалення AI заборонена.",
+      rawSignal: `${normSymbol} NO_TRADE\nreason: LLM unavailable`,
+      parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
+      entryPrice: currentPrice,
+      stopLoss: currentPrice,
+      takeProfits: [],
+      trailingDistancePct: 0,
+      suggestedLeverage: 1,
+      historicalMatch: hist
+    };
   }
 
-  // High-precision mathematical fallback
-  return generateOpportunityFromTicker(normSymbol, currentPrice, {
-    ...options,
-    ...(options?.klines ? { klines: options.klines } : {})
-  });
+  // If parsedJSON was null or invalid: fail-closed NO_TRADE
+  return {
+    symbol: normSymbol,
+    side: "no_trade",
+    currentPrice,
+    qualityScore: 3.0,
+    qualityTier: "High Risk",
+    strategy: "Lead AI Schema Invalid (Protective NO_TRADE)",
+    rationale: "Модель не повернула валідну торгову схему. Створення сигналу скасовано.",
+    riskReward: 0,
+    winProbabilityPct: null,
+    decision: "NO_TRADE",
+    rejectionReason: "Неможливо розпарсити торгову гіпотезу моделі.",
+    rawSignal: `${normSymbol} NO_TRADE\nreason: Invalid AI schema`,
+    parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
+    entryPrice: currentPrice,
+    stopLoss: currentPrice,
+    takeProfits: [],
+    trailingDistancePct: 0,
+    suggestedLeverage: 1,
+    historicalMatch: hist
+  };
 }
 
 export async function enhanceSignalWithNemotron(

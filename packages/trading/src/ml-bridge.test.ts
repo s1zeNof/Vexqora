@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/require-await, @typescript-eslint/no-unsafe-return */
 import { describe, it, expect } from "vitest";
 import { calculateExpectedValue, queryMLModelPrediction } from "./ml-bridge";
 
@@ -19,6 +19,19 @@ describe("ML Bridge & Expected Value (EV) Engine", () => {
       expect(res.totalFeesUsd).toBeGreaterThan(0);
     });
 
+    it("returns zero EV when winProbabilityPct is null (uncalibrated model)", () => {
+      const res = calculateExpectedValue({
+        winProbabilityPct: null,
+        riskUsd: 100,
+        rewardUsd: 180,
+        entryPrice: 65000
+      });
+
+      expect(res.isPositiveEv).toBe(false);
+      expect(res.evUsd).toBe(0);
+      expect(res.pWin).toBe(0);
+    });
+
     it("identifies negative EV trade and accounts for exchange fees", () => {
       const res = calculateExpectedValue({
         winProbabilityPct: 45,
@@ -34,7 +47,7 @@ describe("ML Bridge & Expected Value (EV) Engine", () => {
   });
 
   describe("queryMLModelPrediction", () => {
-    it("falls back gracefully to calibrated Bayesian engine when Python server offline", async () => {
+    it("returns MODEL_UNAVAILABLE with null win probability and NO_TRADE when Python server is offline (AT-11)", async () => {
       const res = await queryMLModelPrediction({
         symbol: "BTCUSDT",
         side: "long",
@@ -47,30 +60,15 @@ describe("ML Bridge & Expected Value (EV) Engine", () => {
       });
 
       expect(res.symbol).toBe("BTCUSDT");
-      expect(res.winProbabilityPct).toBeGreaterThan(40);
+      expect(res.winProbabilityPct).toBeNull(); // Strict contract: null without calibrated model
       expect(res.modelType).toBe("MODEL_UNAVAILABLE");
       expect(res.isFallback).toBe(true);
       expect(res.status).toBe("MODEL_UNAVAILABLE");
       expect(res.decision).toBe("NO_TRADE");
-      expect(typeof res.expectedValueUsd).toBe("number");
+      expect(res.rejectionReason).toContain("ML-сервіс недоступний");
     });
 
-    it("rejects entry when overextended or mathematically unprofitable", async () => {
-      // Overextended asset (e.g. pumped +45% in 24h)
-      const res = await queryMLModelPrediction({
-        symbol: "MEMEUSDT",
-        side: "long",
-        entryPrice: 1.0,
-        stopLoss: 0.95,
-        tp1: 1.02, // poor R:R
-        klines: []
-      });
-
-      expect(res.decision).toBe("NO_TRADE");
-      expect(res.rejectionReason).toBeDefined();
-    });
-
-    it("faithfully preserves Bayesian fallback provenance even on HTTP 200 response", async () => {
+    it("faithfully treats Bayesian Python response without .cbm weights as uncalibrated (null probability)", async () => {
       const mockFetch = async () => ({
         ok: true,
         json: async () => ({
@@ -97,37 +95,40 @@ describe("ML Bridge & Expected Value (EV) Engine", () => {
       expect(res.modelType).toBe("StatisticalBayesian");
       expect(res.isFallback).toBe(true);
       expect(res.status).toBe("FALLBACK_RULE");
-      expect(res.decision).toBe("NO_TRADE"); // Not auto-approved as trained CatBoost
+      expect(res.winProbabilityPct).toBeNull(); // Cannot claim calibrated probability without .cbm weights
+      expect(res.decision).toBe("NO_TRADE");
     });
 
-    it("acknowledges verified CatBoostClassifier when modelLoaded is authentic", async () => {
-      const mockFetch = (async () => ({
+    it("accepts genuine CatBoost predictions when weights are active and confirmed", async () => {
+      const mockFetch = async () => ({
         ok: true,
         json: async () => ({
           symbol: "BTCUSDT",
           side: "long",
-          winProbabilityPct: 67.5,
-          expectedValueUsd: 45.0,
-          riskReward: 2.4,
+          winProbabilityPct: 61.4,
+          expectedValueUsd: 24.8,
+          riskReward: 1.9,
           decision: "TRADE",
           modelType: "CatBoostClassifier",
-          topFeatures: ["rsi_14", "vol_ratio"]
+          topFeatures: ["vol_surge", "cvd_delta", "rsi_14"]
         })
-      })) as any;
+      }) as any;
 
       const res = await queryMLModelPrediction({
         symbol: "BTCUSDT",
         side: "long",
-        entryPrice: 65000,
-        stopLoss: 64000,
-        tp1: 67400,
+        entryPrice: 67000,
+        stopLoss: 66000,
+        tp1: 68900,
         klines: []
       }, mockFetch);
 
       expect(res.modelType).toBe("CatBoostClassifier");
       expect(res.isFallback).toBe(false);
       expect(res.status).toBe("OK");
+      expect(res.winProbabilityPct).toBe(61.4);
       expect(res.decision).toBe("TRADE");
+      expect(res.expectedValueUsd).toBe(24.8);
     });
   });
 });

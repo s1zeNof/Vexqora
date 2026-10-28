@@ -23,7 +23,7 @@ export interface AISignalOpportunity {
   strategy: string;
   rationale: string;
   riskReward: number;
-  winProbabilityPct: number;
+  winProbabilityPct: number | null;
   rawSignal: string;
   parsedSignal: Signal;
   entryPrice: number;

@@ -17,3 +17,7 @@ export * from "./news";
 export * from "./agent-runtime";
 export * from "./ensemble-gate";
 export * from "./copilot-analyst";
+export * from "./global-regime";
+export * from "./news-feed";
+export * from "./tool-registry";
+export * from "./model-registry";

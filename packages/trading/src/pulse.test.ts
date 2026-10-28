@@ -22,7 +22,8 @@ describe("Vexqora Pulse Scanner", () => {
     expect(pulse.eventType).toBe("price_spike");
     expect(pulse.changePct).toBe(10.33);
     expect(pulse.timeframeSec).toBe(15);
-    expect(pulse.historicalMatch.sampleCount).toBeGreaterThan(0);
+    expect(pulse.historicalMatch.sampleCount).toBeNull();
+    expect(pulse.historicalMatch.provenance).toBe("heuristic");
   });
 
   it("filters out low-turnover illiquid pairs", () => {

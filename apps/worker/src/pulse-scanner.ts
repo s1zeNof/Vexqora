@@ -2,6 +2,7 @@ import {
   generateNemotronOpportunity,
   VexqoraPulseScanner,
   evaluateMarketMicrostructure,
+  classifyKlinesRegime,
   type BybitTickerItem
 } from "@crypto-bot/trading";
 import {
@@ -20,6 +21,7 @@ export function startPulseScanner(
 ): () => void {
   const scanner = new VexqoraPulseScanner();
   let isRunning = true;
+  let lastBtcRegime: string | null = null;
 
   logger.info({ intervalMs }, "Starting 24/7 Vexqora Pulse Universe Scanner (Bybit Linear)...");
 
@@ -32,6 +34,45 @@ export function startPulseScanner(
       const tickers = data.result?.list ?? [];
       if (tickers.length === 0) return;
 
+      // 1. Global Market Context: Monitor BTC Regime (P0-10, AT-01)
+      const btcTicker = tickers.find(t => t.symbol === "BTCUSDT");
+      if (btcTicker) {
+        try {
+          const btcKlines = await fetchRecentKlines("BTCUSDT", "15", 30).catch(() => []);
+          if (btcKlines.length >= 20) {
+            const currentBtcRegime = classifyKlinesRegime(btcKlines, "15M").trend;
+            if (lastBtcRegime && lastBtcRegime !== currentBtcRegime) {
+              logger.info({ from: lastBtcRegime, to: currentBtcRegime }, "BTC Global Regime Shift detected by Worker");
+              const { data: accounts } = await supabase
+                .from("exchange_accounts")
+                .select("id")
+                .eq("is_active", true);
+
+              if (accounts && accounts.length > 0) {
+                for (const account of accounts) {
+                  await supabase.from("chat_messages").insert({
+                    account_id: account.id,
+                    role: "system",
+                    kind: "market_pulse",
+                    content: `⚠️ BTC REGIME SHIFT: Біткоїн перейшов із ${lastBtcRegime.toUpperCase()} у ${currentBtcRegime.toUpperCase()}. Всі активні гіпотези альткоїнів проходять переоцінку.`,
+                    payload: {
+                      event: "BTC_REGIME_CHANGE",
+                      from: lastBtcRegime,
+                      to: currentBtcRegime,
+                      timestampMs: Date.now()
+                    }
+                  });
+                }
+              }
+            }
+            lastBtcRegime = currentBtcRegime;
+          }
+        } catch (btcErr) {
+          logger.warn({ err: btcErr }, "Failed to monitor BTC regime");
+        }
+      }
+
+      // 2. Discover anomalies across market universe
       const anomalies = scanner.processTickers(tickers);
 
       if (anomalies.length > 0) {
@@ -44,7 +85,7 @@ export function startPulseScanner(
           .eq("is_active", true);
 
         if (accounts && accounts.length > 0) {
-          for (const anomaly of anomalies.slice(0, 3)) {
+          for (const anomaly of anomalies.slice(0, 5)) {
             // Level 2: Microstructure deep dive (Order Book + Recent Trades + OI)
             let microstructure;
             let klines: Kline[] = [];
@@ -127,7 +168,12 @@ export function startPulseScanner(
                     microstructure
                   });
 
-                  if (opp.decision !== "NO_TRADE" && opp.side !== "no_trade" && opp.qualityScore >= 8.5 && opp.winProbabilityPct >= 58) {
+                  if (
+                    opp.decision !== "NO_TRADE" &&
+                    opp.side !== "no_trade" &&
+                    opp.qualityScore >= 8.5 &&
+                    (opp.winProbabilityPct === null || opp.winProbabilityPct >= 50)
+                  ) {
                     await supabase.from("chat_messages").insert({
                       account_id: account.id,
                       role: "assistant",

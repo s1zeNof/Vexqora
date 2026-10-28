@@ -3,11 +3,12 @@ import {
   executeAgentSkill,
   runSubagent,
   orchestrateTradeAnalysis,
+  executeLeadTraderDynamicLoop,
   type AgentRunContext
 } from "../src/agent-runtime";
 import type { Kline } from "@crypto-bot/shared";
 
-describe("Multi-Agent Runtime & Skill Engine (Phase P4)", () => {
+describe("Multi-Agent Runtime & Dynamic Tool Loop Engine (Phase P0-08, AT-02, AT-05, AT-06, AT-24)", () => {
   const dummyKlines: Kline[] = [
     { time: 1000, open: 100, high: 102, low: 99, close: 101, volume: 50 },
     { time: 2000, open: 101, high: 103, low: 100, close: 102, volume: 60 },
@@ -109,6 +110,7 @@ describe("Multi-Agent Runtime & Skill Engine (Phase P4)", () => {
     expect(synthesis.authorizationRequirement).toBe("explicit_user_confirmation_required");
     expect(synthesis.isCalibrated).toBe(false);
     expect(synthesis.calibrationNotice).toContain("каліброваною");
+    expect(synthesis.toolTraces?.length).toBeGreaterThan(0);
   });
 
   it("recommends CLOSE when Stop Loss is breached in risk guardian", async () => {
@@ -126,5 +128,91 @@ describe("Multi-Agent Runtime & Skill Engine (Phase P4)", () => {
     expect(synthesis.leadVerdict).toBe("RECOMMEND_CLOSE");
     expect(synthesis.confidencePct).toBeGreaterThan(50);
     expect(synthesis.isCalibrated).toBe(false);
+  });
+
+  it("AT-05: dynamically plans and executes indicator tools when user asks for ADX", async () => {
+    const klinesLong = Array.from({ length: 40 }, (_, i) => ({
+      time: 1000 + i * 60000,
+      open: 100 + i,
+      high: 102 + i,
+      low: 99 + i,
+      close: 101 + i,
+      volume: 1000
+    }));
+
+    const result = await executeLeadTraderDynamicLoop({
+      objective: "user_question",
+      userQuery: "Порахуй ADX на 4H, потім перевір чи є дивергенція",
+      symbol: "SOLUSDT",
+      klines: klinesLong
+    });
+
+    expect(result.plan).toContain("list_indicators");
+    expect(result.plan).toContain("compute_indicator:ADX");
+    expect(result.toolTraces.some(t => t.toolName === "list_indicators")).toBe(true);
+    expect(result.toolTraces.some(t => t.toolName === "compute_indicator")).toBe(true);
+  });
+
+  it("AT-06: selects orderflow and VWAP when asked about whale sell absorption instead of generic waterfall", async () => {
+    const trades = [
+      { price: 150, qty: 100, side: "sell" as const, time: 1000 },
+      { price: 149.8, qty: 250, side: "sell" as const, time: 1500 }
+    ];
+
+    const result = await executeLeadTraderDynamicLoop({
+      objective: "whale_check",
+      userQuery: "чи є whale sell absorption на стрічці?",
+      symbol: "SOLUSDT",
+      trades,
+      klines: dummyKlines
+    });
+
+    expect(result.plan).toEqual(["get_orderflow", "compute_indicator:VWAP", "get_market_structure"]);
+    expect(result.toolTraces.some(t => t.toolName === "get_orderflow")).toBe(true);
+    expect(result.toolTraces.some(t => t.toolName === "compute_indicator")).toBe(true);
+  });
+
+  it("AT-02 & AT-24: BTC contradiction triggers dynamic replanning and records full trace", async () => {
+    // 60 candles of falling BTC (bearish trend)
+    const btcFalling = Array.from({ length: 60 }, (_, i) => ({
+      time: 1000 + i * 60000,
+      open: 65000 - i * 100,
+      high: 65100 - i * 100,
+      low: 64900 - i * 100,
+      close: 64950 - i * 100,
+      volume: 1000
+    }));
+
+    const result = await executeLeadTraderDynamicLoop({
+      objective: "trade_evaluation",
+      symbol: "SOLUSDT",
+      side: "long",
+      currentPrice: 150,
+      entryPrice: 148,
+      stopLoss: 142,
+      btcKlines: btcFalling,
+      ethKlines: btcFalling,
+      klines: dummyKlines
+    });
+
+    // Contradiction detected -> replanning cycle triggered get_btc_dependency
+    expect(result.replanningCycles).toBeGreaterThan(1);
+    expect(result.contradictionsFound.length).toBeGreaterThan(0);
+    expect(result.contradictionsFound.some(c => c.includes("BEARISH"))).toBe(true);
+    expect(result.toolTraces.some(t => t.toolName === "get_btc_dependency")).toBe(true);
+
+    // Full trace exists
+    expect(result.toolTraces.length).toBeGreaterThanOrEqual(4);
+    for (const trace of result.toolTraces) {
+      expect(trace.toolCallId).toBeDefined();
+      expect(trace.startedAtMs).toBeGreaterThan(0);
+      expect(trace.finishedAtMs).toBeGreaterThanOrEqual(trace.startedAtMs);
+      expect(trace.status).toBeDefined();
+    }
+
+    // Stateful Trade Thesis generated with invalidation trigger
+    expect(result.tradeThesis).toBeDefined();
+    expect(result.tradeThesis?.status).toBe("WEAKENED");
+    expect(result.tradeThesis?.invalidationTrigger).toBeDefined();
   });
 });
