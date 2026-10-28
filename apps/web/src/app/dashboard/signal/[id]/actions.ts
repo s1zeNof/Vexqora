@@ -6,7 +6,7 @@ import { z } from "zod";
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 import { accountConnectionSchema, createAccountClient } from "../../../../lib/account-client";
 import { sanitizeSymbol } from "@crypto-bot/shared";
-import { parseSignalText, createTradePreview, submitEntry, protectFilledPosition } from "@crypto-bot/trading";
+import { parseSignalText, createTradePreview, submitEntry, protectFilledPosition, extractSignalExecutionEvidence, toExecutionGateEvidence, verifyEntrySubmission } from "@crypto-bot/trading";
 import { ensureTradeAiSession } from "./ai-companion-actions";
 
 export interface ExecuteSignalActionOptions {
@@ -44,16 +44,18 @@ export async function executeSignalAction(
   const account = accountConnectionSchema.parse(rawAccount);
 
   let canonicalRawText: string | null = null;
+  let canonicalParsed: unknown = null;
   if (existingSignalId) {
     const { data: storedSignal, error: storedSignalError } = await supabase
       .from("signals")
-      .select("raw_text")
+      .select("raw_text, parsed")
       .eq("id", existingSignalId)
       .eq("account_id", account.id)
       .maybeSingle();
     const rawText = (storedSignal as { raw_text?: string | null } | null)?.raw_text;
     if (!storedSignalError && rawText) {
       canonicalRawText = rawText;
+      canonicalParsed = (storedSignal as { parsed?: unknown }).parsed ?? null;
     }
   }
 
@@ -185,6 +187,12 @@ lev ${leverage}`;
     }
   );
 
+  const executionEvidence = toExecutionGateEvidence(canonicalParsed);
+  const gateCheck = verifyEntrySubmission(preview, { evidence: executionEvidence });
+  if (!gateCheck.passed) {
+    throw new Error(`Signal requires fresh AI verification: ${gateCheck.rejectionReasons.join("; ")}`);
+  }
+
   let targetSignalId = existingSignalId;
 
   if (!targetSignalId) {
@@ -192,7 +200,7 @@ lev ${leverage}`;
     const { data: storedSignal, error: sigErr } = await supabase.from("signals").insert({
       account_id: account.id,
       raw_text: rawSignalText,
-      parsed: preview,
+      parsed: { ...preview, executionEvidence: extractSignalExecutionEvidence(canonicalParsed) },
       source: "chat",
       status: "confirmed"
     }).select("id").maybeSingle();
@@ -207,7 +215,7 @@ lev ${leverage}`;
     await supabase.from("signals").update({
       status: "confirmed",
       raw_text: rawSignalText,
-      parsed: preview
+      parsed: { ...preview, executionEvidence: extractSignalExecutionEvidence(canonicalParsed) }
     }).eq("id", targetSignalId);
   }
 
@@ -249,7 +257,9 @@ lev ${leverage}`;
   }).catch(() => null);
 
   // Execute entry on exchange/paper
-  const entrySubmission = await submitEntry(client, preview, tradeId);
+  const entrySubmission = await submitEntry(client, preview, tradeId, {
+    evidence: executionEvidence
+  });
 
   // Persist entry order
   await supabase.from("orders").insert({

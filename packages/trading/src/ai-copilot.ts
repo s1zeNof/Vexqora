@@ -14,6 +14,36 @@ export interface SMCAnalysis {
   catalyst?: string | undefined;
 }
 
+export interface SignalExecutionEvidence {
+  version: 1;
+  generatedAtMs: number;
+  expiresAtMs: number;
+  structureTrend: "bullish" | "bearish" | "ranging" | "unknown";
+  structureEvidence: {
+    status: "PASS" | "REJECTED" | "UNKNOWN";
+    reason: string;
+    source?: string;
+    dataAsOfMs?: number;
+  };
+  mlDecision: "TRADE" | "NO_TRADE" | "WAIT" | "UNKNOWN";
+  mlEvidence: {
+    status: "PASS" | "REJECTED" | "UNKNOWN";
+    reason: string;
+    source?: string;
+    dataAsOfMs?: number;
+  };
+  winProbabilityPct: number | null;
+  evUsd: number | null;
+  hasCriticalNews: boolean | null;
+  newsStatus: "OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE";
+  newsEvidence: {
+    status: "PASS" | "REJECTED" | "UNKNOWN";
+    reason: string;
+    source?: string;
+    dataAsOfMs?: number;
+  };
+}
+
 export interface AISignalOpportunity {
   symbol: string;
   side: "long" | "short" | "no_trade";
@@ -35,6 +65,7 @@ export interface AISignalOpportunity {
   rejectionReason?: string | undefined;
   historicalMatch?: HistoricalPatternMatch;
   smcAnalysis?: SMCAnalysis;
+  executionEvidence?: SignalExecutionEvidence | undefined;
 }
 
 export interface EnhancedSignalResult {

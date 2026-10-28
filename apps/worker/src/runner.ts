@@ -1,6 +1,6 @@
 import { createBybitClient, createPaperExchangeClient, decryptSecret } from "@crypto-bot/exchange";
 import type { RiskSettingsRow, Signal } from "@crypto-bot/shared";
-import { createTradePreview, protectFilledPosition, submitEntry, verifyExecutionGates, type TradePreview, type GateEvidence } from "@crypto-bot/trading";
+import { createTradePreview, protectFilledPosition, submitEntry, toExecutionGateEvidence, verifyExecutionGates, type TradePreview } from "@crypto-bot/trading";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logger } from "./logger";
 import { sendDiscordAlert } from "./notifications";
@@ -10,7 +10,7 @@ export interface ExecutionJobData {
   account_id: string;
   signal_id: string;
   attempt_count: number;
-  signal_parsed: Signal;
+  signal_parsed: Signal | { signal: Signal; executionEvidence?: unknown; opportunity?: unknown };
   signal_raw: string;
   exchange_kind: string;
   exchange_env: "live" | "demo";
@@ -27,7 +27,10 @@ export async function processJob(
   _telegramBotToken?: string
 ): Promise<void> {
   void _telegramBotToken;
-  const { account_id, signal_id, signal_parsed: signal } = job;
+  const { account_id, signal_id } = job;
+  const signalEnvelope = job.signal_parsed;
+  const signal = "signal" in signalEnvelope ? signalEnvelope.signal : signalEnvelope;
+  const gateEvidence = toExecutionGateEvidence(signalEnvelope);
   logger.info({ jobId: job.job_id, symbol: signal.symbol, side: signal.side }, "Starting job execution");
 
   // 1. Fetch risk settings for this account
@@ -117,8 +120,6 @@ export async function processJob(
   );
 
   // 4b. Enforce 4-Gate Decision Ensemble verification on backend execution path
-  const signalObj = signal as unknown as { metadata?: Record<string, unknown> };
-  const signalMeta = signalObj.metadata ?? {};
   const gateCheck = verifyExecutionGates({
     symbol: signal.symbol,
     side: signal.side,
@@ -127,13 +128,7 @@ export async function processJob(
     tp1: signal.takeProfits[0]?.price ?? preview.entryPrice,
     riskReward: preview.weightedRewardRisk,
     killSwitchActive: Boolean(riskSettings.kill_switch),
-    structureTrend: signalMeta.structureTrend as ("bullish" | "bearish" | "ranging" | "unknown") | undefined,
-    structureEvidence: signalMeta.structureEvidence as GateEvidence | undefined,
-    mlDecision: signalMeta.mlDecision as ("TRADE" | "NO_TRADE" | "WAIT" | "UNKNOWN") | undefined,
-    mlEvidence: signalMeta.mlEvidence as GateEvidence | undefined,
-    hasCriticalNews: signalMeta.hasCriticalNews as boolean | undefined,
-    newsStatus: signalMeta.newsStatus as ("OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE") | undefined,
-    newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined
+    ...gateEvidence
   });
 
   if (!gateCheck.passed) {
@@ -188,13 +183,7 @@ export async function processJob(
   logger.info({ tradeId, symbol: signal.symbol, qty: preview.qty, exchange: job.exchange_kind }, "Submitting entry order");
   const entryResult = await submitEntry(client, preview, tradeId, {
     evidence: {
-      structureTrend: signalMeta.structureTrend as ("bullish" | "bearish" | "ranging" | "unknown") | undefined,
-      structureEvidence: signalMeta.structureEvidence as GateEvidence | undefined,
-      mlDecision: signalMeta.mlDecision as ("TRADE" | "NO_TRADE" | "WAIT" | "UNKNOWN") | undefined,
-      mlEvidence: signalMeta.mlEvidence as GateEvidence | undefined,
-      hasCriticalNews: signalMeta.hasCriticalNews as boolean | undefined,
-      newsStatus: signalMeta.newsStatus as ("OK" | "CRITICAL_RISK" | "UNAVAILABLE" | "STALE") | undefined,
-      newsEvidence: signalMeta.newsEvidence as GateEvidence | undefined
+      ...gateEvidence
     }
   });
 

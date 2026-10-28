@@ -6,6 +6,14 @@
 > **Repository**: `https://github.com/s1zeNof/Vexqora`
 > **Active Production URL**: `https://vexqora.vercel.app/`
 
+## 2026-10-28 AI evidence integrity update
+
+- AI opportunities now carry a canonical `SignalExecutionEvidence` bundle containing verified candle structure, calibrated ML/EV status, official-news status, provenance timestamps, and a 15-minute execution TTL.
+- When CatBoost is unavailable, Nemotron may still publish a monitored candidate as `WAIT_FOR_CONFIRMATION`, but execution remains fail-closed. No heuristic probability is presented as calibrated ML.
+- Web actions and the worker consume the same persisted evidence bundle. Expired evidence becomes `STALE`; no trade row is created before the entry gates pass.
+- The 24/7 Pulse worker persists accepted AI candidates into `signals`, not only `chat_messages`.
+- Migration `202610280002_signal_outcome_auto_tracking.sql` creates/backfills `signal_outcomes` for every canonical signal so learning continues even when a user never executes it.
+
 ---
 
 ## 1. Project Identity & Positioning

@@ -176,7 +176,7 @@ async function startWorker() {
             account_id: job.account_id,
             role: "system",
             kind: "error",
-            content: `Execution error for ${job.signal_parsed?.symbol ?? "signal"}: ${message}`,
+            content: `Execution error for ${("signal" in job.signal_parsed ? job.signal_parsed.signal.symbol : job.signal_parsed.symbol) ?? "signal"}: ${message}`,
             payload: { jobId: job.job_id, error: message }
           });
         }

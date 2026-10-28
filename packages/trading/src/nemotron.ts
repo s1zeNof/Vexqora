@@ -1,12 +1,13 @@
 import { formatCryptoPrice, type Kline } from "@crypto-bot/shared";
-import type { AISignalOpportunity, EnhancedSignalResult, SMCAnalysis } from "./ai-copilot";
-import { getSensibleTickSize } from "./ai-copilot";
+import type { AISignalOpportunity, EnhancedSignalResult, SMCAnalysis, SignalExecutionEvidence } from "./ai-copilot";
+import { calculateSMCContext, getSensibleTickSize } from "./ai-copilot";
 import { findHistoricalPatternMatch, type HistoricalPatternMatch } from "./memory";
 import { parseSignalText } from "./parser";
 import { roundToStep } from "./risk";
 import { calculateAdaptiveConfidence } from "./ai-learning";
 import type { MarketMicrostructure } from "./microstructure";
 import { queryMLModelPrediction } from "./ml-bridge";
+import { VerifiedNewsFeedService } from "./news-feed";
 
 export interface NemotronResponse {
   content: string;
@@ -713,7 +714,7 @@ Rules:
             klines: options?.klines ?? []
           });
 
-          if (mlPrediction.decision === "NO_TRADE") {
+          if (mlPrediction.decision === "NO_TRADE" && mlPrediction.status === "OK") {
             return {
               symbol: normSymbol,
               side: "no_trade",
@@ -727,31 +728,6 @@ Rules:
               decision: "NO_TRADE",
               rejectionReason: mlPrediction.rejectionReason ?? "Negative EV or low win probability",
               rawSignal: `${normSymbol} NO_TRADE\nreason: ${mlPrediction.rejectionReason}`,
-              parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
-              entryPrice: currentPrice,
-              stopLoss: currentPrice,
-              takeProfits: [],
-              trailingDistancePct: 0,
-              suggestedLeverage: 1,
-              historicalMatch: hist
-            };
-          }
-
-          // Check if quantitative engine overrides to NO_TRADE
-          if (adaptive.decision === "NO_TRADE") {
-            return {
-              symbol: normSymbol,
-              side: "no_trade",
-              currentPrice,
-              qualityScore: adaptive.qualityScore,
-              qualityTier: adaptive.qualityTier,
-              strategy: `${parsedJSON.strategy || "SMC Setup"} (Vexqora ML Risk Filter)`,
-              rationale: `Сетап скасовано захисним ML-фільтром: ${adaptive.rejectionReason}`,
-              riskReward: 0,
-              winProbabilityPct: adaptive.confidencePct,
-              decision: "NO_TRADE",
-              rejectionReason: adaptive.rejectionReason,
-              rawSignal: `${normSymbol} NO_TRADE\nreason: ${adaptive.rejectionReason}`,
               parsedSignal: parseSignalText(`${normSymbol} LONG\nentry market\ntp 0\nsl 0`, "chat"),
               entryPrice: currentPrice,
               stopLoss: currentPrice,
@@ -795,6 +771,54 @@ risk ${risk}%`;
             orderBlockZone: `$${formatCryptoPrice(Math.min(sl, currentPrice))} - $${formatCryptoPrice(Math.max(sl, currentPrice))}`
           };
 
+          const evidenceAsOfMs = klines.at(-1)?.time ?? Date.now();
+          const structure = calculateSMCContext(klines, currentPrice);
+          const newsFeed = await new VerifiedNewsFeedService().fetchLatestEvents();
+          const newsAssessment = VerifiedNewsFeedService.evaluateFeedForSymbol(newsFeed, normSymbol);
+          const expectedTrend = side === "long" ? "bullish" : "bearish";
+          const structureAligned = structure.trend === "neutral" || structure.trend === expectedTrend;
+          const mlVerified = mlPrediction.status === "OK" && mlPrediction.modelType === "CatBoostClassifier";
+          const evidence: SignalExecutionEvidence = {
+            version: 1,
+            generatedAtMs: Date.now(),
+            expiresAtMs: Date.now() + 15 * 60_000,
+            structureTrend: structure.trend === "neutral" ? "ranging" : structure.trend,
+            structureEvidence: {
+              status: structureAligned ? "PASS" : "REJECTED",
+              reason: structureAligned
+                ? `Verified candle structure is ${structure.trend}; aligned with ${side}.`
+                : `Verified candle structure is ${structure.trend}; conflicts with ${side}.`,
+              source: "Bybit 15m candles / SMCParser",
+              dataAsOfMs: evidenceAsOfMs
+            },
+            mlDecision: mlVerified ? mlPrediction.decision : "WAIT",
+            mlEvidence: {
+              status: mlVerified && mlPrediction.decision === "TRADE" ? "PASS" : (mlVerified ? "REJECTED" : "UNKNOWN"),
+              reason: mlVerified
+                ? `CatBoost decision ${mlPrediction.decision}; EV ${mlPrediction.expectedValueUsd} USDT.`
+                : `Calibrated ML model unavailable (${mlPrediction.status}); candidate requires confirmation.`,
+              source: mlPrediction.modelType,
+              dataAsOfMs: Date.now()
+            },
+            winProbabilityPct: mlVerified ? mlPrediction.winProbabilityPct : null,
+            evUsd: mlVerified ? mlPrediction.expectedValueUsd : null,
+            hasCriticalNews: newsAssessment.coverageStatus === "ONLINE" ? newsAssessment.riskLevel === "CRITICAL" : null,
+            newsStatus: newsAssessment.coverageStatus === "ONLINE"
+              ? (newsAssessment.riskLevel === "CRITICAL" ? "CRITICAL_RISK" : "OK")
+              : "UNAVAILABLE",
+            newsEvidence: {
+              status: newsAssessment.coverageStatus !== "ONLINE"
+                ? "UNKNOWN"
+                : (newsAssessment.riskLevel === "CRITICAL" ? "REJECTED" : "PASS"),
+              reason: newsAssessment.recommendation,
+              source: newsFeed.source,
+              dataAsOfMs: newsFeed.asOfMs
+            }
+          };
+
+          const fullyVerified = evidence.structureEvidence.status === "PASS" &&
+            evidence.mlEvidence.status === "PASS" && evidence.newsEvidence.status === "PASS";
+
           return {
             symbol: normSymbol,
             side,
@@ -806,7 +830,7 @@ risk ${risk}%`;
               ? `${parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep.`} [ML: ${adaptive.learningContext}]`
               : (parsedJSON.reasoning || `${normSymbol} setup confirmed by structural liquidity sweep and volume absorption.`),
             riskReward: rr,
-            decision: rr < 1.0 ? "NO_TRADE" : adaptive.decision,
+            decision: rr < 1.0 ? "NO_TRADE" : (fullyVerified ? "TRADE" : "WAIT_FOR_CONFIRMATION"),
             rejectionReason: rr < 1.0 ? "Unfavorable Risk-to-Reward ratio (< 1:1.0)" : adaptive.rejectionReason,
             winProbabilityPct: finalWinProb,
             rawSignal,
@@ -821,7 +845,8 @@ risk ${risk}%`;
             trailingDistancePct: 1,
             suggestedLeverage: lev,
             historicalMatch: hist,
-            smcAnalysis
+            smcAnalysis,
+            executionEvidence: evidence
           };
         }
       }

@@ -11,6 +11,8 @@ import {
   parseSignalText,
   protectFilledPosition,
   submitEntry,
+  toExecutionGateEvidence,
+  verifyEntrySubmission,
   type TradePreview,
   type UniverseScanFilter
 } from "@crypto-bot/trading";
@@ -276,7 +278,7 @@ export async function analyzePulseAction(formData: FormData): Promise<void> {
     const { data: stored, error: insertError } = await supabase.from("signals").insert({
       account_id: account.id,
       raw_text: opp.rawSignal,
-      parsed: preview,
+      parsed: { ...preview, opportunity: opp, executionEvidence: opp.executionEvidence },
       source: "chat",
       status: "preview"
     }).select("id").limit(1).maybeSingle();
@@ -479,7 +481,7 @@ export async function previewSignal(_previous: PreviewState, formData: FormData)
       const { data: stored } = await supabase.from("signals").insert({
         account_id: account.id,
         raw_text: opp.rawSignal,
-        parsed: preview,
+        parsed: { ...preview, opportunity: opp, executionEvidence: opp.executionEvidence },
         source: "chat",
         status: "preview"
       }).select("id").single();
@@ -730,6 +732,12 @@ export async function confirmSignal(formData: FormData) {
       });
     }
 
+    const executionEvidence = toExecutionGateEvidence(rawParsed);
+    const gateCheck = verifyEntrySubmission(preview, { evidence: executionEvidence });
+    if (!gateCheck.passed) {
+      throw new Error(`Signal requires fresh AI verification: ${gateCheck.rejectionReasons.join("; ")}`);
+    }
+
     // 7. Persist trade
     const tradeRes = await supabase.from("trades").insert({
       account_id: account.id,
@@ -762,7 +770,9 @@ export async function confirmSignal(formData: FormData) {
     }).catch(() => null);
 
     // 8. Submit entry order
-    const entryResult = await submitEntry(client, preview, tradeId);
+    const entryResult = await submitEntry(client, preview, tradeId, {
+      evidence: executionEvidence
+    });
 
     // Persist entry order
     await supabase.from("orders").insert({

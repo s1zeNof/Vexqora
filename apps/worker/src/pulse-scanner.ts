@@ -323,9 +323,40 @@ export function startPulseScanner(
                   if (
                     opp.decision !== "NO_TRADE" &&
                     opp.side !== "no_trade" &&
-                    opp.qualityScore >= 8.5 &&
-                    (opp.winProbabilityPct === null || opp.winProbabilityPct >= 50)
+                    opp.executionEvidence?.structureEvidence.status !== "REJECTED"
                   ) {
+                    const expiresAt = new Date(Date.now() + 48 * 60 * 60_000).toISOString();
+                    const originKey = `ai-pulse-${anomaly.id}`;
+                    const { data: existingSignal } = await supabase
+                      .from("signals")
+                      .select("id")
+                      .eq("account_id", account.id)
+                      .eq("origin_key", originKey)
+                      .maybeSingle();
+                    const signalInsert = existingSignal
+                      ? { data: existingSignal, error: null }
+                      : await supabase.from("signals").insert({
+                        account_id: account.id,
+                        origin_key: originKey,
+                        raw_text: opp.rawSignal,
+                        parsed: {
+                          signal: opp.parsedSignal,
+                          entryPrice: opp.entryPrice,
+                          opportunity: opp,
+                          executionEvidence: opp.executionEvidence
+                        },
+                        source: "chat",
+                        status: "preview",
+                        expires_at: expiresAt
+                      })
+                      .select("id")
+                      .maybeSingle();
+                    const { data: storedSignal, error: signalError } = signalInsert;
+
+                    if (signalError || !storedSignal) {
+                      throw signalError ?? new Error("Failed to persist AI pulse signal");
+                    }
+
                     await supabase.from("chat_messages").insert({
                       account_id: account.id,
                       role: "assistant",
@@ -333,6 +364,7 @@ export function startPulseScanner(
                       content: `Vexqora Signal: ${opp.symbol} ${opp.side.toUpperCase()} (${opp.strategy})`,
                       payload: {
                         opportunity: opp,
+                        signalId: String(storedSignal.id),
                         rawSignal: opp.rawSignal,
                         historicalMatch: anomaly.historicalMatch,
                         microstructure,

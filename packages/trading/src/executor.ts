@@ -27,21 +27,14 @@ export interface EntrySubmission {
   status: "entry_open";
 }
 
-function orderLinkId(prefix: string, tradeId: string, suffix: string): string {
-  const safe = tradeId.replace(/[^a-zA-Z0-9_-]/g, "");
-  return `${prefix}-${safe}-${suffix}`.slice(0, 36);
-}
-
-export async function submitEntry(
-  client: ExchangeClient,
+export function verifyEntrySubmission(
   preview: TradePreview,
-  tradeId: string,
   options?: {
     evidence?: Partial<ExecutionGateParams> | undefined;
     policy?: GatePolicy | undefined;
   }
-): Promise<EntrySubmission> {
-  const gateCheck = verifyExecutionGates({
+) {
+  return verifyExecutionGates({
     symbol: preview.signal.symbol,
     side: preview.signal.side,
     entryPrice: preview.entryPrice,
@@ -60,6 +53,23 @@ export async function submitEntry(
     newsEvidence: options?.evidence?.newsEvidence,
     policy: options?.policy
   });
+}
+
+function orderLinkId(prefix: string, tradeId: string, suffix: string): string {
+  const safe = tradeId.replace(/[^a-zA-Z0-9_-]/g, "");
+  return `${prefix}-${safe}-${suffix}`.slice(0, 36);
+}
+
+export async function submitEntry(
+  client: ExchangeClient,
+  preview: TradePreview,
+  tradeId: string,
+  options?: {
+    evidence?: Partial<ExecutionGateParams> | undefined;
+    policy?: GatePolicy | undefined;
+  }
+): Promise<EntrySubmission> {
+  const gateCheck = verifyEntrySubmission(preview, options);
 
   if (!gateCheck.passed) {
     throw new Error(`Execution blocked by Decision Ensemble Gate: ${gateCheck.rejectionReasons.join("; ")}`);
