@@ -1732,6 +1732,7 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   z-index: 2;
 }
 
@@ -1740,32 +1741,37 @@ input:focus, select:focus, textarea:focus {
   height: 18px;
 }
 
-.floating-field__input {
+.floating-field__input,
+.floating-field input[type="text"],
+.floating-field input[type="number"],
+.floating-field input.floating-field__input {
   width: 100%;
   min-height: 50px;
   background: transparent !important;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
-  padding: 16px 14px 6px 42px;
+  padding: 18px 14px 6px 44px !important;
   color: #F8FAFC;
   font-size: 14px;
   font-family: inherit;
   outline: none;
+  box-sizing: border-box !important;
   transition: border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.floating-field__input:focus {
-  border-color: #00e5ff;
-  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.35);
+.floating-field__input:focus,
+.floating-field input:focus {
+  border-color: #00e5ff !important;
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.35) !important;
 }
 
-.floating-field__input:focus ~ .floating-field__icon {
+.floating-field__input-wrap:focus-within .floating-field__icon {
   color: #00e5ff;
 }
 
 .floating-field__label {
   position: absolute;
-  left: 42px;
+  left: 44px;
   top: 50%;
   transform: translateY(-50%);
   color: #64748B;
@@ -1778,7 +1784,9 @@ input:focus, select:focus, textarea:focus {
 }
 
 .floating-field__input:focus ~ .floating-field__label,
-.floating-field__input:not(:placeholder-shown) ~ .floating-field__label {
+.floating-field__input:not(:placeholder-shown) ~ .floating-field__label,
+.floating-field input:focus ~ .floating-field__label,
+.floating-field input:not(:placeholder-shown) ~ .floating-field__label {
   top: 8px;
   transform: translateY(0);
   font-size: 10px;

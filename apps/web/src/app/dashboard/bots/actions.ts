@@ -61,8 +61,8 @@ export async function createPaperBot(formData: FormData) {
     .limit(1)
     .maybeSingle();
 
-  if (!account || capital > Number(account.paper_balance ?? 0)) {
-    redirect("/dashboard/bots?error=balance");
+  if (!account) {
+    redirect("/dashboard/bots?error=account");
   }
 
   // Ensure DB accepts strategy constraint (map 'adaptive' to scalping in DB if needed or store description note)

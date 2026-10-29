@@ -16,7 +16,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
   const [goalAction, setGoalAction] = useState<"pause" | "stop" | "continue">("pause");
 
   const setCapitalPreset = (val: number) => {
-    setCapital(String(Math.min(paperBalance, Math.max(1, val))));
+    setCapital(String(Math.max(1, val)));
   };
 
   const toggleStrategy = (strat: string) => {
@@ -86,9 +86,11 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                   <circle cx="14" cy="10" r="1.5" />
                   <path d="M6 8h4" />
                 </svg>
-                <span>Available Paper balance:</span>
+                <span>Independent Virtual Bot Bankroll</span>
               </div>
-              <strong className="mono">${paperBalance.toFixed(2)} USDT</strong>
+              <span className="mono" style={{ fontSize: "11px", color: "var(--cyan, #00e5ff)" }}>
+                Main Wallet: ${paperBalance.toFixed(2)} USDT · Dedicated Bot Capital (No Limits)
+              </span>
             </div>
 
             <div className="bot-form-fields-grid">
@@ -155,7 +157,6 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                     type="number"
                     required
                     min={1}
-                    max={paperBalance}
                     step="0.01"
                     value={capital}
                     onChange={(e) => setCapital(e.target.value)}
@@ -170,8 +171,9 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                   <button type="button" onClick={() => setCapitalPreset(10)} className="capital-chip">10$</button>
                   <button type="button" onClick={() => setCapitalPreset(25)} className="capital-chip">25$</button>
                   <button type="button" onClick={() => setCapitalPreset(50)} className="capital-chip">50$</button>
-                  <button type="button" onClick={() => setCapitalPreset(Math.floor(paperBalance * 0.5))} className="capital-chip">50%</button>
-                  <button type="button" onClick={() => setCapitalPreset(Math.floor(paperBalance))} className="capital-chip">MAX</button>
+                  <button type="button" onClick={() => setCapitalPreset(100)} className="capital-chip">100$</button>
+                  <button type="button" onClick={() => setCapitalPreset(500)} className="capital-chip">500$</button>
+                  <button type="button" onClick={() => setCapitalPreset(1000)} className="capital-chip">1000$</button>
                 </div>
               </div>
 

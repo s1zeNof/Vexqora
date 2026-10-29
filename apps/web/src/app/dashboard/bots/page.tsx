@@ -126,6 +126,11 @@ export default async function BotsPage({
           <span>Bot initialized successfully in Stopped mode. Click <strong>Start</strong> when ready.</span>
         </div>
       )}
+      {params.error === "account" && (
+        <div className="bots-notice bots-notice--error" role="alert">
+          No active Paper trading account found. Please initialize your Paper account in Accounts.
+        </div>
+      )}
       {params.error === "balance" && (
         <div className="bots-notice bots-notice--error" role="alert">
           Insufficient Paper balance. Reduce allocated capital or fund your virtual account.
