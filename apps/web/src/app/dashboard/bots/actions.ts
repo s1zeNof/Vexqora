@@ -138,13 +138,13 @@ export async function updateBotSettings(formData: FormData) {
   const direction = ["both", "long", "short"].includes(rawDir) ? rawDir : "both";
 
   const rawDailyLoss = value("max_daily_loss_pct");
-  const maxDailyLossPct = rawDailyLoss && Number(rawDailyLoss) > 0 ? Number(rawDailyLoss) : 100;
+  const maxDailyLossPct = rawDailyLoss && Number(rawDailyLoss) > 0 ? Math.min(25, Math.max(0.1, Number(rawDailyLoss))) : 25;
 
   const rawDrawdown = value("max_drawdown_pct");
-  const maxDrawdownPct = rawDrawdown && Number(rawDrawdown) > 0 ? Number(rawDrawdown) : 100;
+  const maxDrawdownPct = rawDrawdown && Number(rawDrawdown) > 0 ? Math.min(50, Math.max(1, Number(rawDrawdown))) : 50;
 
   const rawTradesPerDay = value("max_trades_per_day");
-  const maxTradesPerDay = rawTradesPerDay && Number(rawTradesPerDay) > 0 ? Number(rawTradesPerDay) : 0;
+  const maxTradesPerDay = rawTradesPerDay && Number(rawTradesPerDay) > 0 ? Math.min(100, Math.max(1, Number(rawTradesPerDay))) : 100;
 
   await supabase
     .from("trading_bots")

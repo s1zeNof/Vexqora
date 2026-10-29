@@ -815,7 +815,7 @@ export function BotDetailView({
                 </label>
                 <label>Target balance (USDT)<input name="target_balance" type="number" min="0" step="0.01" defaultValue={bot.target_balance ?? ""} placeholder="No target (continuous)" /></label>
                 <label>When target reached<select name="goal_action" defaultValue={bot.goal_action}><option value="pause">Pause</option><option value="stop">Stop</option><option value="continue">Continue</option></select></label>
-                <label>Max daily loss limit (%)<input name="max_daily_loss_pct" type="number" min="0" max="100" step="1" defaultValue={bot.max_daily_loss_pct >= 100 ? "" : bot.max_daily_loss_pct} placeholder="Disabled (No limit)" /></label>
+                <label>Max daily loss limit (%)<input name="max_daily_loss_pct" type="number" min="1" max="25" step="1" defaultValue={bot.max_daily_loss_pct} placeholder="1% – 25%" /></label>
                 <button type="submit" className="btn-terminal btn-terminal--scan">Save Settings</button>
               </form>
             </div>
