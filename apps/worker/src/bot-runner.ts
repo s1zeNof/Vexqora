@@ -27,19 +27,21 @@ interface BotRow {
 
 interface SignalRow {
   id: string;
-  symbol: string;
-  side: string;
+  symbol?: string;
+  side?: string;
   status: string;
   parsed: {
     entry?: number;
     sl?: number;
     tp1?: number;
     symbol?: string;
+    side?: string;
     signal?: {
       entry?: number;
       sl?: number;
       tp1?: number;
       symbol?: string;
+      side?: string;
     };
   } | null;
 }
@@ -189,28 +191,33 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       return;
     }
 
-    // Fetch viable signals from the last 48h
+    // Fetch viable signals from the last 48h (signals table stores symbol/side inside parsed jsonb)
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    let signalQuery = supabase
+    const { data: rawSignals, error: sigErr } = await supabase
       .from("signals")
-      .select("id, symbol, side, status, parsed")
+      .select("id, status, parsed, created_at")
       .in("status", ["pending", "active"])
       .gte("created_at", cutoff)
       .order("created_at", { ascending: false })
       .limit(20);
 
-    if (bot.direction === "long") {
-      signalQuery = signalQuery.eq("side", "long");
-    } else if (bot.direction === "short") {
-      signalQuery = signalQuery.eq("side", "short");
-    }
-
-    const { data: signals, error: sigErr } = await signalQuery;
-
     if (sigErr) {
-      await writeDecision("wait", "Failed to fetch signals from database.", { error: sigErr.message });
-      return;
+      logger.warn({ error: sigErr.message }, "Could not query signals table, continuing to autonomous scan");
     }
+
+    const allSignals = (rawSignals ?? []) as unknown as SignalRow[];
+    const signals = allSignals.filter((s) => {
+      if (!s.parsed) return false;
+      const parsedSide = (
+        s.parsed.side ??
+        s.parsed.signal?.side ??
+        (s as unknown as { side?: string }).side ??
+        "long"
+      ).toLowerCase();
+      if (bot.direction === "long") return parsedSide === "long";
+      if (bot.direction === "short") return parsedSide === "short";
+      return true;
+    });
 
     if (!signals || signals.length === 0) {
       if (process.env.VITEST) {
@@ -380,7 +387,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     // Evaluate each signal through scalping economics
     let bestSignal: SignalRow | null = null;
 
-    for (const rawSignal of signals as unknown as SignalRow[]) {
+    for (const rawSignal of signals) {
       const parsed = rawSignal.parsed;
       if (!parsed) continue;
 
@@ -426,8 +433,17 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     const entry = Number(parsed.entry ?? parsed.signal?.entry ?? 0);
     const sl = Number(parsed.sl ?? parsed.signal?.sl ?? 0);
     const tp1 = Number(parsed.tp1 ?? parsed.signal?.tp1 ?? 0);
-    const symbol = bestSignal.symbol ?? parsed.symbol ?? parsed.signal?.symbol ?? "";
-    const side = (bestSignal.side ?? "long") as "long" | "short";
+    const symbol =
+      parsed.symbol ??
+      parsed.signal?.symbol ??
+      (bestSignal as unknown as { symbol?: string }).symbol ??
+      "";
+    const side = (
+      parsed.side ??
+      parsed.signal?.side ??
+      (bestSignal as unknown as { side?: string }).side ??
+      "long"
+    ).toLowerCase() as "long" | "short";
 
     const econ = calculateScalpingEconomics({
       depositUsdt: accountBalance,
