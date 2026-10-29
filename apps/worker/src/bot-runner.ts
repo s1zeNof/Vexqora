@@ -108,37 +108,17 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         .filter((tid): tid is string => Boolean(tid));
     }
 
-    // Check today's realized losses for this bot
+    // Daily loss is informational for autonomous Paper bots. Execution remains
+    // bounded by allocated capital, drawdown protection and Emergency Stop.
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
-    const { data: closedToday } = process.env.VITEST
-      ? await supabase.from("trades").select("realized_pnl").eq("account_id", bot.account_id).in("status", ["closed", "stopped"]).gte("closed_at", todayStart.toISOString())
-      : botTradeIds.length > 0
-        ? await supabase.from("trades").select("realized_pnl").eq("account_id", bot.account_id).in("id", botTradeIds).in("status", ["closed", "stopped"]).gte("closed_at", todayStart.toISOString())
-        : { data: [] };
-
-    const todayLoss = (closedToday ?? []).reduce((sum, t) => {
-      const pnl = Number(t.realized_pnl ?? 0);
-      return sum + (pnl < 0 ? Math.abs(pnl) : 0);
-    }, 0);
-
-    const maxDailyLossUsdt = (accountBalance * bot.max_daily_loss_pct) / 100;
-    if (todayLoss >= maxDailyLossUsdt) {
-      await writeDecision(
-        "blocked",
-        `Daily loss limit reached: lost $${todayLoss.toFixed(2)} of $${maxDailyLossUsdt.toFixed(2)} allowed (${bot.max_daily_loss_pct}%).`,
-        { todayLoss, maxDailyLossUsdt }
-      );
-      return;
-    }
-
-    // Check drawdown from allocated capital
+    // Check drawdown from allocated capital (only if user explicitly configured a limit)
     const drawdownPct =
       bot.allocated_capital > 0
         ? ((bot.allocated_capital - accountBalance) / bot.allocated_capital) * 100
         : 0;
-    if (drawdownPct >= bot.max_drawdown_pct) {
+    if (bot.max_drawdown_pct && bot.max_drawdown_pct > 0 && bot.max_drawdown_pct < 100 && drawdownPct >= bot.max_drawdown_pct) {
       await writeDecision(
         "blocked",
         `Max drawdown exceeded: ${drawdownPct.toFixed(1)}% drawdown vs limit ${bot.max_drawdown_pct}%.`,
@@ -147,7 +127,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       return;
     }
 
-    // Check today's trade count
+    // Check today's trade count (only if user set an explicit positive ceiling)
     const { data: tradesToday } = process.env.VITEST
       ? await supabase.from("trades").select("id").eq("account_id", bot.account_id).gte("opened_at", todayStart.toISOString())
       : botTradeIds.length > 0
@@ -155,7 +135,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         : { data: [] };
 
     const tradesTodayCount = (tradesToday ?? []).length;
-    if (tradesTodayCount >= bot.max_trades_per_day) {
+    if (bot.max_trades_per_day && bot.max_trades_per_day > 0 && tradesTodayCount >= bot.max_trades_per_day) {
       await writeDecision(
         "blocked",
         `Max trades per day reached: ${tradesTodayCount}/${bot.max_trades_per_day}.`,
@@ -229,9 +209,9 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
           };
           const list = data.result?.list ?? [];
 
-          // Scan all active Bybit Linear USDT perpetual contracts with volume >= $5M (zero hardcoded list)
+          // Scan all active Bybit Linear USDT perpetual contracts with volume >= $100k (all coins in universe)
           const scored = list
-            .filter((t) => t.symbol.endsWith("USDT") && !activeSyms.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 5_000_000)
+            .filter((t) => t.symbol.endsWith("USDT") && !activeSyms.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 100_000)
             .map((t) => {
               const lastPrice = Number(t.lastPrice);
               const changePct = Number(t.price24hPcnt) * 100;

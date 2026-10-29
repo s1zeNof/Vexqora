@@ -23,7 +23,7 @@ export default async function BotDetailPage({
   const { data: rawBot } = await supabase
     .from("trading_bots")
     .select(
-      "id,name,description,status,mode,strategy,allocated_capital,current_balance,target_balance,risk_per_trade_pct,max_daily_loss_pct,max_drawdown_pct,goal_action,autonomous_enabled,last_heartbeat_at,last_error,created_at,account_id"
+      "id,name,description,status,mode,strategy,allocated_capital,current_balance,target_balance,direction,risk_per_trade_pct,max_daily_loss_pct,max_drawdown_pct,goal_action,autonomous_enabled,last_heartbeat_at,last_error,created_at,account_id"
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -42,6 +42,7 @@ export default async function BotDetailPage({
   const balance = Number(botRecord.current_balance ?? 0);
   const target = botRecord.target_balance ? Number(botRecord.target_balance) : null;
   const riskPct = Number(botRecord.risk_per_trade_pct ?? 1);
+  const botDirection = typeof botRecord.direction === "string" ? botRecord.direction : "both";
   const maxLossPct = Number(botRecord.max_daily_loss_pct ?? 5);
   const goalAct = typeof botRecord.goal_action === "string" ? botRecord.goal_action : "pause";
   const heartbeat = typeof botRecord.last_heartbeat_at === "string" ? botRecord.last_heartbeat_at : null;
@@ -109,6 +110,7 @@ export default async function BotDetailPage({
         allocated_capital: allocated,
         current_balance: balance,
         target_balance: target,
+        direction: botDirection,
         risk_per_trade_pct: riskPct,
         max_daily_loss_pct: maxLossPct,
         goal_action: goalAct,

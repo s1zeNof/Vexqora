@@ -132,10 +132,36 @@ export async function updateBotSettings(formData: FormData) {
   const value = (key: string) => { const raw = formData.get(key); return typeof raw === "string" ? raw : ""; };
   const id = value("id");
   const risk = Math.min(5, Math.max(0.1, Number(value("risk_per_trade_pct")) || 1));
-  const daily = Math.min(25, Math.max(0.1, Number(value("max_daily_loss_pct")) || 5));
   const targetRaw = Number(value("target_balance"));
   const goal = ["pause", "stop", "continue"].includes(value("goal_action")) ? value("goal_action") : "pause";
-  await supabase.from("trading_bots").update({ risk_per_trade_pct: risk, max_daily_loss_pct: daily, target_balance: Number.isFinite(targetRaw) && targetRaw > 0 ? targetRaw : null, goal_action: goal, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", user.id).eq("mode", "paper");
+  const rawDir = value("direction");
+  const direction = ["both", "long", "short"].includes(rawDir) ? rawDir : "both";
+
+  const rawDailyLoss = value("max_daily_loss_pct");
+  const maxDailyLossPct = rawDailyLoss && Number(rawDailyLoss) > 0 ? Number(rawDailyLoss) : 100;
+
+  const rawDrawdown = value("max_drawdown_pct");
+  const maxDrawdownPct = rawDrawdown && Number(rawDrawdown) > 0 ? Number(rawDrawdown) : 100;
+
+  const rawTradesPerDay = value("max_trades_per_day");
+  const maxTradesPerDay = rawTradesPerDay && Number(rawTradesPerDay) > 0 ? Number(rawTradesPerDay) : 0;
+
+  await supabase
+    .from("trading_bots")
+    .update({
+      risk_per_trade_pct: risk,
+      target_balance: Number.isFinite(targetRaw) && targetRaw > 0 ? targetRaw : null,
+      goal_action: goal,
+      direction,
+      max_daily_loss_pct: maxDailyLossPct,
+      max_drawdown_pct: maxDrawdownPct,
+      max_trades_per_day: maxTradesPerDay,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .eq("mode", "paper");
+
   revalidatePath(`/dashboard/bots/${id}`);
   revalidatePath("/dashboard/bots");
 }
@@ -224,9 +250,9 @@ export async function triggerBotScan(formData: FormData) {
       };
       const list = data.result?.list ?? [];
 
-      // Scan all active Bybit Linear USDT perpetual contracts with volume >= $5M (zero hardcoded list)
+      // Scan all active Bybit Linear USDT perpetual contracts with volume >= $100k (all coins in universe)
       const scored = list
-        .filter((t) => t.symbol.endsWith("USDT") && !activeSymbols.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 5_000_000)
+        .filter((t) => t.symbol.endsWith("USDT") && !activeSymbols.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 100_000)
         .map((t) => {
           const lastPrice = Number(t.lastPrice);
           const changePct = Number(t.price24hPcnt) * 100;
