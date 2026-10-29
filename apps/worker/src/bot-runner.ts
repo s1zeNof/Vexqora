@@ -248,6 +248,15 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
               return { symbol: t.symbol, lastPrice, changePct, turnover };
             });
 
+function roundPrice(val: number): number {
+  if (val < 0.001) return Number(val.toFixed(7));
+  if (val < 0.01) return Number(val.toFixed(6));
+  if (val < 0.1) return Number(val.toFixed(5));
+  if (val < 1) return Number(val.toFixed(4));
+  if (val < 10) return Number(val.toFixed(3));
+  return Number(val.toFixed(2));
+}
+
           if (scored.length > 0) {
             if (bot.direction === "long") {
               scored.sort((a, b) => b.changePct - a.changePct);
@@ -257,10 +266,10 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
                 scannedOpportunity = {
                   symbol: best.symbol,
                   entry,
-                  sl: Number((entry * 0.988).toFixed(entry < 1 ? 4 : 2)),
-                  tp1: Number((entry * 1.018).toFixed(entry < 1 ? 4 : 2)),
-                  tp2: Number((entry * 1.030).toFixed(entry < 1 ? 4 : 2)),
-                  tp3: Number((entry * 1.045).toFixed(entry < 1 ? 4 : 2)),
+                  sl: roundPrice(entry * 0.988),
+                  tp1: roundPrice(entry * 1.018),
+                  tp2: roundPrice(entry * 1.030),
+                  tp3: roundPrice(entry * 1.045),
                   side: "long",
                   changePct: best.changePct,
                   turnover: best.turnover,
@@ -274,10 +283,10 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
                 scannedOpportunity = {
                   symbol: best.symbol,
                   entry,
-                  sl: Number((entry * 1.012).toFixed(entry < 1 ? 4 : 2)),
-                  tp1: Number((entry * 0.982).toFixed(entry < 1 ? 4 : 2)),
-                  tp2: Number((entry * 0.970).toFixed(entry < 1 ? 4 : 2)),
-                  tp3: Number((entry * 0.955).toFixed(entry < 1 ? 4 : 2)),
+                  sl: roundPrice(entry * 1.012),
+                  tp1: roundPrice(entry * 0.982),
+                  tp2: roundPrice(entry * 0.970),
+                  tp3: roundPrice(entry * 0.955),
                   side: "short",
                   changePct: best.changePct,
                   turnover: best.turnover,
@@ -292,10 +301,10 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
                 scannedOpportunity = {
                   symbol: best.symbol,
                   entry,
-                  sl: Number((isLong ? entry * 0.988 : entry * 1.012).toFixed(entry < 1 ? 4 : 2)),
-                  tp1: Number((isLong ? entry * 1.018 : entry * 0.982).toFixed(entry < 1 ? 4 : 2)),
-                  tp2: Number((isLong ? entry * 1.030 : entry * 0.970).toFixed(entry < 1 ? 4 : 2)),
-                  tp3: Number((isLong ? entry * 1.045 : entry * 0.955).toFixed(entry < 1 ? 4 : 2)),
+                  sl: roundPrice(isLong ? entry * 0.988 : entry * 1.012),
+                  tp1: roundPrice(isLong ? entry * 1.018 : entry * 0.982),
+                  tp2: roundPrice(isLong ? entry * 1.030 : entry * 0.970),
+                  tp3: roundPrice(isLong ? entry * 1.045 : entry * 0.955),
                   side: isLong ? "long" : "short",
                   changePct: best.changePct,
                   turnover: best.turnover,

@@ -303,13 +303,22 @@ export async function triggerBotScan(formData: FormData) {
     return;
   }
 
+  const roundPrice = (val: number) => {
+    if (val < 0.001) return Number(val.toFixed(7));
+    if (val < 0.01) return Number(val.toFixed(6));
+    if (val < 0.1) return Number(val.toFixed(5));
+    if (val < 1) return Number(val.toFixed(4));
+    if (val < 10) return Number(val.toFixed(3));
+    return Number(val.toFixed(2));
+  };
+
   // Calculate entry, SL, TP
   const entry = selectedCandidate.lastPrice;
   const isLong = selectedCandidate.side === "long";
-  const sl = Number((isLong ? entry * 0.988 : entry * 1.012).toFixed(entry < 1 ? 4 : 2));
-  const tp1 = Number((isLong ? entry * 1.018 : entry * 0.982).toFixed(entry < 1 ? 4 : 2));
-  const tp2 = Number((isLong ? entry * 1.030 : entry * 0.970).toFixed(entry < 1 ? 4 : 2));
-  const tp3 = Number((isLong ? entry * 1.045 : entry * 0.955).toFixed(entry < 1 ? 4 : 2));
+  const sl = roundPrice(isLong ? entry * 0.988 : entry * 1.012);
+  const tp1 = roundPrice(isLong ? entry * 1.018 : entry * 0.982);
+  const tp2 = roundPrice(isLong ? entry * 1.030 : entry * 0.970);
+  const tp3 = roundPrice(isLong ? entry * 1.045 : entry * 0.955);
 
   const balance = Number(bot.current_balance ?? bot.allocated_capital);
   const maxLev = Number(bot.max_leverage ?? 3);

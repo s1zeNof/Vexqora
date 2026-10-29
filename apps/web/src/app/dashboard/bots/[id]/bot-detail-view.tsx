@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { formatCryptoPrice } from "../../../../lib/format";
 import { setBotStatus, triggerBotScan, closeTradeManually, updateBotSettings } from "../actions";
 
 export type BotStatus = "running" | "stopped" | "paused" | "error";
@@ -654,9 +655,9 @@ export function BotDetailView({
                             {pos.side.toUpperCase()}
                           </span>
                         </td>
-                        <td className="mono">${pos.entry_avg ? Number(pos.entry_avg).toFixed(2) : "—"}</td>
+                        <td className="mono">{pos.entry_avg ? `$${formatCryptoPrice(pos.entry_avg)}` : "—"}</td>
                         <td className="mono">{pos.qty ?? "—"}</td>
-                        <td className="mono text-red">{pos.sl ? `$${Number(pos.sl).toFixed(2)}` : "—"}</td>
+                        <td className="mono text-red">{pos.sl ? `$${formatCryptoPrice(pos.sl)}` : "—"}</td>
                         <td className={`mono ${isProfit ? "text-green" : "text-red"}`}>
                           ${pos.realized_pnl ? Number(pos.realized_pnl).toFixed(2) : "$0.00"}
                         </td>
@@ -725,8 +726,8 @@ export function BotDetailView({
                             {t.side.toUpperCase()}
                           </span>
                         </td>
-                        <td className="mono">${t.entry_avg ? Number(t.entry_avg).toFixed(2) : "—"}</td>
-                        <td className="mono">${t.exit_price ? Number(t.exit_price).toFixed(2) : "—"}</td>
+                        <td className="mono">{t.entry_avg ? `$${formatCryptoPrice(t.entry_avg)}` : "—"}</td>
+                        <td className="mono">{t.exit_price ? `$${formatCryptoPrice(t.exit_price)}` : "—"}</td>
                         <td>
                           <span className="exit-reason-tag">
                             {t.exit_reason ? t.exit_reason.replaceAll("_", " ").toUpperCase() : "RESOLVED"}
