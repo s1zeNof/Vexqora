@@ -26,13 +26,59 @@ interface SignalPageProps {
 export default async function SignalPage({ params, searchParams }: SignalPageProps) {
   const { id: rawId } = await params;
   const query = await searchParams;
-  void query;
 
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId);
 
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // Check if a specific trade was requested via query param ?trade= or directly as rawId
+  const tradeIdParam = query?.trade ?? (isUuid ? rawId : null);
+  let linkedTrade: {
+    id: string;
+    symbol: string;
+    side: string;
+    entry_avg: number | null;
+    sl: number | null;
+    status: string;
+    qty: number | null;
+    leverage: number | null;
+    realized_pnl: number | null;
+    exit_price: number | null;
+    exit_reason: string | null;
+    opened_at: string | null;
+    closed_at: string | null;
+    signal_id: string | null;
+  } | null = null;
+
+  if (tradeIdParam) {
+    const { data: tRow } = await supabase
+      .from("trades")
+      .select("id, symbol, side, entry_avg, sl, status, qty, leverage, realized_pnl, exit_price, exit_reason, opened_at, closed_at, signal_id")
+      .eq("id", tradeIdParam)
+      .maybeSingle();
+    if (tRow) {
+      linkedTrade = tRow;
+    }
+  }
+
+  let linkedTargets: Array<{ idx: number; price: number; share_pct: number; status: string }> = [];
+  if (linkedTrade) {
+    const { data: rawTgts } = await supabase
+      .from("trade_targets")
+      .select("idx, price, share_pct, status")
+      .eq("trade_id", linkedTrade.id)
+      .order("idx", { ascending: true });
+    if (rawTgts && rawTgts.length > 0) {
+      linkedTargets = rawTgts.map((tg) => ({
+        idx: Number(tg.idx),
+        price: Number(tg.price),
+        share_pct: Number(tg.share_pct),
+        status: String(tg.status),
+      }));
+    }
+  }
 
   const { data: rawAccount } = await supabase
     .from("exchange_accounts")
@@ -69,7 +115,7 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   type SignalRecord = z.infer<typeof signalSchema>;
   let signalRecord: SignalRecord | null = null;
 
-  let formattedSymbol = "BTCUSDT";
+  let formattedSymbol = linkedTrade ? sanitizeSymbol(linkedTrade.symbol) : "BTCUSDT";
 
   if (isUuid) {
     const { data } = await supabase
@@ -203,21 +249,22 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
   const textSide = signalRecord?.raw_text
     ? (/\bSHORT\b/i.test(signalRecord.raw_text) ? "short" : (/\bLONG\b/i.test(signalRecord.raw_text) ? "long" : undefined))
     : undefined;
-  const side: "long" | "short" = (rawSide ?? textSide ?? (changeNum >= 0 ? "long" : "short")) === "short" ? "short" : "long";
+  const tradeSide = linkedTrade?.side === "short" ? "short" : linkedTrade?.side === "long" ? "long" : null;
+  const side: "long" | "short" = tradeSide ?? ((rawSide ?? textSide ?? (changeNum >= 0 ? "long" : "short")) === "short" ? "short" : "long");
   const isLong = side === "long";
 
-  const entry = Number(parsedPreview?.entryPrice ?? (parsedAny?.entryPrice as number) ?? (currentPrice > 0 ? currentPrice : (klines[klines.length - 1]?.close ?? 1)));
+  const entry = linkedTrade?.entry_avg
+    ? Number(linkedTrade.entry_avg)
+    : Number(parsedPreview?.entryPrice ?? (parsedAny?.entryPrice as number) ?? (currentPrice > 0 ? currentPrice : (klines[klines.length - 1]?.close ?? 1)));
   const slDist = entry * 0.025;
-  const stopLoss = Number(
-    parsedPreview?.signal?.stopLoss ??
-    (parsedAny?.stopLoss as number) ??
-    (isLong ? entry - slDist : entry + slDist)
-  );
+  const stopLoss = linkedTrade?.sl
+    ? Number(linkedTrade.sl)
+    : Number(parsedPreview?.signal?.stopLoss ?? (parsedAny?.stopLoss as number) ?? (isLong ? entry - slDist : entry + slDist));
 
   const tps = parsedPreview?.signal?.takeProfits ?? ((parsedAny?.takeProfits as Array<{ price: number; sharePct: number }>) || []);
-  const tp1 = Number(tps[0]?.price ?? (isLong ? entry + slDist * 1.8 : entry - slDist * 1.8));
-  const tp2 = Number(tps[1]?.price ?? (isLong ? entry + slDist * 2.6 : entry - slDist * 2.6));
-  const tp3 = Number(tps[2]?.price ?? (isLong ? entry + slDist * 3.5 : entry - slDist * 3.5));
+  const tp1 = linkedTargets[0]?.price ? linkedTargets[0].price : Number(tps[0]?.price ?? (isLong ? entry + slDist * 1.8 : entry - slDist * 1.8));
+  const tp2 = linkedTargets[1]?.price ? linkedTargets[1].price : Number(tps[1]?.price ?? (isLong ? entry + slDist * 2.6 : entry - slDist * 2.6));
+  const tp3 = linkedTargets[2]?.price ? linkedTargets[2].price : Number(tps[2]?.price ?? (isLong ? entry + slDist * 3.5 : entry - slDist * 3.5));
 
   const strategy = parsedPreview?.opportunity?.strategy ?? "Fair Value Gap (FVG) Mitigation & Expansion";
   const rationale = parsedPreview?.opportunity?.rationale ?? "Structural liquidity sweep followed by market structure shift (MSS) into discount value gap.";
@@ -290,8 +337,57 @@ export default async function SignalPage({ params, searchParams }: SignalPagePro
     }
   }
 
-  const activePosition = tradesList[0] || null;
-  const recentHistoricalTrade = historyTrades[0] || null;
+  if (linkedTrade) {
+    const foundInActive = tradesList.find((t) => t.id === linkedTrade.id);
+    const foundInHistory = historyTrades.find((t) => t.id === linkedTrade.id);
+    if (!foundInActive && !foundInHistory) {
+      const itemSide = linkedTrade.side === "short" ? ("short" as const) : ("long" as const);
+      const leverage = Number(linkedTrade.leverage ?? 5);
+      const entryPrice = Number(linkedTrade.entry_avg ?? currentPrice);
+      const qty = Number(linkedTrade.qty ?? 0);
+      const direction = itemSide === "long" ? 1 : -1;
+      const priceDiff = (currentPrice - entryPrice) * direction;
+      const isActive = linkedTrade.status === "active" || linkedTrade.status === "entry_open";
+      const pnlUsdt = isActive ? (qty > 0 ? priceDiff * qty : 0) : Number(linkedTrade.realized_pnl ?? 0);
+      const pnlPct = isActive
+        ? (entryPrice > 0 ? (priceDiff / entryPrice) * 100 * leverage : 0)
+        : (entryPrice > 0 && qty > 0 ? (pnlUsdt / ((entryPrice * qty) / leverage)) * 100 : 0);
+
+      const item: SignalTradeItem = {
+        id: String(linkedTrade.id),
+        symbol: String(linkedTrade.symbol),
+        side: itemSide,
+        leverage,
+        entryPrice,
+        markPrice: currentPrice,
+        qty,
+        pnlUsdt: Number(pnlUsdt.toFixed(2)),
+        pnlPct: Number(pnlPct.toFixed(2)),
+        sl: linkedTrade.sl ? Number(linkedTrade.sl) : null,
+        tp1: tp1,
+        status: String(linkedTrade.status),
+        opened_at: linkedTrade.opened_at ? String(linkedTrade.opened_at) : undefined,
+        closed_at: linkedTrade.closed_at ? String(linkedTrade.closed_at) : undefined,
+        exitReason: linkedTrade.exit_reason ? String(linkedTrade.exit_reason) : null,
+        exitPrice: linkedTrade.exit_price ? Number(linkedTrade.exit_price) : null,
+        controlMode: "auto",
+        trailingStop: null
+      };
+
+      if (isActive) {
+        tradesList.unshift(item);
+      } else {
+        historyTrades.unshift(item);
+      }
+    }
+  }
+
+  const activePosition = (linkedTrade && linkedTrade.status !== "closed"
+    ? tradesList.find((t) => t.id === linkedTrade.id) ?? tradesList[0]
+    : tradesList[0]) || null;
+  const recentHistoricalTrade = (linkedTrade && linkedTrade.status === "closed"
+    ? historyTrades.find((t) => t.id === linkedTrade.id) ?? historyTrades[0]
+    : historyTrades[0]) || null;
 
   // 7. Calculate Machine Learning & Adaptive Confidence based on 24h change, wick action & historical memory
   const symbolHistory = historyTrades.filter(

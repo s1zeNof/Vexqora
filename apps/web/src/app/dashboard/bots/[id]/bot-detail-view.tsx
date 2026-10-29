@@ -30,6 +30,13 @@ export interface RadarTickerItem {
   status: string;
 }
 
+export interface TradeTargetItem {
+  idx: number;
+  price: number;
+  share_pct: number;
+  status: string;
+}
+
 export interface OpenTradeItem {
   id: string;
   symbol: string;
@@ -41,6 +48,7 @@ export interface OpenTradeItem {
   sl: number | null;
   realized_pnl: number | null;
   created_at: string;
+  targets?: TradeTargetItem[];
 }
 
 export interface ClosedTradeItem {
@@ -57,6 +65,7 @@ export interface ClosedTradeItem {
   realized_pnl: number | null;
   opened_at: string | null;
   closed_at: string | null;
+  targets?: TradeTargetItem[];
 }
 
 interface BotDetailViewProps {
@@ -637,10 +646,12 @@ export function BotDetailView({
                     <th>Symbol</th>
                     <th>Side</th>
                     <th>Entry Price</th>
+                    <th>Take Profit (TP)</th>
                     <th>Quantity</th>
                     <th>Stop Loss</th>
                     <th>Unrealized PnL</th>
                     <th>Status</th>
+                    <th>Chart</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -649,20 +660,43 @@ export function BotDetailView({
                     const isProfit = Number(pos.realized_pnl ?? 0) >= 0;
                     return (
                       <tr key={pos.id}>
-                        <td><strong>{pos.symbol}</strong></td>
+                        <td>
+                          <Link href={`/dashboard/signal/${pos.symbol}?trade=${pos.id}`} className="trade-chart-link" title="Open live chart & trade terminal">
+                            <strong>{pos.symbol}</strong>
+                            <span className="trade-chart-link__icon">↗</span>
+                          </Link>
+                        </td>
                         <td>
                           <span className={`side-badge side-badge--${pos.side}`}>
                             {pos.side.toUpperCase()}
                           </span>
                         </td>
-                        <td className="mono">{pos.entry_avg ? `$${formatCryptoPrice(pos.entry_avg)}` : "—"}</td>
+                        <td className="mono">{pos.entry_avg ? `${formatCryptoPrice(pos.entry_avg)}` : "—"}</td>
+                        <td className="mono">
+                          {pos.targets && pos.targets.length > 0 ? (
+                            <div className="tp-targets-inline">
+                              {pos.targets.map((tgt) => (
+                                <span key={tgt.idx} className={`tp-badge tp-badge--${tgt.status}`}>
+                                  TP{tgt.idx}: ${formatCryptoPrice(tgt.price)} ({tgt.share_pct}%)
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted">Dynamic ATR</span>
+                          )}
+                        </td>
                         <td className="mono">{pos.qty ?? "—"}</td>
-                        <td className="mono text-red">{pos.sl ? `$${formatCryptoPrice(pos.sl)}` : "—"}</td>
+                        <td className="mono text-red">{pos.sl ? `${formatCryptoPrice(pos.sl)}` : "—"}</td>
                         <td className={`mono ${isProfit ? "text-green" : "text-red"}`}>
                           ${pos.realized_pnl ? Number(pos.realized_pnl).toFixed(2) : "$0.00"}
                         </td>
                         <td>
                           <span className="status-live-tag">{pos.status.toUpperCase()}</span>
+                        </td>
+                        <td>
+                          <Link href={`/dashboard/signal/${pos.symbol}?trade=${pos.id}`} className="btn-view-chart">
+                            📊 Графік
+                          </Link>
                         </td>
                         <td>
                           <form action={closeTradeManually}>
@@ -708,9 +742,11 @@ export function BotDetailView({
                     <th>Symbol</th>
                     <th>Side</th>
                     <th>Entry Price</th>
+                    <th>Take Profit (TP)</th>
                     <th>Exit Price</th>
                     <th>Exit Reason</th>
                     <th>Realized PnL</th>
+                    <th>Chart</th>
                     <th>Closed At</th>
                   </tr>
                 </thead>
@@ -720,14 +756,33 @@ export function BotDetailView({
                     const isPositive = pnlVal > 0;
                     return (
                       <tr key={t.id}>
-                        <td><strong>{t.symbol}</strong></td>
+                        <td>
+                          <Link href={`/dashboard/signal/${t.symbol}?trade=${t.id}`} className="trade-chart-link" title="Open chart & trade terminal">
+                            <strong>{t.symbol}</strong>
+                            <span className="trade-chart-link__icon">↗</span>
+                          </Link>
+                        </td>
                         <td>
                           <span className={`side-badge side-badge--${t.side}`}>
                             {t.side.toUpperCase()}
                           </span>
                         </td>
-                        <td className="mono">{t.entry_avg ? `$${formatCryptoPrice(t.entry_avg)}` : "—"}</td>
-                        <td className="mono">{t.exit_price ? `$${formatCryptoPrice(t.exit_price)}` : "—"}</td>
+                        <td className="mono">{t.entry_avg ? `${formatCryptoPrice(t.entry_avg)}` : "—"}</td>
+                        <td className="mono">
+                          {t.targets && t.targets.length > 0 ? (
+                            <div className="tp-targets-inline">
+                              {t.targets.map((tgt) => (
+                                <span key={tgt.idx} className={`tp-badge tp-badge--${tgt.status}`}>
+                                  TP{tgt.idx}: ${formatCryptoPrice(tgt.price)}
+                                  {tgt.status === "filled" && " ✓"}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted">Dynamic ATR</span>
+                          )}
+                        </td>
+                        <td className="mono">{t.exit_price ? `${formatCryptoPrice(t.exit_price)}` : "—"}</td>
                         <td>
                           <span className="exit-reason-tag">
                             {t.exit_reason ? t.exit_reason.replaceAll("_", " ").toUpperCase() : "RESOLVED"}
@@ -735,6 +790,11 @@ export function BotDetailView({
                         </td>
                         <td className={`mono ${isPositive ? "text-green" : pnlVal < 0 ? "text-red" : ""}`}>
                           {isPositive ? "+" : ""}${pnlVal.toFixed(2)}
+                        </td>
+                        <td>
+                          <Link href={`/dashboard/signal/${t.symbol}?trade=${t.id}`} className="btn-view-chart">
+                            📊 Графік
+                          </Link>
                         </td>
                         <td className="mono text-muted">
                           {t.closed_at ? new Date(t.closed_at).toLocaleString() : "—"}

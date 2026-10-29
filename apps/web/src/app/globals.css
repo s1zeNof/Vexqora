@@ -3665,3 +3665,93 @@ input:focus, select:focus, textarea:focus {
   .goal-action-options { grid-template-columns: 1fr; }
   .radar-row { grid-template-columns: 1fr 1fr; }
 }
+
+
+/* Trade Chart Navigation & TP Target Badges */
+.trade-chart-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #00e5ff;
+  text-decoration: none;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.trade-chart-link:hover {
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+}
+
+.trade-chart-link__icon {
+  font-size: 11px;
+  opacity: 0.6;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.trade-chart-link:hover .trade-chart-link__icon {
+  opacity: 1;
+  transform: translate(2px, -2px);
+}
+
+.btn-view-chart {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 6px;
+  color: #00e5ff;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-view-chart:hover {
+  background: rgba(0, 229, 255, 0.2);
+  border-color: #00e5ff;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+}
+
+.tp-targets-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tp-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-family: var(--font-mono), monospace;
+  font-weight: 600;
+  background: rgba(53, 242, 208, 0.08);
+  color: #35f2d0;
+  border: 1px solid rgba(53, 242, 208, 0.25);
+  white-space: nowrap;
+}
+
+.tp-badge--filled {
+  background: rgba(53, 242, 208, 0.2);
+  color: #35f2d0;
+  border-color: #35f2d0;
+  box-shadow: 0 0 6px rgba(53, 242, 208, 0.3);
+}
+
+.tp-badge--active {
+  background: rgba(0, 229, 255, 0.12);
+  color: #00e5ff;
+  border-color: rgba(0, 229, 255, 0.4);
+}
+
+.tp-badge--cancelled {
+  background: rgba(148, 163, 184, 0.08);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.2);
+  text-decoration: line-through;
+}

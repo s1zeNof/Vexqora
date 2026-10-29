@@ -96,6 +96,38 @@ export default async function BotDetailPage({
       .limit(50);
 
     closedTrades = rawClosed ?? [];
+
+    // Load TP targets for bot trades to display in tables
+    const { data: rawTargets } = await supabase
+      .from("trade_targets")
+      .select("trade_id,idx,price,share_pct,status")
+      .in("trade_id", botTradeIds)
+      .order("idx", { ascending: true });
+
+    const targetsByTradeId = new Map<string, Array<{ idx: number; price: number; share_pct: number; status: string }>>();
+    if (rawTargets) {
+      for (const tg of rawTargets) {
+        const tradeId = String(tg.trade_id);
+        const list = targetsByTradeId.get(tradeId) ?? [];
+        list.push({
+          idx: Number(tg.idx),
+          price: Number(tg.price),
+          share_pct: Number(tg.share_pct),
+          status: String(tg.status),
+        });
+        targetsByTradeId.set(tradeId, list);
+      }
+    }
+
+    openPositions = openPositions.map((t) => ({
+      ...t,
+      targets: targetsByTradeId.get(t.id) ?? [],
+    }));
+
+    closedTrades = closedTrades.map((t) => ({
+      ...t,
+      targets: targetsByTradeId.get(t.id) ?? [],
+    }));
   }
 
   return (
