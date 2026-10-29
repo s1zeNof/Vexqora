@@ -24,3 +24,4 @@ export * from "./model-registry";
 export * from "./adx";
 export * from "./thesis-store";
 export * from "./execution-evidence";
+export * from "./scalping-economics";
