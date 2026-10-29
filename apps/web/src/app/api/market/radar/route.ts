@@ -16,76 +16,85 @@ export interface RadarTickerItem {
   status: string;
 }
 
+interface RawTickerItem {
+  symbol: string;
+  lastPrice: string;
+  price24hPcnt: string;
+  turnover24h: string;
+  highPrice24h?: string | undefined;
+  lowPrice24h?: string | undefined;
+}
+
+let cachedTickers: { timestamp: number; list: RawTickerItem[] } | null = null;
+const CACHE_TTL_MS = 4000;
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const category = (searchParams.get("category") ?? "volume").toLowerCase();
   const search = (searchParams.get("search") ?? "").toUpperCase().trim();
   const limit = Math.min(100, Math.max(10, Number(searchParams.get("limit") ?? 40)));
 
-  let rawList: Array<{
-    symbol: string;
-    lastPrice: string;
-    price24hPcnt: string;
-    turnover24h: string;
-    highPrice24h?: string | undefined;
-    lowPrice24h?: string | undefined;
-  }> = [];
+  let rawList: RawTickerItem[] = [];
 
-  try {
-    const res = await fetch("https://api.bybit.com/v5/market/tickers?category=linear", {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        Accept: "application/json",
-      },
-      cache: "no-store",
-    });
-
-    if (res.ok) {
-      const data = (await res.json()) as {
-        result?: {
-          list?: Array<{
-            symbol: string;
-            lastPrice: string;
-            price24hPcnt: string;
-            turnover24h: string;
-            highPrice24h?: string | undefined;
-            lowPrice24h?: string | undefined;
-          }>;
-        };
-      };
-      rawList = data.result?.list ?? [];
-    }
-  } catch {
-    // If Bybit public API fails, fallback to Binance below
-  }
-
-  // Fallback to Binance Futures if Bybit returned nothing
-  if (rawList.length === 0) {
+  const now = Date.now();
+  if (cachedTickers && now - cachedTickers.timestamp < CACHE_TTL_MS && cachedTickers.list.length > 0) {
+    rawList = cachedTickers.list;
+  } else {
     try {
-      const res = await fetch("https://fapi.binance.com/fapi/v1/ticker/24hr", {
-        headers: { "User-Agent": "Mozilla/5.0" },
+      const res = await fetch("https://api.bybit.com/v5/market/tickers?category=linear", {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "application/json",
+        },
         cache: "no-store",
       });
+
       if (res.ok) {
-        const binanceList = (await res.json()) as Array<{
-          symbol: string;
-          lastPrice: string;
-          priceChangePercent: string;
-          quoteVolume: string;
-          highPrice?: string;
-          lowPrice?: string;
-        }>;
-        rawList = binanceList.map((t) => ({
-          symbol: t.symbol,
-          lastPrice: t.lastPrice,
-          price24hPcnt: (Number(t.priceChangePercent) / 100).toString(),
-          turnover24h: t.quoteVolume,
-          highPrice24h: t.highPrice,
-          lowPrice24h: t.lowPrice,
-        }));
+        const data = (await res.json()) as {
+          result?: {
+            list?: RawTickerItem[];
+          };
+        };
+        rawList = data.result?.list ?? [];
+        if (rawList.length > 0) {
+          cachedTickers = { timestamp: now, list: rawList };
+        }
       }
     } catch {
-      // Return empty
+      // If Bybit public API fails, fallback to Binance below
+    }
+
+    // Fallback to Binance Futures if Bybit returned nothing
+    if (rawList.length === 0) {
+      try {
+        const res = await fetch("https://fapi.binance.com/fapi/v1/ticker/24hr", {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const binanceList = (await res.json()) as Array<{
+            symbol: string;
+            lastPrice: string;
+            priceChangePercent: string;
+            quoteVolume: string;
+            highPrice?: string;
+            lowPrice?: string;
+          }>;
+          rawList = binanceList.map((t) => ({
+            symbol: t.symbol,
+            lastPrice: t.lastPrice,
+            price24hPcnt: (Number(t.priceChangePercent) / 100).toString(),
+            turnover24h: t.quoteVolume,
+            highPrice24h: t.highPrice,
+            lowPrice24h: t.lowPrice,
+          }));
+          if (rawList.length > 0) {
+            cachedTickers = { timestamp: now, list: rawList };
+          }
+        }
+      } catch {
+        // Return empty
+      }
     }
   }
 

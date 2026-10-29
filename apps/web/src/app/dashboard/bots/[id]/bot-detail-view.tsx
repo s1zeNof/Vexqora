@@ -105,6 +105,7 @@ export function BotDetailView({
   useEffect(() => {
     let active = true;
     async function loadRadar() {
+      if (activeTab !== "radar" || (typeof document !== "undefined" && document.hidden)) return;
       try {
         const query = new URLSearchParams({
           category: radarCategory,
@@ -127,12 +128,12 @@ export function BotDetailView({
     void loadRadar();
     const interval = setInterval(() => {
       void loadRadar();
-    }, 4000);
+    }, 6000);
     return () => {
       active = false;
       clearInterval(interval);
     };
-  }, [radarCategory, radarSearch]);
+  }, [radarCategory, radarSearch, activeTab]);
 
   const heartbeatTime = bot.last_heartbeat_at ? new Date(bot.last_heartbeat_at).getTime() : 0;
   const secondsSinceHeartbeat = heartbeatTime > 0 ? Math.max(0, Math.floor((now - heartbeatTime) / 1000)) : null;
