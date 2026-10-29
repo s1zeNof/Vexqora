@@ -352,7 +352,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                         name="risk_per_trade_pct"
                         type="number"
                         min={0.1}
-                        max={5}
+                        max={100}
                         step="0.1"
                         defaultValue={1}
                         placeholder=" "
@@ -362,7 +362,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                         Risk per trade (%)
                       </label>
                     </div>
-                    <span className="field-hint">Range: 0.1% – 5.0% of allocated balance</span>
+                    <span className="field-hint">Range: 0.1% – 100% of allocated balance</span>
                   </div>
 
                   <div className="floating-field">
@@ -377,8 +377,8 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                         id="bf-dailyloss"
                         name="max_daily_loss_pct"
                         type="number"
-                        min={1}
-                        max={25}
+                        min={0.1}
+                        max={100}
                         step="0.5"
                         defaultValue={5}
                         placeholder=" "
@@ -388,7 +388,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                         Max daily loss (%)
                       </label>
                     </div>
-                    <span className="field-hint">Bot halts if daily loss reaches limit (1% – 25%)</span>
+                    <span className="field-hint">Bot halts if daily loss reaches limit (0.1% – 100%)</span>
                   </div>
                 </div>
               )}

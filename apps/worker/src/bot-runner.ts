@@ -258,58 +258,44 @@ function roundPrice(val: number): number {
 }
 
           if (scored.length > 0) {
+            let best: { symbol: string; lastPrice: number; changePct: number; turnover: number } | undefined;
+            let isLong = true;
+
             if (bot.direction === "long") {
               scored.sort((a, b) => b.changePct - a.changePct);
-              const best = scored[0];
-              if (best) {
-                const entry = best.lastPrice;
-                scannedOpportunity = {
-                  symbol: best.symbol,
-                  entry,
-                  sl: roundPrice(entry * 0.988),
-                  tp1: roundPrice(entry * 1.018),
-                  tp2: roundPrice(entry * 1.030),
-                  tp3: roundPrice(entry * 1.045),
-                  side: "long",
-                  changePct: best.changePct,
-                  turnover: best.turnover,
-                };
-              }
+              best = scored[0];
+              isLong = true;
             } else if (bot.direction === "short") {
               scored.sort((a, b) => a.changePct - b.changePct);
-              const best = scored[0];
-              if (best) {
-                const entry = best.lastPrice;
-                scannedOpportunity = {
-                  symbol: best.symbol,
-                  entry,
-                  sl: roundPrice(entry * 1.012),
-                  tp1: roundPrice(entry * 0.982),
-                  tp2: roundPrice(entry * 0.970),
-                  tp3: roundPrice(entry * 0.955),
-                  side: "short",
-                  changePct: best.changePct,
-                  turnover: best.turnover,
-                };
-              }
+              best = scored[0];
+              isLong = false;
             } else {
               scored.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
-              const best = scored[0];
-              if (best) {
-                const isLong = best.changePct >= 0;
-                const entry = best.lastPrice;
-                scannedOpportunity = {
-                  symbol: best.symbol,
-                  entry,
-                  sl: roundPrice(isLong ? entry * 0.988 : entry * 1.012),
-                  tp1: roundPrice(isLong ? entry * 1.018 : entry * 0.982),
-                  tp2: roundPrice(isLong ? entry * 1.030 : entry * 0.970),
-                  tp3: roundPrice(isLong ? entry * 1.045 : entry * 0.955),
-                  side: isLong ? "long" : "short",
-                  changePct: best.changePct,
-                  turnover: best.turnover,
-                };
-              }
+              best = scored[0];
+              isLong = (best?.changePct ?? 0) >= 0;
+            }
+
+            if (best) {
+              const entry = best.lastPrice;
+              // Dynamic Stop Loss based on market volatility, not hardcoded constants
+              const volatilityPct = Math.max(0.015, Math.min(0.06, (Math.abs(best.changePct) / 100) * 0.35 || 0.02));
+              const sl = roundPrice(isLong ? entry * (1 - volatilityPct) : entry * (1 + volatilityPct));
+              // Dynamic Take Profit targets based on Risk-to-Reward (1.5R, 2.5R, 4.0R)
+              const tp1 = roundPrice(isLong ? entry * (1 + volatilityPct * 1.5) : entry * (1 - volatilityPct * 1.5));
+              const tp2 = roundPrice(isLong ? entry * (1 + volatilityPct * 2.5) : entry * (1 - volatilityPct * 2.5));
+              const tp3 = roundPrice(isLong ? entry * (1 + volatilityPct * 4.0) : entry * (1 - volatilityPct * 4.0));
+
+              scannedOpportunity = {
+                symbol: best.symbol,
+                entry,
+                sl,
+                tp1,
+                tp2,
+                tp3,
+                side: isLong ? "long" : "short",
+                changePct: best.changePct,
+                turnover: best.turnover,
+              };
             }
           }
         }
@@ -322,9 +308,14 @@ function roundPrice(val: number): number {
         return;
       }
 
-      // Execute paper trade for autonomous scan
-      const effectiveLeverage = Math.max(1, Math.min(bot.max_leverage, Math.ceil(5.5 / Math.max(1, accountBalance))));
-      const notional = Math.min(accountBalance * effectiveLeverage, Math.max(5.0, accountBalance));
+      // Dynamic position sizing based on bot's configured leverage and risk_per_trade_pct
+      const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
+      const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
+      const stopDistancePct = Math.max(0.005, Math.abs(scannedOpportunity.entry - scannedOpportunity.sl) / scannedOpportunity.entry);
+      const maxCapitalRisk = accountBalance * riskPct;
+      const targetNotional = maxCapitalRisk / stopDistancePct;
+      const maxAllowedNotional = accountBalance * effectiveLeverage;
+      const notional = Math.max(5.0, Math.min(targetNotional, maxAllowedNotional));
       const qty = Number((notional / scannedOpportunity.entry).toFixed(scannedOpportunity.entry < 1 ? 1 : 4));
 
       const { data: newTrade, error: tradeErr } = await supabase

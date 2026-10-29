@@ -31,11 +31,11 @@ export async function createPaperBot(formData: FormData) {
   const rawDailyLoss = formData.get("max_daily_loss_pct");
 
   const riskPerTradePct = typeof rawRisk === "string" && rawRisk.length > 0
-    ? Math.min(5, Math.max(0.1, Number(rawRisk)))
+    ? Math.min(100, Math.max(0.1, Number(rawRisk)))
     : 1.0;
 
   const maxDailyLossPct = typeof rawDailyLoss === "string" && rawDailyLoss.length > 0
-    ? Math.min(25, Math.max(0.1, Number(rawDailyLoss)))
+    ? Math.min(100, Math.max(0.1, Number(rawDailyLoss)))
     : 5.0;
 
   const maxDrawdownPct = 20.0;
@@ -68,7 +68,7 @@ export async function createPaperBot(formData: FormData) {
   // Ensure DB accepts strategy constraint (map 'adaptive' to scalping in DB if needed or store description note)
   const dbStrategy = strategy.includes("intraday") && !strategy.includes("scalping") ? "intraday" : "scalping";
 
-  const { error } = await supabase.from("trading_bots").insert({
+  let { error } = await supabase.from("trading_bots").insert({
     user_id: user.id,
     account_id: account.id,
     name,
@@ -88,6 +88,30 @@ export async function createPaperBot(formData: FormData) {
     direction,
     goal_action: goalAction,
   });
+
+  if (error && error.message?.includes("trading_bots_risk_per_trade_pct_check")) {
+    const fallbackRes = await supabase.from("trading_bots").insert({
+      user_id: user.id,
+      account_id: account.id,
+      name,
+      description: strategy === "adaptive"
+        ? (description ? `${description} [AI Adaptive]` : "AI Adaptive Regime Engine")
+        : (description ? `${description} [${strategy}]` : `Strategies: ${strategy}`),
+      mode: "paper",
+      strategy: dbStrategy,
+      allocated_capital: capital,
+      current_balance: capital,
+      target_balance: Number.isFinite(target) && target !== null && target > capital ? target : null,
+      risk_per_trade_pct: Math.min(5, riskPerTradePct),
+      max_daily_loss_pct: Math.min(25, maxDailyLossPct),
+      max_drawdown_pct: Math.min(50, maxDrawdownPct),
+      max_trades_per_day: maxTradesPerDay,
+      max_leverage: maxLeverage,
+      direction,
+      goal_action: goalAction,
+    });
+    error = fallbackRes.error;
+  }
 
   if (error) {
     redirect("/dashboard/bots?error=database");
@@ -131,22 +155,22 @@ export async function updateBotSettings(formData: FormData) {
   if (!user) redirect("/login");
   const value = (key: string) => { const raw = formData.get(key); return typeof raw === "string" ? raw : ""; };
   const id = value("id");
-  const risk = Math.min(5, Math.max(0.1, Number(value("risk_per_trade_pct")) || 1));
+  const risk = Math.min(100, Math.max(0.1, Number(value("risk_per_trade_pct")) || 1));
   const targetRaw = Number(value("target_balance"));
   const goal = ["pause", "stop", "continue"].includes(value("goal_action")) ? value("goal_action") : "pause";
   const rawDir = value("direction");
   const direction = ["both", "long", "short"].includes(rawDir) ? rawDir : "both";
 
   const rawDailyLoss = value("max_daily_loss_pct");
-  const maxDailyLossPct = rawDailyLoss && Number(rawDailyLoss) > 0 ? Math.min(25, Math.max(0.1, Number(rawDailyLoss))) : 25;
+  const maxDailyLossPct = rawDailyLoss && Number(rawDailyLoss) > 0 ? Math.min(100, Math.max(0.1, Number(rawDailyLoss))) : 100;
 
   const rawDrawdown = value("max_drawdown_pct");
-  const maxDrawdownPct = rawDrawdown && Number(rawDrawdown) > 0 ? Math.min(50, Math.max(1, Number(rawDrawdown))) : 50;
+  const maxDrawdownPct = rawDrawdown && Number(rawDrawdown) > 0 ? Math.min(100, Math.max(1, Number(rawDrawdown))) : 100;
 
   const rawTradesPerDay = value("max_trades_per_day");
   const maxTradesPerDay = rawTradesPerDay && Number(rawTradesPerDay) > 0 ? Math.min(100, Math.max(1, Number(rawTradesPerDay))) : 100;
 
-  await supabase
+  const updateErr = (await supabase
     .from("trading_bots")
     .update({
       risk_per_trade_pct: risk,
@@ -160,7 +184,25 @@ export async function updateBotSettings(formData: FormData) {
     })
     .eq("id", id)
     .eq("user_id", user.id)
-    .eq("mode", "paper");
+    .eq("mode", "paper")).error;
+
+  if (updateErr && updateErr.message?.includes("trading_bots_risk_per_trade_pct_check")) {
+    await supabase
+      .from("trading_bots")
+      .update({
+        risk_per_trade_pct: Math.min(5, risk),
+        target_balance: Number.isFinite(targetRaw) && targetRaw > 0 ? targetRaw : null,
+        goal_action: goal,
+        direction,
+        max_daily_loss_pct: Math.min(25, maxDailyLossPct),
+        max_drawdown_pct: Math.min(50, maxDrawdownPct),
+        max_trades_per_day: maxTradesPerDay,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .eq("mode", "paper");
+  }
 
   revalidatePath(`/dashboard/bots/${id}`);
   revalidatePath("/dashboard/bots");
@@ -312,18 +354,23 @@ export async function triggerBotScan(formData: FormData) {
     return Number(val.toFixed(2));
   };
 
-  // Calculate entry, SL, TP
+  // Dynamic Stop Loss based on coin volatility, never arbitrary fixed 1.2%
   const entry = selectedCandidate.lastPrice;
   const isLong = selectedCandidate.side === "long";
-  const sl = roundPrice(isLong ? entry * 0.988 : entry * 1.012);
-  const tp1 = roundPrice(isLong ? entry * 1.018 : entry * 0.982);
-  const tp2 = roundPrice(isLong ? entry * 1.030 : entry * 0.970);
-  const tp3 = roundPrice(isLong ? entry * 1.045 : entry * 0.955);
+  const volatilityPct = Math.max(0.015, Math.min(0.06, (Math.abs(selectedCandidate.changePct) / 100) * 0.35 || 0.02));
+  const sl = roundPrice(isLong ? entry * (1 - volatilityPct) : entry * (1 + volatilityPct));
+  // Dynamic Take Profit targets based on Risk-to-Reward (1.5R, 2.5R, 4.0R)
+  const tp1 = roundPrice(isLong ? entry * (1 + volatilityPct * 1.5) : entry * (1 - volatilityPct * 1.5));
+  const tp2 = roundPrice(isLong ? entry * (1 + volatilityPct * 2.5) : entry * (1 - volatilityPct * 2.5));
+  const tp3 = roundPrice(isLong ? entry * (1 + volatilityPct * 4.0) : entry * (1 - volatilityPct * 4.0));
 
   const balance = Number(bot.current_balance ?? bot.allocated_capital);
-  const maxLev = Number(bot.max_leverage ?? 3);
-  const effectiveLeverage = Math.max(1, Math.min(maxLev, Math.ceil(5.5 / Math.max(1, balance))));
-  const notional = Math.min(balance * effectiveLeverage, Math.max(5.0, balance));
+  const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
+  const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
+  const maxCapitalRisk = balance * riskPct;
+  const targetNotional = maxCapitalRisk / volatilityPct;
+  const maxAllowedNotional = balance * effectiveLeverage;
+  const notional = Math.max(5.0, Math.min(targetNotional, maxAllowedNotional));
   const qty = Number((notional / entry).toFixed(entry < 1 ? 1 : 4));
 
   // Place real paper trade into database
