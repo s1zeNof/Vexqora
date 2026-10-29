@@ -9,6 +9,7 @@ import { reconcileOnStartup } from "./reconciler";
 import { processJob, type ExecutionJobData } from "./runner";
 import { startWsListener } from "./ws-listener";
 import { startMarketEventsScheduler } from "./market-events-scheduler";
+import { startBotRunner } from "./bot-runner";
 
 interface JobRow {
   id: string;
@@ -123,6 +124,9 @@ async function startWorker() {
   // Start 24/7 Market Events Scheduler for AI Companion (Phase P1-E)
   const stopMarketEvents = startMarketEventsScheduler(supabase);
 
+  // Start 24/7 Autonomous Bot Runner (Stage 5)
+  const stopBotRunner = startBotRunner(supabase);
+
   logger.info({ pollIntervalMs: config.pollIntervalMs }, "Worker queue consumer active. Waiting for execution jobs...");
 
   let isRunning = true;
@@ -135,6 +139,7 @@ async function startWorker() {
     stopPaper();
     stopSignalMonitor();
     stopMarketEvents();
+    stopBotRunner();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

@@ -13,7 +13,7 @@ interface TopNavProps {
   displayName: string | null;
 }
 
-type IconName = "pulse" | "signals" | "scalping" | "desk" | "positions" | "history" | "copilot" | "profile" | "accounts" | "risk" | "integrations";
+type IconName = "pulse" | "signals" | "scalping" | "bots" | "desk" | "positions" | "history" | "copilot" | "profile" | "accounts" | "risk" | "integrations";
 type NavItem = { label: string; href: string; icon: IconName; match?: (path: string) => boolean };
 type NavGroup = { id: string; label: string; items: NavItem[] };
 
@@ -35,6 +35,7 @@ const navGroups: NavGroup[] = [
     label: "Intelligence",
     items: [{ label: "Market copilot", href: "/dashboard/copilot", icon: "copilot" }]
   },
+  { id: "automation", label: "Automation", items: [{ label: "Trading bots", href: "/dashboard/bots", icon: "bots" }] },
   {
     id: "account",
     label: "Account",
@@ -56,6 +57,7 @@ function NavIcon({ name }: { name: IconName }) {
     pulse: <><path d="M3 12h4l2.2-6 4.1 12 2.2-6H21" /></>,
     signals: <><path d="M5 19V9M12 19V5M19 19v-7" /><path d="M3 19h18" /></>,
     scalping: <><path d="M4 15l4-4 3 3 7-8" /><path d="M14 6h4v4" /><path d="M4 20h16" /></>,
+    bots: <><rect x="4" y="7" width="16" height="12" rx="2" /><path d="M12 3v4M8 12h.01M16 12h.01M9 16h6" /></>,
     desk: <><path d="M4 5h16v11H4z" /><path d="M8 20h8M12 16v4" /></>,
     positions: <><path d="M5 6h14M5 12h14M5 18h14" /><path d="M8 3v6M16 9v6M10 15v6" /></>,
     history: <><path d="M4 7V3m0 0h4M4 3l3 3" /><path d="M5.2 18.8A9 9 0 1 0 4 7" /><path d="M12 7v5l3 2" /></>,
