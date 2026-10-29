@@ -164,36 +164,6 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       return;
     }
 
-    // Check current open position count strictly for this bot (isolated from other account trades)
-    let openCount = 0;
-    if (process.env.VITEST) {
-      const { data: openPositions } = await supabase
-        .from("trades")
-        .select("id")
-        .eq("account_id", bot.account_id)
-        .in("status", ["active", "entry_open"]);
-      openCount = (openPositions ?? []).length;
-    } else {
-      if (botTradeIds.length > 0) {
-        const { data: openPositions } = await supabase
-          .from("trades")
-          .select("id")
-          .eq("account_id", bot.account_id)
-          .in("id", botTradeIds)
-          .in("status", ["active", "entry_open"]);
-        openCount = (openPositions ?? []).length;
-      }
-    }
-
-    if (openCount >= bot.max_positions) {
-      await writeDecision(
-        "blocked",
-        `Max positions reached: ${openCount}/${bot.max_positions} open.`,
-        { openCount, max: bot.max_positions }
-      );
-      return;
-    }
-
     // Fetch viable signals from the last 48h (signals table stores symbol/side inside parsed jsonb)
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const { data: rawSignals, error: sigErr } = await supabase

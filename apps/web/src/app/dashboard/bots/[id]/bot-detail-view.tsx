@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { setBotStatus, triggerBotScan, closeTradeManually } from "../actions";
+import { setBotStatus, triggerBotScan, closeTradeManually, updateBotSettings } from "../actions";
 
 export type BotStatus = "running" | "stopped" | "paused" | "error";
 
@@ -801,12 +801,14 @@ export function BotDetailView({
 
             <div className="config-box">
               <h4>Risk &amp; Safety Guardrails</h4>
-              <dl className="config-dl">
-                <div><dt>Risk Per Trade</dt><dd className="mono">{bot.risk_per_trade_pct}% of capital</dd></div>
-                <div><dt>Max Daily Loss Guard</dt><dd className="mono">{bot.max_daily_loss_pct}% (halt on touch)</dd></div>
-                <div><dt>Goal Action</dt><dd className="mono">{bot.goal_action.toUpperCase()}</dd></div>
-                <div><dt>Max Leverage Limit</dt><dd className="mono">3.0x dynamic</dd></div>
-              </dl>
+              <form action={updateBotSettings} className="bot-settings-form">
+                <input type="hidden" name="id" value={bot.id} />
+                <label>Risk per trade (%)<input name="risk_per_trade_pct" type="number" min="0.1" max="5" step="0.1" defaultValue={bot.risk_per_trade_pct} /></label>
+                <label>Max daily loss (%)<input name="max_daily_loss_pct" type="number" min="0.1" max="25" step="0.1" defaultValue={bot.max_daily_loss_pct} /></label>
+                <label>Target balance (USDT)<input name="target_balance" type="number" min="0" step="0.01" defaultValue={bot.target_balance ?? ""} /></label>
+                <label>When target reached<select name="goal_action" defaultValue={bot.goal_action}><option value="pause">Pause</option><option value="stop">Stop</option><option value="continue">Continue</option></select></label>
+                <button type="submit" className="btn-terminal btn-terminal--scan">Save Settings</button>
+              </form>
             </div>
           </div>
         </div>

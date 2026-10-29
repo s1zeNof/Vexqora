@@ -125,6 +125,21 @@ export async function setBotStatus(formData: FormData) {
   revalidatePath(`/dashboard/bots/${id}`);
 }
 
+export async function updateBotSettings(formData: FormData) {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const value = (key: string) => { const raw = formData.get(key); return typeof raw === "string" ? raw : ""; };
+  const id = value("id");
+  const risk = Math.min(5, Math.max(0.1, Number(value("risk_per_trade_pct")) || 1));
+  const daily = Math.min(25, Math.max(0.1, Number(value("max_daily_loss_pct")) || 5));
+  const targetRaw = Number(value("target_balance"));
+  const goal = ["pause", "stop", "continue"].includes(value("goal_action")) ? value("goal_action") : "pause";
+  await supabase.from("trading_bots").update({ risk_per_trade_pct: risk, max_daily_loss_pct: daily, target_balance: Number.isFinite(targetRaw) && targetRaw > 0 ? targetRaw : null, goal_action: goal, updated_at: new Date().toISOString() }).eq("id", id).eq("user_id", user.id).eq("mode", "paper");
+  revalidatePath(`/dashboard/bots/${id}`);
+  revalidatePath("/dashboard/bots");
+}
+
 export async function triggerBotScan(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -159,7 +174,9 @@ export async function triggerBotScan(formData: FormData) {
   }
   const openPositions = (openTrades ?? []) as SimpleOpenTrade[];
   const openSymbols = openPositions.map((p) => String(p.symbol));
-  const maxPositions = Number(bot.max_positions ?? 3);
+  // Manual AI scans are constrained by allocated capital and risk guards, not
+  // by an arbitrary position-count ceiling.
+  const maxPositions = Number.POSITIVE_INFINITY;
 
   if (openPositions.length >= maxPositions) {
     await supabase.from("bot_decisions").insert({

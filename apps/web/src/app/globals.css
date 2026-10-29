@@ -3035,7 +3035,16 @@ input:focus, select:focus, textarea:focus {
 .market-radar-list {
   display: grid;
   gap: 8px;
+  max-height: min(620px, 62vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px;
+  scrollbar-gutter: stable;
 }
+.bot-settings-form { display: grid; gap: 10px; margin-top: 12px; }
+.bot-settings-form label { display: grid; gap: 5px; color: #94a3b8; font-size: 11px; }
+.bot-settings-form input, .bot-settings-form select { min-height: 40px; padding: 0 10px; border: 1px solid rgba(255,255,255,.12); background: #07090e; color: #f8fafc; }
+.bot-settings-form button { justify-self: start; margin-top: 4px; }
 
 .radar-row {
   display: grid;
