@@ -10,11 +10,23 @@ interface BotCreateFormProps {
 export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [capital, setCapital] = useState("");
+  const [strategyMode, setStrategyMode] = useState<"adaptive" | "custom">("adaptive");
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(["scalping", "momentum"]);
   const [isCustomRisk, setIsCustomRisk] = useState(false);
   const [goalAction, setGoalAction] = useState<"pause" | "stop" | "continue">("pause");
 
   const setCapitalPreset = (val: number) => {
     setCapital(String(Math.min(paperBalance, Math.max(1, val))));
+  };
+
+  const toggleStrategy = (strat: string) => {
+    setSelectedStrategies((prev) =>
+      prev.includes(strat)
+        ? prev.length > 1
+          ? prev.filter((s) => s !== strat)
+          : prev
+        : [...prev, strat]
+    );
   };
 
   return (
@@ -31,8 +43,8 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
             </svg>
           </span>
           <div className="bot-create-trigger__text">
-            <strong>Create Autonomous Bot</strong>
-            <span>Set up a new Paper trading bot with algorithmic execution</span>
+            <strong>Deploy Autonomous AI Trading Bot</strong>
+            <span>Create a new 24/7 algorithmic agent with Market-Adaptive regime detection</span>
           </div>
           <span className="bot-create-trigger__badge">Paper Mode</span>
         </button>
@@ -50,8 +62,8 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                 </svg>
               </span>
               <div>
-                <h3>Deploy New AI Bot</h3>
-                <p>Pure Paper Trading · No real assets at risk · Real-time market pipeline</p>
+                <h3>Deploy New Autonomous AI Bot</h3>
+                <p>Pure Paper Trading · 24/7 Background Runner · Real-time Bybit WebSocket feed</p>
               </div>
             </div>
             <button
@@ -123,7 +135,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                     className="floating-field__input"
                   />
                   <label htmlFor="bf-desc" className="floating-field__label">
-                    Description & Instructions (Optional)
+                    Description &amp; Strategy Notes (Optional)
                   </label>
                 </div>
               </div>
@@ -186,13 +198,107 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                     className="floating-field__input mono"
                   />
                   <label htmlFor="bf-target" className="floating-field__label">
-                    Target Balance (USDT) — Optional
+                    Target Goal (USDT) — Optional
                   </label>
                 </div>
                 <div className="field-hint">
-                  Goal target. Bot executes action below when reached.
+                  Bot will execute selected action once this goal balance is achieved.
                 </div>
               </div>
+            </div>
+
+            {/* Trading Strategy & Market Regimes Selector */}
+            <div className="risk-segment">
+              <div className="risk-segment__header">
+                <div className="risk-segment__title">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path d="M3 13l4-4 4 4 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M13 7h4v4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>Strategy &amp; Market Regime Selection</span>
+                </div>
+                <div className="risk-mode-toggle">
+                  <button
+                    type="button"
+                    onClick={() => setStrategyMode("adaptive")}
+                    className={`risk-mode-btn ${strategyMode === "adaptive" ? "risk-mode-btn--active" : ""}`}
+                  >
+                    🤖 AI Adaptive (Recommended)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStrategyMode("custom")}
+                    className={`risk-mode-btn ${strategyMode === "custom" ? "risk-mode-btn--active" : ""}`}
+                  >
+                    🎯 Custom Strategy
+                  </button>
+                </div>
+              </div>
+
+              <input
+                type="hidden"
+                name="strategy"
+                value={strategyMode === "adaptive" ? "adaptive" : selectedStrategies.join(",")}
+              />
+
+              {strategyMode === "adaptive" ? (
+                <div className="risk-auto-banner">
+                  <div className="risk-auto-banner__dot" />
+                  <p>
+                    <strong>Autonomous Market-Adaptive Trading Active:</strong> The AI bot continuously inspects market volatility, spread, and order flow. It automatically picks the optimal strategy for the current market state (High-frequency Scalping during micro-volatility, Momentum / Breakout during volume surges, or Mean Reversion in consolidations).
+                  </p>
+                </div>
+              ) : (
+                <div className="strategy-options-grid">
+                  <label className={`strategy-chip-label ${selectedStrategies.includes("scalping") ? "is-selected" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedStrategies.includes("scalping")}
+                      onChange={() => toggleStrategy("scalping")}
+                    />
+                    <div className="strategy-chip-body">
+                      <strong>⚡ Micro-Scalping (1m – 5m)</strong>
+                      <span>Quick trades on tight spreads and local order book imbalances</span>
+                    </div>
+                  </label>
+
+                  <label className={`strategy-chip-label ${selectedStrategies.includes("momentum") ? "is-selected" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedStrategies.includes("momentum")}
+                      onChange={() => toggleStrategy("momentum")}
+                    />
+                    <div className="strategy-chip-body">
+                      <strong>🚀 Intraday Momentum &amp; Breakouts</strong>
+                      <span>Trend continuations following volume expansions and VWAP breakouts</span>
+                    </div>
+                  </label>
+
+                  <label className={`strategy-chip-label ${selectedStrategies.includes("mean_reversion") ? "is-selected" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedStrategies.includes("mean_reversion")}
+                      onChange={() => toggleStrategy("mean_reversion")}
+                    />
+                    <div className="strategy-chip-body">
+                      <strong>🔄 Range &amp; Mean Reversion</strong>
+                      <span>Counter-trend bounces off support/resistance in sideways markets</span>
+                    </div>
+                  </label>
+
+                  <label className={`strategy-chip-label ${selectedStrategies.includes("volatility") ? "is-selected" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedStrategies.includes("volatility")}
+                      onChange={() => toggleStrategy("volatility")}
+                    />
+                    <div className="strategy-chip-body">
+                      <strong>💥 Volatility Squeeze Spikes</strong>
+                      <span>Explosive moves following Bollinger band compressions</span>
+                    </div>
+                  </label>
+                </div>
+              )}
             </div>
 
             {/* AI Risk Management Segment */}
@@ -227,7 +333,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                 <div className="risk-auto-banner">
                   <div className="risk-auto-banner__dot" />
                   <p>
-                    <strong>Autonomous Risk Engine Enabled:</strong> The AI dynamically sizes positions according to current market regime, order-flow liquidity, and asset volatility. Direction (Long/Short) is chosen automatically.
+                    <strong>Autonomous Risk Engine Enabled:</strong> Position sizing is dynamically scaled according to current asset volatility, Bybit minimum notional constraints, and exchange fees. Direction (Long / Short) is determined by AI models based on order-flow delta.
                   </p>
                 </div>
               ) : (
@@ -254,7 +360,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                         Risk per trade (%)
                       </label>
                     </div>
-                    <span className="field-hint">Range 0.1% – 5.0% of allocated balance</span>
+                    <span className="field-hint">Range: 0.1% – 5.0% of allocated balance</span>
                   </div>
 
                   <div className="floating-field">
@@ -280,7 +386,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                         Max daily loss (%)
                       </label>
                     </div>
-                    <span className="field-hint">Bot halts if daily loss touches limit (1% – 25%)</span>
+                    <span className="field-hint">Bot halts if daily loss reaches limit (1% – 25%)</span>
                   </div>
                 </div>
               )}
@@ -288,7 +394,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
 
             {/* Goal Action Segment */}
             <div className="goal-action-segment">
-              <span className="goal-action-label">Action when target balance is reached:</span>
+              <span className="goal-action-label">Action when target goal is reached:</span>
               <div className="goal-action-options">
                 <input type="hidden" name="goal_action" value={goalAction} />
                 <button
@@ -319,7 +425,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                   <svg viewBox="0 0 16 16" fill="currentColor">
                     <path d="M4 3l9 5-9 5V3z" />
                   </svg>
-                  <span>Continue</span>
+                  <span>Continue Trading</span>
                 </button>
               </div>
             </div>
@@ -331,7 +437,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                   <circle cx="8" cy="8" r="6" />
                   <path d="M8 5v3.5M8 11h.01" strokeLinecap="round" />
                 </svg>
-                <span>Created bots start in Stopped mode. Activate manually when ready.</span>
+                <span>Created bots start in Stopped mode. Start manually from the dashboard.</span>
               </div>
               <div className="bot-form-footer__actions">
                 <button
@@ -345,7 +451,7 @@ export function BotCreateForm({ paperBalance }: BotCreateFormProps) {
                   <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.75">
                     <path d="M9 2l5 5-5 5M14 7H4" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  <span>Create Bot</span>
+                  <span>Deploy Bot</span>
                 </button>
               </div>
             </div>
