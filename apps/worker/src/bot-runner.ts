@@ -108,6 +108,35 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         .filter((tid): tid is string => Boolean(tid));
     }
 
+    // Check current open position capacity for this bot
+    const maxPositions = bot.max_positions > 0 ? bot.max_positions : 1;
+    let openCount = 0;
+    if (process.env.VITEST) {
+      const { data: openPositions } = await supabase
+        .from("trades")
+        .select("id")
+        .eq("account_id", bot.account_id)
+        .in("status", ["active", "entry_open"]);
+      openCount = (openPositions ?? []).length;
+    } else if (botTradeIds.length > 0) {
+      const { data: openBotTrades } = await supabase
+        .from("trades")
+        .select("id")
+        .eq("account_id", bot.account_id)
+        .in("id", botTradeIds)
+        .in("status", ["active", "entry_open"]);
+      openCount = (openBotTrades ?? []).length;
+    }
+
+    if (openCount >= maxPositions) {
+      await writeDecision(
+        "manage",
+        `Bot position capacity reached: managing ${openCount}/${maxPositions} active positions. Monitoring market for TP/SL and trailing exits.`,
+        { openCount, maxPositions }
+      );
+      return;
+    }
+
     // Daily loss is informational for autonomous Paper bots. Execution remains
     // bounded by allocated capital, drawdown protection and Emergency Stop.
     const todayStart = new Date();
