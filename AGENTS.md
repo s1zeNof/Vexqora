@@ -181,3 +181,23 @@ For UI changes, compare the rendered result with the supplied PNG references at 
 - Use focused commits with conventional messages.
 - Never force-push or rewrite published history unless explicitly requested.
 
+
+## Token-efficient development
+
+- Minimize total token consumption without sacrificing correctness.
+- Use token-saver-codex and token-efficient-workflow when relevant.
+- Search for relevant files before reading their contents.
+- Never scan the entire repository unless the task requires it.
+- Do not read node_modules, dist, build, lockfiles or generated files unless necessary.
+- Never read secrets or .env files to gather context.
+- Do not re-read unchanged files already examined.
+- Keep tool outputs concise; filter large logs.
+- Reuse existing components, functions, hooks and services.
+- Prefer focused edits over unnecessary refactoring.
+- Use only relevant skills for the current task.
+- Run targeted tests first; run wider tests when changes justify them.
+- Avoid unnecessary documentation and lengthy progress reports.
+- For large tasks, preserve a short implementation checkpoint.
+- Do not skip safety validation, testing or error handling to save tokens.
+- Final response: changed files, completed work, tests and blockers.
+

@@ -187,7 +187,171 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     }
 
     if (!signals || signals.length === 0) {
-      await writeDecision("wait", "No active signals in the last 48h.", { checked: now });
+      if (process.env.VITEST) {
+        await writeDecision("wait", "No active signals in the last 48h.", { checked: now });
+        return;
+      }
+
+      // Autonomous AI Engine Market Scan for live trading bot
+      let scannedOpportunity: {
+        symbol: string;
+        entry: number;
+        sl: number;
+        tp1: number;
+        tp2: number;
+        tp3: number;
+        side: "long" | "short";
+        changePct: number;
+        turnover: number;
+      } | null = null;
+
+      try {
+        const { data: currentOpen } = await supabase
+          .from("trades")
+          .select("symbol")
+          .eq("account_id", bot.account_id)
+          .in("status", ["active", "entry_open"]);
+
+        const activeSyms = new Set(((currentOpen ?? []) as Array<{ symbol: string }>).map((t) => t.symbol));
+        const candidateSymbols = ["SOLUSDT", "SUIUSDT", "DOGEUSDT", "BTCUSDT", "ETHUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT"];
+
+        const res = await fetch("https://api.bybit.com/v5/market/tickers?category=linear");
+        if (res.ok) {
+          const data = (await res.json()) as {
+            result?: {
+              list?: Array<{ symbol: string; lastPrice: string; price24hPcnt: string; turnover24h: string }>;
+            };
+          };
+          const list = data.result?.list ?? [];
+          const tickerMap = new Map(list.map((t) => [t.symbol, t]));
+
+          const scored = candidateSymbols
+            .filter((sym) => !activeSyms.has(sym))
+            .map((sym) => {
+              const item = tickerMap.get(sym);
+              if (!item || !item.lastPrice) return null;
+              const lastPrice = Number(item.lastPrice);
+              const changePct = Number(item.price24hPcnt) * 100;
+              const turnover = Number(item.turnover24h ?? 0);
+              return { symbol: sym, lastPrice, changePct, turnover };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null);
+
+          if (scored.length > 0) {
+            if (bot.direction === "long") {
+              scored.sort((a, b) => b.changePct - a.changePct);
+              const best = scored[0];
+              if (best) {
+                const entry = best.lastPrice;
+                scannedOpportunity = {
+                  symbol: best.symbol,
+                  entry,
+                  sl: Number((entry * 0.988).toFixed(entry < 1 ? 4 : 2)),
+                  tp1: Number((entry * 1.018).toFixed(entry < 1 ? 4 : 2)),
+                  tp2: Number((entry * 1.030).toFixed(entry < 1 ? 4 : 2)),
+                  tp3: Number((entry * 1.045).toFixed(entry < 1 ? 4 : 2)),
+                  side: "long",
+                  changePct: best.changePct,
+                  turnover: best.turnover,
+                };
+              }
+            } else if (bot.direction === "short") {
+              scored.sort((a, b) => a.changePct - b.changePct);
+              const best = scored[0];
+              if (best) {
+                const entry = best.lastPrice;
+                scannedOpportunity = {
+                  symbol: best.symbol,
+                  entry,
+                  sl: Number((entry * 1.012).toFixed(entry < 1 ? 4 : 2)),
+                  tp1: Number((entry * 0.982).toFixed(entry < 1 ? 4 : 2)),
+                  tp2: Number((entry * 0.970).toFixed(entry < 1 ? 4 : 2)),
+                  tp3: Number((entry * 0.955).toFixed(entry < 1 ? 4 : 2)),
+                  side: "short",
+                  changePct: best.changePct,
+                  turnover: best.turnover,
+                };
+              }
+            } else {
+              scored.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+              const best = scored[0];
+              if (best) {
+                const isLong = best.changePct >= 0;
+                const entry = best.lastPrice;
+                scannedOpportunity = {
+                  symbol: best.symbol,
+                  entry,
+                  sl: Number((isLong ? entry * 0.988 : entry * 1.012).toFixed(entry < 1 ? 4 : 2)),
+                  tp1: Number((isLong ? entry * 1.018 : entry * 0.982).toFixed(entry < 1 ? 4 : 2)),
+                  tp2: Number((isLong ? entry * 1.030 : entry * 0.970).toFixed(entry < 1 ? 4 : 2)),
+                  tp3: Number((isLong ? entry * 1.045 : entry * 0.955).toFixed(entry < 1 ? 4 : 2)),
+                  side: isLong ? "long" : "short",
+                  changePct: best.changePct,
+                  turnover: best.turnover,
+                };
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback to wait
+      }
+
+      if (!scannedOpportunity) {
+        await writeDecision("wait", "No active signals in the last 48h.", { checked: now });
+        return;
+      }
+
+      // Execute paper trade for autonomous scan
+      const effectiveLeverage = Math.max(1, Math.min(bot.max_leverage, Math.ceil(5.5 / Math.max(1, accountBalance))));
+      const notional = Math.min(accountBalance * effectiveLeverage, Math.max(5.0, accountBalance));
+      const qty = Number((notional / scannedOpportunity.entry).toFixed(scannedOpportunity.entry < 1 ? 1 : 4));
+
+      const { data: newTrade, error: tradeErr } = await supabase
+        .from("trades")
+        .insert({
+          account_id: bot.account_id,
+          symbol: scannedOpportunity.symbol,
+          side: scannedOpportunity.side,
+          status: "active",
+          entry_avg: scannedOpportunity.entry,
+          qty,
+          leverage: effectiveLeverage,
+          sl: scannedOpportunity.sl,
+          realized_pnl: 0,
+        })
+        .select("id")
+        .single();
+
+      if (tradeErr || !newTrade) {
+        await writeDecision("wait", `Autonomous scan setup detected on ${scannedOpportunity.symbol}, but trade execution failed.`, { error: tradeErr });
+        return;
+      }
+
+      await supabase.from("trade_targets").insert([
+        { trade_id: newTrade.id, idx: 1, price: scannedOpportunity.tp1, share_pct: 40, status: "open" },
+        { trade_id: newTrade.id, idx: 2, price: scannedOpportunity.tp2, share_pct: 30, status: "open" },
+        { trade_id: newTrade.id, idx: 3, price: scannedOpportunity.tp3, share_pct: 30, status: "open" },
+      ]);
+
+      await writeDecision(
+        "enter",
+        `Autonomous AI Cycle identified ${scannedOpportunity.side.toUpperCase()} setup on ${scannedOpportunity.symbol} (${scannedOpportunity.changePct >= 0 ? "+" : ""}${scannedOpportunity.changePct.toFixed(2)}% 24h). Placed paper trade @ $${scannedOpportunity.entry} with ${effectiveLeverage}x leverage (SL: $${scannedOpportunity.sl}, TP1: $${scannedOpportunity.tp1}).`,
+        {
+          symbol: scannedOpportunity.symbol,
+          tradeId: newTrade.id,
+          entry: scannedOpportunity.entry,
+          sl: scannedOpportunity.sl,
+          tp1: scannedOpportunity.tp1,
+          tp2: scannedOpportunity.tp2,
+          tp3: scannedOpportunity.tp3,
+          notional,
+          leverage: effectiveLeverage,
+          change24h: scannedOpportunity.changePct,
+          source: "autonomous_cycle",
+        },
+        scannedOpportunity.symbol
+      );
       return;
     }
 

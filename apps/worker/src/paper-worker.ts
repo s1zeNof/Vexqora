@@ -303,6 +303,25 @@ export function startPaperWorker(
           continue;
         }
 
+        // Synchronize trading_bots current_balance if this trade belongs to a bot
+        try {
+          const { data: botRow } = await supabase
+            .from("trading_bots")
+            .select("id, current_balance")
+            .eq("account_id", trade.account_id)
+            .maybeSingle();
+
+          if (botRow) {
+            const nextBalance = Math.max(0, Number(botRow.current_balance) + safePnlDelta);
+            await supabase
+              .from("trading_bots")
+              .update({ current_balance: nextBalance, updated_at: new Date().toISOString() })
+              .eq("id", botRow.id);
+          }
+        } catch (botSyncErr) {
+          logger.warn({ tradeId: trade.id, error: botSyncErr }, "Failed to update trading_bots current_balance on paper fill");
+        }
+
         // Record orders & notifications
         for (const action of result.actions) {
           if (action.type === "TP_FILLED") {

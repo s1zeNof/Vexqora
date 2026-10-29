@@ -16,6 +16,19 @@ export interface BotDecisionItem {
   created_at: string;
 }
 
+export interface RadarTickerItem {
+  symbol: string;
+  name: string;
+  lastPrice: number;
+  priceFormatted: string;
+  change24h: number;
+  changeFormatted: string;
+  turnoverFormatted: string;
+  regime: string;
+  volumeState: string;
+  status: string;
+}
+
 export interface OpenTradeItem {
   id: string;
   symbol: string;
@@ -77,25 +90,54 @@ export function BotDetailView({
   const [activeTab, setActiveTab] = useState<"radar" | "active" | "archive" | "decisions" | "config">("radar");
   const [now, setNow] = useState(Date.now());
   const [isPending, setIsPending] = useState(false);
+  const [radarData, setRadarData] = useState<RadarTickerItem[]>([]);
+  const [isRadarLoading, setIsRadarLoading] = useState(true);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    async function loadRadar() {
+      try {
+        const res = await fetch("/api/market/radar");
+        if (res.ok) {
+          const data = (await res.json()) as { tickers?: RadarTickerItem[] };
+          if (active && data.tickers && data.tickers.length > 0) {
+            setRadarData(data.tickers);
+            setIsRadarLoading(false);
+          }
+        }
+      } catch {
+        // preserve previous radar state on error
+      }
+    }
+    void loadRadar();
+    const interval = setInterval(() => {
+      void loadRadar();
+    }, 4000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
   const heartbeatTime = bot.last_heartbeat_at ? new Date(bot.last_heartbeat_at).getTime() : 0;
   const secondsSinceHeartbeat = heartbeatTime > 0 ? Math.max(0, Math.floor((now - heartbeatTime) / 1000)) : null;
 
   const allocated = Number(bot.allocated_capital);
-  const balance = Number(bot.current_balance);
-  const pnl = balance - allocated;
-  const pnlPct = allocated > 0 ? (pnl / allocated) * 100 : 0;
-  const pnlColor = pnl > 0 ? "#00e676" : pnl < 0 ? "#ef4444" : "#94a3b8";
-
-  // Calculations for stats
+  const realizedPnl = closedTrades.reduce((sum, t) => sum + Number(t.realized_pnl ?? 0), 0);
   const totalTradesCount = closedTrades.length;
   const winningTrades = closedTrades.filter((t) => Number(t.realized_pnl ?? 0) > 0).length;
-  const winRate = totalTradesCount > 0 ? (winningTrades / totalTradesCount) * 100 : 0;
+  const winRate = totalTradesCount > 0 ? (winningTrades / totalTradesCount) * 100 : null;
+
+  // Use actual audited performance based on closed trades
+  const balance = Math.max(0, allocated + realizedPnl);
+  const pnl = realizedPnl;
+  const pnlPct = allocated > 0 ? (pnl / allocated) * 100 : 0;
+  const pnlColor = pnl > 0 ? "#00e676" : pnl < 0 ? "#ef4444" : "#94a3b8";
 
   const target = bot.target_balance ? Number(bot.target_balance) : null;
   const targetPct = target && target > allocated ? Math.min(100, Math.max(0, ((balance - allocated) / (target - allocated)) * 100)) : null;
@@ -253,10 +295,19 @@ export function BotDetailView({
 
         <div className="metric-tile">
           <span className="metric-tile__label">Win Rate</span>
-          <strong className="metric-tile__value mono">
-            {winRate.toFixed(1)}%
-          </strong>
-          <span className="metric-tile__sub">{winningTrades}W / {totalTradesCount} total</span>
+          {winRate !== null ? (
+            <>
+              <strong className="metric-tile__value mono">
+                {winRate.toFixed(1)}%
+              </strong>
+              <span className="metric-tile__sub">{winningTrades}W / {totalTradesCount} total</span>
+            </>
+          ) : (
+            <>
+              <strong className="metric-tile__value mono text-muted">—</strong>
+              <span className="metric-tile__sub">No closed trades yet</span>
+            </>
+          )}
         </div>
 
         <div className="metric-tile">
@@ -404,35 +455,55 @@ export function BotDetailView({
                 </svg>
                 <h3>Primary Market Radar (Bybit Linear Feed)</h3>
               </div>
-              <span className="terminal-panel__status mono">WebSocket: 0ms Latency</span>
+              <span className="terminal-panel__status mono">
+                {isRadarLoading ? "Connecting..." : "Live Feed · 4s Poll"}
+              </span>
             </div>
 
             <div className="market-radar-list">
-              {[
-                { sym: "BTCUSDT", name: "Bitcoin Perpetual", price: "$68,450.00", chg: "+1.85%", regime: "Consolidation", vol: "Low / Squeeze", status: "Monitoring" },
-                { sym: "ETHUSDT", name: "Ethereum Perpetual", price: "$2,640.20", chg: "-0.42%", regime: "Range Bound", vol: "Moderate", status: "Neutral" },
-                { sym: "SOLUSDT", name: "Solana Perpetual", price: "$182.40", chg: "+4.12%", regime: "Bullish Momentum", vol: "High / Scalp Target", status: "Evaluating Breakout" },
-                { sym: "XRPUSDT", name: "Ripple Perpetual", price: "$0.5240", chg: "+0.15%", regime: "Sideways Accumulation", vol: "Low", status: "Standby" },
-                { sym: "DOGEUSDT", name: "Dogecoin Perpetual", price: "$0.1420", chg: "+3.20%", regime: "High Beta Volatility", vol: "High", status: "Spread Check" },
-              ].map((item) => (
-                <div key={item.sym} className="radar-row">
-                  <div className="radar-col-sym">
-                    <strong>{item.sym}</strong>
-                    <small>{item.name}</small>
-                  </div>
-                  <div className="radar-col-price mono">
-                    <strong>{item.price}</strong>
-                    <span className={item.chg.startsWith("+") ? "text-green" : "text-red"}>{item.chg}</span>
-                  </div>
-                  <div className="radar-col-regime">
-                    <span className="regime-tag">{item.regime}</span>
-                    <small>Vol: {item.vol}</small>
-                  </div>
-                  <div className="radar-col-action">
-                    <span className="status-indicator-tag">{item.status}</span>
-                  </div>
+              {radarData.length === 0 ? (
+                <div className="empty-panel-state">
+                  <div className="dot-cyan pulse-anim" />
+                  <p>Streaming Bybit Linear live order book telemetry...</p>
                 </div>
-              ))}
+              ) : (
+                radarData.map((item) => {
+                  const hasActivePosition = openPositions.some((p) => p.symbol === item.symbol);
+                  return (
+                    <div
+                      key={item.symbol}
+                      className={`radar-row ${hasActivePosition ? "radar-row--active" : ""}`}
+                    >
+                      <div className="radar-col-sym">
+                        <div className="radar-sym-head" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {hasActivePosition && <span className="dot-cyan pulse-anim" title="Active bot position" />}
+                          <strong>{item.symbol}</strong>
+                        </div>
+                        <small>{item.name}</small>
+                      </div>
+                      <div className="radar-col-price mono">
+                        <strong>{item.priceFormatted}</strong>
+                        <span className={item.change24h >= 0 ? "text-green" : "text-red"}>
+                          {item.changeFormatted}
+                        </span>
+                      </div>
+                      <div className="radar-col-regime">
+                        <span className="regime-tag">{item.regime}</span>
+                        <small>Vol: {item.turnoverFormatted}</small>
+                      </div>
+                      <div className="radar-col-action">
+                        {hasActivePosition ? (
+                          <span className="status-indicator-tag" style={{ borderColor: "#00e5ff", color: "#00e5ff", background: "rgba(0,229,255,0.1)" }}>
+                            ACTIVE TRADE
+                          </span>
+                        ) : (
+                          <span className="status-indicator-tag">{item.status}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
