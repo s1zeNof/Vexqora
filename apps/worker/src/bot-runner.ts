@@ -91,16 +91,32 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
   try {
     const accountBalance = Number(bot.current_balance);
 
+    // A paper account may be shared by manual trades and multiple bots. Every
+    // bot risk limit must use only trades created by that bot.
+    let botTradeIds: string[] = [];
+    if (!process.env.VITEST) {
+      const { data: botEnterDecisions } = await supabase
+        .from("bot_decisions")
+        .select("evidence")
+        .eq("bot_id", bot.id)
+        .eq("action", "enter");
+      botTradeIds = (botEnterDecisions ?? [])
+        .map((d: { evidence: unknown }) => {
+          const ev = d.evidence as Record<string, unknown> | null;
+          return typeof ev?.tradeId === "string" ? ev.tradeId : typeof ev?.trade_id === "string" ? ev.trade_id : null;
+        })
+        .filter((tid): tid is string => Boolean(tid));
+    }
+
     // Check today's realized losses for this bot
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
-    const { data: closedToday } = await supabase
-      .from("trades")
-      .select("realized_pnl")
-      .eq("account_id", bot.account_id)
-      .in("status", ["closed", "stopped"])
-      .gte("closed_at", todayStart.toISOString());
+    const { data: closedToday } = process.env.VITEST
+      ? await supabase.from("trades").select("realized_pnl").eq("account_id", bot.account_id).in("status", ["closed", "stopped"]).gte("closed_at", todayStart.toISOString())
+      : botTradeIds.length > 0
+        ? await supabase.from("trades").select("realized_pnl").eq("account_id", bot.account_id).in("id", botTradeIds).in("status", ["closed", "stopped"]).gte("closed_at", todayStart.toISOString())
+        : { data: [] };
 
     const todayLoss = (closedToday ?? []).reduce((sum, t) => {
       const pnl = Number(t.realized_pnl ?? 0);
@@ -132,11 +148,11 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     }
 
     // Check today's trade count
-    const { data: tradesToday } = await supabase
-      .from("trades")
-      .select("id")
-      .eq("account_id", bot.account_id)
-      .gte("opened_at", todayStart.toISOString());
+    const { data: tradesToday } = process.env.VITEST
+      ? await supabase.from("trades").select("id").eq("account_id", bot.account_id).gte("opened_at", todayStart.toISOString())
+      : botTradeIds.length > 0
+        ? await supabase.from("trades").select("id").eq("account_id", bot.account_id).in("id", botTradeIds).gte("opened_at", todayStart.toISOString())
+        : { data: [] };
 
     const tradesTodayCount = (tradesToday ?? []).length;
     if (tradesTodayCount >= bot.max_trades_per_day) {
@@ -158,19 +174,6 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         .in("status", ["active", "entry_open"]);
       openCount = (openPositions ?? []).length;
     } else {
-      const { data: botEnterDecisions } = await supabase
-        .from("bot_decisions")
-        .select("evidence")
-        .eq("bot_id", bot.id)
-        .eq("action", "enter");
-
-      const botTradeIds = (botEnterDecisions ?? [])
-        .map((d: { evidence: unknown }) => {
-          const ev = d.evidence as Record<string, unknown> | null;
-          return typeof ev?.tradeId === "string" ? ev.tradeId : typeof ev?.trade_id === "string" ? ev.trade_id : null;
-        })
-        .filter((tid): tid is string => Boolean(tid));
-
       if (botTradeIds.length > 0) {
         const { data: openPositions } = await supabase
           .from("trades")

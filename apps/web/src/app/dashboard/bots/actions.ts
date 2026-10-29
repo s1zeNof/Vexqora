@@ -114,7 +114,7 @@ export async function setBotStatus(formData: FormData) {
     .update({
       status,
       autonomous_enabled: status === "running",
-      last_heartbeat_at: new Date().toISOString(),
+      ...(status === "running" ? { last_heartbeat_at: null, last_error: null } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
