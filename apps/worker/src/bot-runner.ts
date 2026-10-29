@@ -118,13 +118,18 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         .eq("account_id", bot.account_id)
         .in("status", ["active", "entry_open"]);
       openCount = (openPositions ?? []).length;
-    } else if (botTradeIds.length > 0) {
-      const { data: openBotTrades } = await supabase
+    } else {
+      let openQuery = supabase
         .from("trades")
         .select("id")
         .eq("account_id", bot.account_id)
-        .in("id", botTradeIds)
         .in("status", ["active", "entry_open"]);
+      if (botTradeIds.length > 0) {
+        openQuery = openQuery.or(`bot_id.eq.${bot.id},id.in.(${botTradeIds.join(",")})`);
+      } else {
+        openQuery = openQuery.eq("bot_id", bot.id);
+      }
+      const { data: openBotTrades } = await openQuery;
       openCount = (openBotTrades ?? []).length;
     }
 
@@ -157,11 +162,19 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     }
 
     // Check today's trade count (only if user set an explicit positive ceiling)
-    const { data: tradesToday } = process.env.VITEST
-      ? await supabase.from("trades").select("id").eq("account_id", bot.account_id).gte("opened_at", todayStart.toISOString())
-      : botTradeIds.length > 0
-        ? await supabase.from("trades").select("id").eq("account_id", bot.account_id).in("id", botTradeIds).gte("opened_at", todayStart.toISOString())
-        : { data: [] };
+    let todayQuery = supabase
+      .from("trades")
+      .select("id")
+      .eq("account_id", bot.account_id)
+      .gte("opened_at", todayStart.toISOString());
+    if (!process.env.VITEST) {
+      if (botTradeIds.length > 0) {
+        todayQuery = todayQuery.or(`bot_id.eq.${bot.id},id.in.(${botTradeIds.join(",")})`);
+      } else {
+        todayQuery = todayQuery.eq("bot_id", bot.id);
+      }
+    }
+    const { data: tradesToday } = await todayQuery;
 
     const tradesTodayCount = (tradesToday ?? []).length;
     if (bot.max_trades_per_day && bot.max_trades_per_day > 0 && tradesTodayCount >= bot.max_trades_per_day) {

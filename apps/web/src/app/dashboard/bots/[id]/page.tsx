@@ -47,7 +47,6 @@ export default async function BotDetailPage({
   const goalAct = typeof botRecord.goal_action === "string" ? botRecord.goal_action : "pause";
   const heartbeat = typeof botRecord.last_heartbeat_at === "string" ? botRecord.last_heartbeat_at : null;
   const lastErr = typeof botRecord.last_error === "string" ? botRecord.last_error : null;
-  const accountId = typeof botRecord.account_id === "string" ? botRecord.account_id : "";
   const createdAt = typeof botRecord.created_at === "string" ? botRecord.created_at : new Date().toISOString();
 
   // Load decision log
@@ -60,8 +59,8 @@ export default async function BotDetailPage({
 
   const decisions = (rawDecisions ?? []) as unknown as BotDecisionItem[];
 
-  // Extract trade IDs strictly initiated by this bot to isolate from other account trades
-  const botTradeIds = decisions
+  // Extract trade IDs from recent decisions as secondary fallback
+  const decisionTradeIds = decisions
     .map((d) => {
       const ev = d.evidence as Record<string, unknown> | null;
       if (typeof ev?.tradeId === "string") return ev.tradeId;
@@ -70,38 +69,47 @@ export default async function BotDetailPage({
     })
     .filter((tid): tid is string => Boolean(tid));
 
-  let openPositions: OpenTradeItem[] = [];
-  let closedTrades: ClosedTradeItem[] = [];
+  // 1. Load active trades initiated by this bot (directly by bot_id or recent decision evidence)
+  let activeQuery = supabase
+    .from("trades")
+    .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,created_at")
+    .in("status", ["active", "entry_open"])
+    .order("created_at", { ascending: false });
 
-  if (botTradeIds.length > 0) {
-    // Load active trades initiated by this bot
-    const { data: rawActive } = await supabase
-      .from("trades")
-      .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,created_at")
-      .eq("account_id", accountId)
-      .in("id", botTradeIds)
-      .in("status", ["active", "entry_open"])
-      .order("created_at", { ascending: false });
+  if (decisionTradeIds.length > 0) {
+    activeQuery = activeQuery.or(`bot_id.eq.${id},id.in.(${decisionTradeIds.join(",")})`);
+  } else {
+    activeQuery = activeQuery.eq("bot_id", id);
+  }
 
-    openPositions = rawActive ?? [];
+  const { data: rawActive } = await activeQuery;
+  let openPositions: OpenTradeItem[] = rawActive ?? [];
 
-    // Load closed trades archive initiated by this bot
-    const { data: rawClosed } = await supabase
-      .from("trades")
-      .select("id,symbol,side,status,entry_avg,exit_price,exit_reason,qty,leverage,sl,realized_pnl,opened_at,closed_at")
-      .eq("account_id", accountId)
-      .in("id", botTradeIds)
-      .in("status", ["closed", "stopped"])
-      .order("closed_at", { ascending: false })
-      .limit(50);
+  // 2. Load closed trades archive initiated by this bot
+  let closedQuery = supabase
+    .from("trades")
+    .select("id,symbol,side,status,entry_avg,exit_price,exit_reason,qty,leverage,sl,realized_pnl,opened_at,closed_at")
+    .in("status", ["closed", "stopped"])
+    .order("closed_at", { ascending: false })
+    .limit(100);
 
-    closedTrades = rawClosed ?? [];
+  if (decisionTradeIds.length > 0) {
+    closedQuery = closedQuery.or(`bot_id.eq.${id},id.in.(${decisionTradeIds.join(",")})`);
+  } else {
+    closedQuery = closedQuery.eq("bot_id", id);
+  }
 
-    // Load TP targets for bot trades to display in tables
+  const { data: rawClosed } = await closedQuery;
+  let closedTrades: ClosedTradeItem[] = rawClosed ?? [];
+
+  // 3. Load TP targets for all found bot trades to display in tables
+  const allBotTradeIds = [...openPositions.map((t) => t.id), ...closedTrades.map((t) => t.id)];
+
+  if (allBotTradeIds.length > 0) {
     const { data: rawTargets } = await supabase
       .from("trade_targets")
       .select("trade_id,idx,price,share_pct,status")
-      .in("trade_id", botTradeIds)
+      .in("trade_id", allBotTradeIds)
       .order("idx", { ascending: true });
 
     const targetsByTradeId = new Map<string, Array<{ idx: number; price: number; share_pct: number; status: string }>>();
