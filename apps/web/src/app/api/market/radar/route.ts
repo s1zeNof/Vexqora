@@ -1,31 +1,35 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-interface RadarTickerItem {
+export interface RadarTickerItem {
   symbol: string;
   name: string;
   lastPrice: number;
   priceFormatted: string;
   change24h: number;
   changeFormatted: string;
+  turnover: number;
   turnoverFormatted: string;
+  high24h: string;
+  low24h: string;
   regime: string;
   volumeState: string;
   status: string;
 }
 
-const MONITORED_SYMBOLS: Record<string, string> = {
-  BTCUSDT: "Bitcoin Perpetual",
-  ETHUSDT: "Ethereum Perpetual",
-  SOLUSDT: "Solana Perpetual",
-  SUIUSDT: "Sui Perpetual",
-  DOGEUSDT: "Dogecoin Perpetual",
-  XRPUSDT: "Ripple Perpetual",
-  AVAXUSDT: "Avalanche Perpetual",
-  NEARUSDT: "Near Perpetual",
-};
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const category = (searchParams.get("category") ?? "volume").toLowerCase();
+  const search = (searchParams.get("search") ?? "").toUpperCase().trim();
+  const limit = Math.min(100, Math.max(10, Number(searchParams.get("limit") ?? 40)));
 
-export async function GET() {
-  const radarList: RadarTickerItem[] = [];
+  let rawList: Array<{
+    symbol: string;
+    lastPrice: string;
+    price24hPcnt: string;
+    turnover24h: string;
+    highPrice24h?: string | undefined;
+    lowPrice24h?: string | undefined;
+  }> = [];
 
   try {
     const res = await fetch("https://api.bybit.com/v5/market/tickers?category=linear", {
@@ -44,108 +48,129 @@ export async function GET() {
             lastPrice: string;
             price24hPcnt: string;
             turnover24h: string;
-            highPrice24h?: string;
-            lowPrice24h?: string;
+            highPrice24h?: string | undefined;
+            lowPrice24h?: string | undefined;
           }>;
         };
       };
-
-      const list = data.result?.list ?? [];
-      const tickerMap = new Map(list.map((t) => [t.symbol, t]));
-
-      for (const [sym, name] of Object.entries(MONITORED_SYMBOLS)) {
-        const item = tickerMap.get(sym);
-        if (item && item.lastPrice) {
-          const price = Number(item.lastPrice);
-          const chgPct = Number(item.price24hPcnt) * 100;
-          const turnover = Number(item.turnover24h ?? 0);
-
-          let regime = "Consolidation / Range";
-          if (chgPct >= 3.0) regime = "Bullish Momentum";
-          else if (chgPct <= -3.0) regime = "Bearish Pressure";
-          else if (chgPct >= 1.0) regime = "Mild Uptrend";
-          else if (chgPct <= -1.0) regime = "Mild Downtrend";
-
-          let volumeState = "Moderate";
-          if (turnover >= 1_000_000_000) volumeState = "Ultra High ($1B+)";
-          else if (turnover >= 200_000_000) volumeState = "High Liquidity";
-          else if (turnover >= 50_000_000) volumeState = "Moderate Liquidity";
-          else volumeState = "Low / Standard";
-
-          const turnoverStr =
-            turnover >= 1_000_000_000
-              ? `$${(turnover / 1e9).toFixed(2)}B`
-              : turnover >= 1_000_000
-                ? `$${(turnover / 1e6).toFixed(1)}M`
-                : `$${Math.round(turnover).toLocaleString()}`;
-
-          radarList.push({
-            symbol: sym,
-            name,
-            lastPrice: price,
-            priceFormatted: `$${price.toLocaleString("en-US", {
-              minimumFractionDigits: price < 1 ? 4 : 2,
-              maximumFractionDigits: price < 1 ? 4 : 2,
-            })}`,
-            change24h: Number(chgPct.toFixed(2)),
-            changeFormatted: `${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%`,
-            turnoverFormatted: turnoverStr,
-            regime,
-            volumeState,
-            status: Math.abs(chgPct) >= 2.0 ? "Scalp Candidate" : "Monitoring",
-          });
-        }
-      }
+      rawList = data.result?.list ?? [];
     }
   } catch {
-    // Fallback if network issue occurs
+    // If Bybit public API fails, fallback to Binance below
   }
 
-  // Fallback to Binance if Bybit was empty
-  if (radarList.length === 0) {
+  // Fallback to Binance Futures if Bybit returned nothing
+  if (rawList.length === 0) {
     try {
       const res = await fetch("https://fapi.binance.com/fapi/v1/ticker/24hr", {
         headers: { "User-Agent": "Mozilla/5.0" },
         cache: "no-store",
       });
       if (res.ok) {
-        const list = (await res.json()) as Array<{
+        const binanceList = (await res.json()) as Array<{
           symbol: string;
           lastPrice: string;
           priceChangePercent: string;
           quoteVolume: string;
+          highPrice?: string;
+          lowPrice?: string;
         }>;
-        const tickerMap = new Map(list.map((t) => [t.symbol, t]));
-
-        for (const [sym, name] of Object.entries(MONITORED_SYMBOLS)) {
-          const item = tickerMap.get(sym);
-          if (item && item.lastPrice) {
-            const price = Number(item.lastPrice);
-            const chgPct = Number(item.priceChangePercent);
-            const turnover = Number(item.quoteVolume ?? 0);
-
-            radarList.push({
-              symbol: sym,
-              name,
-              lastPrice: price,
-              priceFormatted: `$${price.toLocaleString("en-US", {
-                minimumFractionDigits: price < 1 ? 4 : 2,
-                maximumFractionDigits: price < 1 ? 4 : 2,
-              })}`,
-              change24h: Number(chgPct.toFixed(2)),
-              changeFormatted: `${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%`,
-              turnoverFormatted: turnover >= 1e9 ? `$${(turnover / 1e9).toFixed(2)}B` : `$${(turnover / 1e6).toFixed(1)}M`,
-              regime: chgPct >= 2 ? "Bullish Momentum" : chgPct <= -2 ? "Bearish Pressure" : "Consolidation",
-              volumeState: turnover >= 1e8 ? "High Liquidity" : "Moderate",
-              status: "Monitoring",
-            });
-          }
-        }
+        rawList = binanceList.map((t) => ({
+          symbol: t.symbol,
+          lastPrice: t.lastPrice,
+          price24hPcnt: (Number(t.priceChangePercent) / 100).toString(),
+          turnover24h: t.quoteVolume,
+          highPrice24h: t.highPrice,
+          lowPrice24h: t.lowPrice,
+        }));
       }
     } catch {
-      // Fallback
+      // Return empty
     }
   }
 
-  return NextResponse.json({ tickers: radarList });
+  // Filter for valid USDT perpetual pairs
+  let candidates = rawList
+    .filter((t) => t.symbol.endsWith("USDT") && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 100_000)
+    .map((t) => {
+      const price = Number(t.lastPrice);
+      const chgPct = Number(t.price24hPcnt) * 100;
+      const turnover = Number(t.turnover24h ?? 0);
+      const high = Number(t.highPrice24h ?? 0);
+      const low = Number(t.lowPrice24h ?? 0);
+      const baseCoin = t.symbol.replace("USDT", "");
+
+      let regime = "Consolidation / Range";
+      if (chgPct >= 10.0) regime = "Extreme Breakout 🔥";
+      else if (chgPct >= 3.0) regime = "Bullish Momentum";
+      else if (chgPct <= -10.0) regime = "Severe Dump 🔻";
+      else if (chgPct <= -3.0) regime = "Bearish Pressure";
+      else if (chgPct >= 1.0) regime = "Mild Uptrend";
+      else if (chgPct <= -1.0) regime = "Mild Downtrend";
+
+      let volumeState: string;
+      if (turnover >= 1_000_000_000) volumeState = "Mega ($1B+)";
+      else if (turnover >= 200_000_000) volumeState = "High ($200M+)";
+      else if (turnover >= 40_000_000) volumeState = "Moderate ($40M+)";
+      else volumeState = "Low";
+
+      const turnoverStr =
+        turnover >= 1_000_000_000
+          ? `$${(turnover / 1e9).toFixed(2)}B`
+          : turnover >= 1_000_000
+            ? `$${(turnover / 1e6).toFixed(1)}M`
+            : `$${Math.round(turnover).toLocaleString()}`;
+
+      let status = "Scanning";
+      if (Math.abs(chgPct) >= 5.0 && turnover >= 20_000_000) status = "Scalp Target";
+      else if (Math.abs(chgPct) >= 2.5) status = "Volatile";
+      else if (turnover >= 200_000_000) status = "Deep Liquidity";
+
+      return {
+        symbol: t.symbol,
+        name: `${baseCoin} Perpetual`,
+        lastPrice: price,
+        priceFormatted: `$${price.toLocaleString("en-US", {
+          minimumFractionDigits: price < 0.01 ? 6 : price < 1 ? 4 : 2,
+          maximumFractionDigits: price < 0.01 ? 6 : price < 1 ? 4 : 2,
+        })}`,
+        change24h: Number(chgPct.toFixed(2)),
+        changeFormatted: `${chgPct >= 0 ? "+" : ""}${chgPct.toFixed(2)}%`,
+        turnover,
+        turnoverFormatted: turnoverStr,
+        high24h: high > 0 ? `$${high.toFixed(high < 1 ? 4 : 2)}` : "—",
+        low24h: low > 0 ? `$${low.toFixed(low < 1 ? 4 : 2)}` : "—",
+        regime,
+        volumeState,
+        status,
+      };
+    });
+
+  // Apply search query if present
+  if (search) {
+    candidates = candidates.filter(
+      (c) => c.symbol.includes(search) || c.name.toUpperCase().includes(search)
+    );
+  }
+
+  // Sort by category
+  if (category === "gainers") {
+    candidates.sort((a, b) => b.change24h - a.change24h);
+  } else if (category === "losers") {
+    candidates.sort((a, b) => a.change24h - b.change24h);
+  } else if (category === "volatility") {
+    candidates.sort((a, b) => Math.abs(b.change24h) - Math.abs(a.change24h));
+  } else {
+    // Default: volume (turnover)
+    candidates.sort((a, b) => b.turnover - a.turnover);
+  }
+
+  const result = candidates.slice(0, limit);
+
+  return NextResponse.json({
+    totalPairs: rawList.length,
+    matchedCount: candidates.length,
+    category,
+    tickers: result,
+  });
 }

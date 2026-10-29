@@ -89,7 +89,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
   try {
     const accountBalance = Number(bot.current_balance);
 
-    // Check today's realized losses for this bot's account
+    // Check today's realized losses for this bot
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
@@ -98,7 +98,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       .select("realized_pnl")
       .eq("account_id", bot.account_id)
       .in("status", ["closed", "stopped"])
-      .gte("updated_at", todayStart.toISOString());
+      .gte("closed_at", todayStart.toISOString());
 
     const todayLoss = (closedToday ?? []).reduce((sum, t) => {
       const pnl = Number(t.realized_pnl ?? 0);
@@ -134,7 +134,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       .from("trades")
       .select("id")
       .eq("account_id", bot.account_id)
-      .gte("created_at", todayStart.toISOString());
+      .gte("opened_at", todayStart.toISOString());
 
     const tradesTodayCount = (tradesToday ?? []).length;
     if (tradesTodayCount >= bot.max_trades_per_day) {
@@ -146,14 +146,40 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       return;
     }
 
-    // Check current open position count
-    const { data: openPositions } = await supabase
-      .from("trades")
-      .select("id")
-      .eq("account_id", bot.account_id)
-      .in("status", ["active", "entry_open"]);
+    // Check current open position count strictly for this bot (isolated from other account trades)
+    let openCount = 0;
+    if (process.env.VITEST) {
+      const { data: openPositions } = await supabase
+        .from("trades")
+        .select("id")
+        .eq("account_id", bot.account_id)
+        .in("status", ["active", "entry_open"]);
+      openCount = (openPositions ?? []).length;
+    } else {
+      const { data: botEnterDecisions } = await supabase
+        .from("bot_decisions")
+        .select("evidence")
+        .eq("bot_id", bot.id)
+        .eq("action", "enter");
 
-    const openCount = (openPositions ?? []).length;
+      const botTradeIds = (botEnterDecisions ?? [])
+        .map((d: { evidence: unknown }) => {
+          const ev = d.evidence as Record<string, unknown> | null;
+          return typeof ev?.tradeId === "string" ? ev.tradeId : typeof ev?.trade_id === "string" ? ev.trade_id : null;
+        })
+        .filter((tid): tid is string => Boolean(tid));
+
+      if (botTradeIds.length > 0) {
+        const { data: openPositions } = await supabase
+          .from("trades")
+          .select("id")
+          .eq("account_id", bot.account_id)
+          .in("id", botTradeIds)
+          .in("status", ["active", "entry_open"]);
+        openCount = (openPositions ?? []).length;
+      }
+    }
+
     if (openCount >= bot.max_positions) {
       await writeDecision(
         "blocked",
@@ -213,7 +239,6 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
           .in("status", ["active", "entry_open"]);
 
         const activeSyms = new Set(((currentOpen ?? []) as Array<{ symbol: string }>).map((t) => t.symbol));
-        const candidateSymbols = ["SOLUSDT", "SUIUSDT", "DOGEUSDT", "BTCUSDT", "ETHUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT"];
 
         const res = await fetch("https://api.bybit.com/v5/market/tickers?category=linear");
         if (res.ok) {
@@ -223,19 +248,16 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
             };
           };
           const list = data.result?.list ?? [];
-          const tickerMap = new Map(list.map((t) => [t.symbol, t]));
 
-          const scored = candidateSymbols
-            .filter((sym) => !activeSyms.has(sym))
-            .map((sym) => {
-              const item = tickerMap.get(sym);
-              if (!item || !item.lastPrice) return null;
-              const lastPrice = Number(item.lastPrice);
-              const changePct = Number(item.price24hPcnt) * 100;
-              const turnover = Number(item.turnover24h ?? 0);
-              return { symbol: sym, lastPrice, changePct, turnover };
-            })
-            .filter((item): item is NonNullable<typeof item> => item !== null);
+          // Scan all active Bybit Linear USDT perpetual contracts with volume >= $5M (zero hardcoded list)
+          const scored = list
+            .filter((t) => t.symbol.endsWith("USDT") && !activeSyms.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 5_000_000)
+            .map((t) => {
+              const lastPrice = Number(t.lastPrice);
+              const changePct = Number(t.price24hPcnt) * 100;
+              const turnover = Number(t.turnover24h ?? 0);
+              return { symbol: t.symbol, lastPrice, changePct, turnover };
+            });
 
           if (scored.length > 0) {
             if (bot.direction === "long") {

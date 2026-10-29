@@ -186,9 +186,8 @@ export async function triggerBotScan(formData: FormData) {
     return;
   }
 
-  // Fetch live Bybit linear tickers
+  // Fetch live Bybit linear tickers across the entire 900+ pair universe
   const activeSymbols = new Set(openSymbols);
-  const candidateSymbols = ["SOLUSDT", "SUIUSDT", "DOGEUSDT", "BTCUSDT", "ETHUSDT", "XRPUSDT", "AVAXUSDT", "NEARUSDT"];
 
   let selectedCandidate: {
     symbol: string;
@@ -207,19 +206,16 @@ export async function triggerBotScan(formData: FormData) {
         };
       };
       const list = data.result?.list ?? [];
-      const tickerMap = new Map(list.map((t) => [t.symbol, t]));
 
-      const scored = candidateSymbols
-        .filter((sym) => !activeSymbols.has(sym))
-        .map((sym) => {
-          const item = tickerMap.get(sym);
-          if (!item || !item.lastPrice) return null;
-          const lastPrice = Number(item.lastPrice);
-          const changePct = Number(item.price24hPcnt) * 100;
-          const turnover = Number(item.turnover24h ?? 0);
-          return { symbol: sym, lastPrice, changePct, turnover };
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null);
+      // Scan all active Bybit Linear USDT perpetual contracts with volume >= $5M (zero hardcoded list)
+      const scored = list
+        .filter((t) => t.symbol.endsWith("USDT") && !activeSymbols.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 5_000_000)
+        .map((t) => {
+          const lastPrice = Number(t.lastPrice);
+          const changePct = Number(t.price24hPcnt) * 100;
+          const turnover = Number(t.turnover24h ?? 0);
+          return { symbol: t.symbol, lastPrice, changePct, turnover };
+        });
 
       if (scored.length > 0) {
         // Sort according to direction preference

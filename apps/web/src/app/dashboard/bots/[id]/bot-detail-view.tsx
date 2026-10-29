@@ -92,6 +92,9 @@ export function BotDetailView({
   const [isPending, setIsPending] = useState(false);
   const [radarData, setRadarData] = useState<RadarTickerItem[]>([]);
   const [isRadarLoading, setIsRadarLoading] = useState(true);
+  const [radarCategory, setRadarCategory] = useState<"volume" | "gainers" | "losers" | "volatility">("volume");
+  const [radarSearch, setRadarSearch] = useState("");
+  const [totalPairs, setTotalPairs] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -102,11 +105,17 @@ export function BotDetailView({
     let active = true;
     async function loadRadar() {
       try {
-        const res = await fetch("/api/market/radar");
+        const query = new URLSearchParams({
+          category: radarCategory,
+          limit: "40",
+          ...(radarSearch ? { search: radarSearch } : {}),
+        });
+        const res = await fetch(`/api/market/radar?${query.toString()}`);
         if (res.ok) {
-          const data = (await res.json()) as { tickers?: RadarTickerItem[] };
-          if (active && data.tickers && data.tickers.length > 0) {
+          const data = (await res.json()) as { tickers?: RadarTickerItem[]; totalPairs?: number };
+          if (active && data.tickers) {
             setRadarData(data.tickers);
+            if (data.totalPairs) setTotalPairs(data.totalPairs);
             setIsRadarLoading(false);
           }
         }
@@ -122,7 +131,7 @@ export function BotDetailView({
       active = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [radarCategory, radarSearch]);
 
   const heartbeatTime = bot.last_heartbeat_at ? new Date(bot.last_heartbeat_at).getTime() : 0;
   const secondsSinceHeartbeat = heartbeatTime > 0 ? Math.max(0, Math.floor((now - heartbeatTime) / 1000)) : null;
@@ -186,11 +195,21 @@ export function BotDetailView({
           {/* Heartbeat Status Indicator */}
           <div className="bot-heartbeat-box">
             <div className="bot-heartbeat-status">
-              <span className={secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 45 ? "beacon-active" : "beacon-idle"} />
-              <strong>{bot.status === "running" ? "RUNNER ACTIVE" : bot.status.toUpperCase()}</strong>
+              <span className={secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60 ? "beacon-active" : bot.status === "running" ? "beacon-stalled" : "beacon-idle"} />
+              <strong>
+                {bot.status === "running"
+                  ? secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60
+                    ? "RUNNER ACTIVE"
+                    : "RUNNER IDLE"
+                  : bot.status.toUpperCase()}
+              </strong>
             </div>
             <span className="bot-heartbeat-timer mono">
-              {secondsSinceHeartbeat !== null ? `Pulse: ${secondsSinceHeartbeat}s ago` : "Waiting for start"}
+              {secondsSinceHeartbeat !== null
+                ? secondsSinceHeartbeat < 60
+                  ? `Pulse: ${secondsSinceHeartbeat}s ago`
+                  : `Pulse: ${Math.floor(secondsSinceHeartbeat / 60)}m ago`
+                : "Waiting for start"}
             </span>
           </div>
 
@@ -254,6 +273,20 @@ export function BotDetailView({
           </div>
         </div>
       </header>
+
+      {/* Warning Banner if runner is idle */}
+      {bot.status === "running" && (secondsSinceHeartbeat === null || secondsSinceHeartbeat >= 60) && (
+        <div className="bot-alert-banner bot-alert-banner--warning">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="10" cy="10" r="8" />
+            <line x1="10" y1="6" x2="10" y2="10" strokeLinecap="round" />
+            <line x1="10" y1="14" x2="10.01" y2="14" strokeWidth="2.5" strokeLinecap="round" />
+          </svg>
+          <div>
+            <strong>Фоновий воркер очікує підключення:</strong> Останній пульс зафіксовано {secondsSinceHeartbeat ? `${Math.floor(secondsSinceHeartbeat / 60)} хв тому` : "раніше"}. Натисніть кнопку <strong>«⚡ Scan Market Now»</strong> для примусового ринкового сканування або запустіть воркер у терміналі (<code>npm run dev:worker</code>).
+          </div>
+        </div>
+      )}
 
       {/* Error Banner if any */}
       {bot.status === "error" && bot.last_error && (
@@ -456,8 +489,57 @@ export function BotDetailView({
                 <h3>Primary Market Radar (Bybit Linear Feed)</h3>
               </div>
               <span className="terminal-panel__status mono">
-                {isRadarLoading ? "Connecting..." : "Live Feed · 4s Poll"}
+                {isRadarLoading ? "Connecting..." : `${totalPairs > 0 ? `${totalPairs} Linear Pairs` : "Bybit Live Feed"} · 4s Poll`}
               </span>
+            </div>
+
+            {/* Dynamic Market Radar Controls (Zero Hardcode) */}
+            <div className="radar-controls-bar">
+              <div className="radar-filter-tabs">
+                <button
+                  type="button"
+                  onClick={() => setRadarCategory("volume")}
+                  className={`radar-tab-btn ${radarCategory === "volume" ? "is-active" : ""}`}
+                >
+                  🔥 Top Turnover
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRadarCategory("gainers")}
+                  className={`radar-tab-btn ${radarCategory === "gainers" ? "is-active" : ""}`}
+                >
+                  🚀 Top Gainers
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRadarCategory("losers")}
+                  className={`radar-tab-btn ${radarCategory === "losers" ? "is-active" : ""}`}
+                >
+                  🔻 Top Losers
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRadarCategory("volatility")}
+                  className={`radar-tab-btn ${radarCategory === "volatility" ? "is-active" : ""}`}
+                >
+                  ⚡ High Volatility
+                </button>
+              </div>
+
+              <div className="radar-search-wrap">
+                <input
+                  type="text"
+                  value={radarSearch}
+                  onChange={(e) => setRadarSearch(e.target.value)}
+                  placeholder="Filter 900+ pairs (e.g. PEPE, HYPE, SOL)..."
+                  className="radar-search-input"
+                />
+                {radarSearch && (
+                  <button type="button" onClick={() => setRadarSearch("")} className="radar-search-clear">
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="market-radar-list">
