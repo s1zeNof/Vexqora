@@ -158,7 +158,7 @@ export function BotDetailView({
       {/* Top Breadcrumb & Quick Info */}
       <div className="bot-detail-topbar">
         <Link href="/dashboard/bots" className="bot-detail-back-link">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14, flexShrink: 0 }}>
             <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <span>All Trading Bots</span>
@@ -277,7 +277,16 @@ export function BotDetailView({
       {/* Warning Banner if runner is idle */}
       {bot.status === "running" && (secondsSinceHeartbeat === null || secondsSinceHeartbeat >= 60) && (
         <div className="bot-alert-banner bot-alert-banner--warning">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width={20}
+            height={20}
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="bot-alert-banner__icon"
+            style={{ width: 20, height: 20, minWidth: 20, minHeight: 20, flexShrink: 0 }}
+          >
             <circle cx="10" cy="10" r="8" />
             <line x1="10" y1="6" x2="10" y2="10" strokeLinecap="round" />
             <line x1="10" y1="14" x2="10.01" y2="14" strokeWidth="2.5" strokeLinecap="round" />
@@ -291,7 +300,16 @@ export function BotDetailView({
       {/* Error Banner if any */}
       {bot.status === "error" && bot.last_error && (
         <div className="bot-alert-banner">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width={20}
+            height={20}
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="bot-alert-banner__icon"
+            style={{ width: 20, height: 20, minWidth: 20, minHeight: 20, flexShrink: 0 }}
+          >
             <circle cx="10" cy="10" r="8" />
             <line x1="10" y1="6" x2="10" y2="10" strokeLinecap="round" />
             <line x1="10" y1="14" x2="10.01" y2="14" strokeWidth="2.5" strokeLinecap="round" />

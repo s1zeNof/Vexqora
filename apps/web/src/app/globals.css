@@ -2413,6 +2413,14 @@ input:focus, select:focus, textarea:focus {
   transition: color 0.15s;
 }
 
+.bot-detail-back-link svg {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  flex-shrink: 0;
+}
+
 .bot-detail-back-link:hover {
   color: #F8FAFC;
 }
@@ -2701,6 +2709,29 @@ input:focus, select:focus, textarea:focus {
   to { transform: rotate(360deg); }
 }
 
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #00e5ff;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.btn-back:hover {
+  opacity: 0.85;
+}
+
+.btn-back svg {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  flex-shrink: 0;
+}
+
 .bot-alert-banner {
   display: flex;
   align-items: center;
@@ -2711,6 +2742,18 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid rgba(239, 68, 68, 0.35);
   color: #ef4444;
   font-size: 13px;
+  width: 100%;
+}
+
+.bot-alert-banner svg,
+.bot-alert-banner__icon {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  max-width: 20px !important;
+  max-height: 20px !important;
+  flex-shrink: 0 !important;
 }
 
 /* 6 Metrics Row - 100% Full-Width Grid */
