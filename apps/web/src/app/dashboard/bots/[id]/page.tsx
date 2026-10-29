@@ -55,30 +55,47 @@ export default async function BotDetailPage({
     .select("id,cycle_id,action,symbol,reasoning,evidence,created_at")
     .eq("bot_id", id)
     .order("created_at", { ascending: false })
-    .limit(40);
+    .limit(50);
 
   const decisions = (rawDecisions ?? []) as unknown as BotDecisionItem[];
 
-  // Load active trades
-  const { data: rawActive } = await supabase
-    .from("trades")
-    .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,created_at")
-    .eq("account_id", accountId)
-    .in("status", ["active", "entry_open"])
-    .order("created_at", { ascending: false });
+  // Extract trade IDs strictly initiated by this bot to isolate from other account trades
+  const botTradeIds = decisions
+    .map((d) => {
+      const ev = d.evidence as Record<string, unknown> | null;
+      if (typeof ev?.tradeId === "string") return ev.tradeId;
+      if (typeof ev?.trade_id === "string") return ev.trade_id;
+      return null;
+    })
+    .filter((tid): tid is string => Boolean(tid));
 
-  const openPositions = (rawActive ?? []) as unknown as OpenTradeItem[];
+  let openPositions: OpenTradeItem[] = [];
+  let closedTrades: ClosedTradeItem[] = [];
 
-  // Load closed trades archive
-  const { data: rawClosed } = await supabase
-    .from("trades")
-    .select("id,symbol,side,status,entry_avg,exit_price,exit_reason,qty,leverage,sl,realized_pnl,opened_at,closed_at")
-    .eq("account_id", accountId)
-    .in("status", ["closed", "stopped"])
-    .order("closed_at", { ascending: false })
-    .limit(50);
+  if (botTradeIds.length > 0) {
+    // Load active trades initiated by this bot
+    const { data: rawActive } = await supabase
+      .from("trades")
+      .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,created_at")
+      .eq("account_id", accountId)
+      .in("id", botTradeIds)
+      .in("status", ["active", "entry_open"])
+      .order("created_at", { ascending: false });
 
-  const closedTrades = (rawClosed ?? []) as unknown as ClosedTradeItem[];
+    openPositions = rawActive ?? [];
+
+    // Load closed trades archive initiated by this bot
+    const { data: rawClosed } = await supabase
+      .from("trades")
+      .select("id,symbol,side,status,entry_avg,exit_price,exit_reason,qty,leverage,sl,realized_pnl,opened_at,closed_at")
+      .eq("account_id", accountId)
+      .in("id", botTradeIds)
+      .in("status", ["closed", "stopped"])
+      .order("closed_at", { ascending: false })
+      .limit(50);
+
+    closedTrades = rawClosed ?? [];
+  }
 
   return (
     <BotDetailView

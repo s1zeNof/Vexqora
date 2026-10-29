@@ -133,9 +133,9 @@ export function BotDetailView({
   const winningTrades = closedTrades.filter((t) => Number(t.realized_pnl ?? 0) > 0).length;
   const winRate = totalTradesCount > 0 ? (winningTrades / totalTradesCount) * 100 : null;
 
-  // Use actual audited performance based on closed trades
-  const balance = Math.max(0, allocated + realizedPnl);
-  const pnl = realizedPnl;
+  // Use actual audited performance based on this bot's closed trades
+  const balance = totalTradesCount > 0 ? Math.max(0, allocated + realizedPnl) : Number(bot.current_balance);
+  const pnl = balance - allocated;
   const pnlPct = allocated > 0 ? (pnl / allocated) * 100 : 0;
   const pnlColor = pnl > 0 ? "#00e676" : pnl < 0 ? "#ef4444" : "#94a3b8";
 
