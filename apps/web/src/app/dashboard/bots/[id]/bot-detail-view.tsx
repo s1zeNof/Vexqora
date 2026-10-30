@@ -99,7 +99,8 @@ export function BotDetailView({
   closedTrades,
 }: BotDetailViewProps) {
   const [activeTab, setActiveTab] = useState<"radar" | "active" | "archive" | "decisions" | "config">("radar");
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(0);
+  const [isMounted, setIsMounted] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const [radarData, setRadarData] = useState<RadarTickerItem[]>([]);
   const [isRadarLoading, setIsRadarLoading] = useState(true);
@@ -108,6 +109,8 @@ export function BotDetailView({
   const [totalPairs, setTotalPairs] = useState(0);
 
   useEffect(() => {
+    setIsMounted(true);
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -146,7 +149,7 @@ export function BotDetailView({
   }, [radarCategory, radarSearch, activeTab]);
 
   const heartbeatTime = bot.last_heartbeat_at ? new Date(bot.last_heartbeat_at).getTime() : 0;
-  const secondsSinceHeartbeat = heartbeatTime > 0 ? Math.max(0, Math.floor((now - heartbeatTime) / 1000)) : null;
+  const secondsSinceHeartbeat = isMounted && heartbeatTime > 0 && now > 0 ? Math.max(0, Math.floor((now - heartbeatTime) / 1000)) : null;
 
   const allocated = Number(bot.allocated_capital);
   const realizedPnl = closedTrades.reduce((sum, t) => sum + Number(t.realized_pnl ?? 0), 0);
@@ -207,21 +210,23 @@ export function BotDetailView({
           {/* Heartbeat Status Indicator */}
           <div className="bot-heartbeat-box">
             <div className="bot-heartbeat-status">
-              <span className={secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60 ? "beacon-active" : bot.status === "running" ? "beacon-stalled" : "beacon-idle"} />
+              <span className={isMounted && secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60 ? "beacon-active" : bot.status === "running" ? "beacon-stalled" : "beacon-idle"} />
               <strong>
                 {bot.status === "running"
-                  ? secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60
+                  ? isMounted && secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60
                     ? "RUNNER ACTIVE"
                     : "RUNNER IDLE"
                   : bot.status.toUpperCase()}
               </strong>
             </div>
-            <span className="bot-heartbeat-timer mono">
-              {secondsSinceHeartbeat !== null
-                ? secondsSinceHeartbeat < 60
-                  ? `Pulse: ${secondsSinceHeartbeat}s ago`
-                  : `Pulse: ${Math.floor(secondsSinceHeartbeat / 60)}m ago`
-                : "Waiting for start"}
+            <span className="bot-heartbeat-timer mono" suppressHydrationWarning>
+              {!isMounted
+                ? "Checking pulse..."
+                : secondsSinceHeartbeat !== null
+                  ? secondsSinceHeartbeat < 60
+                    ? `Pulse: ${secondsSinceHeartbeat}s ago`
+                    : `Pulse: ${Math.floor(secondsSinceHeartbeat / 60)}m ago`
+                  : "Waiting for start"}
             </span>
           </div>
 
@@ -474,8 +479,8 @@ export function BotDetailView({
                 <span className="dot-cyan pulse-anim" />
                 <h3>Active AI Reasoning &amp; Market Inspection</h3>
               </div>
-              <span className="terminal-panel__timestamp mono">
-                Cycle: {latestDecision ? new Date(latestDecision.created_at).toLocaleTimeString() : "Live"}
+              <span className="terminal-panel__timestamp mono" suppressHydrationWarning>
+                Cycle: {latestDecision ? (isMounted ? new Date(latestDecision.created_at).toLocaleTimeString("en-GB", { hour12: false }) : "Live") : "Live"}
               </span>
             </div>
 
@@ -796,8 +801,8 @@ export function BotDetailView({
                             📊 Графік
                           </Link>
                         </td>
-                        <td className="mono text-muted">
-                          {t.closed_at ? new Date(t.closed_at).toLocaleString() : "—"}
+                        <td className="mono text-muted" suppressHydrationWarning>
+                          {t.closed_at ? (isMounted ? new Date(t.closed_at).toLocaleString("en-GB", { hour12: false }) : "—") : "—"}
                         </td>
                       </tr>
                     );
@@ -831,8 +836,10 @@ export function BotDetailView({
                       {dec.action.toUpperCase()}
                     </span>
                     {dec.symbol && <strong className="decision-sym mono">{dec.symbol}</strong>}
-                    <time className="decision-time mono">
-                      {new Date(dec.created_at).toLocaleTimeString()} · {new Date(dec.created_at).toLocaleDateString()}
+                    <time className="decision-time mono" suppressHydrationWarning>
+                      {isMounted
+                        ? `${new Date(dec.created_at).toLocaleTimeString("en-GB", { hour12: false })} · ${new Date(dec.created_at).toLocaleDateString("en-GB")}`
+                        : "—"}
                     </time>
                   </div>
                   <p className="decision-reason">{dec.reasoning}</p>
