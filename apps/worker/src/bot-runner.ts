@@ -97,11 +97,12 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     if (!process.env.VITEST) {
       const { data: botEnterDecisions } = await supabase
         .from("bot_decisions")
-        .select("evidence")
+        .select("trade_id,evidence")
         .eq("bot_id", bot.id)
         .eq("action", "enter");
       botTradeIds = (botEnterDecisions ?? [])
-        .map((d: { evidence: unknown }) => {
+        .map((d: { trade_id?: string | null; evidence: unknown }) => {
+          if (typeof d.trade_id === "string") return d.trade_id;
           const ev = d.evidence as Record<string, unknown> | null;
           return typeof ev?.tradeId === "string" ? ev.tradeId : typeof ev?.trade_id === "string" ? ev.trade_id : null;
         })
@@ -118,19 +119,16 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         .eq("account_id", bot.account_id)
         .in("status", ["active", "entry_open"]);
       openCount = (openPositions ?? []).length;
-    } else {
-      let openQuery = supabase
+    } else if (botTradeIds.length > 0) {
+      const { data: openBotTrades } = await supabase
         .from("trades")
         .select("id")
         .eq("account_id", bot.account_id)
-        .in("status", ["active", "entry_open"]);
-      if (botTradeIds.length > 0) {
-        openQuery = openQuery.or(`bot_id.eq.${bot.id},id.in.(${botTradeIds.join(",")})`);
-      } else {
-        openQuery = openQuery.eq("bot_id", bot.id);
-      }
-      const { data: openBotTrades } = await openQuery;
+        .in("status", ["active", "entry_open"])
+        .in("id", botTradeIds);
       openCount = (openBotTrades ?? []).length;
+    } else {
+      openCount = 0;
     }
 
     if (openCount >= maxPositions) {
@@ -162,21 +160,25 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     }
 
     // Check today's trade count (only if user set an explicit positive ceiling)
-    let todayQuery = supabase
-      .from("trades")
-      .select("id")
-      .eq("account_id", bot.account_id)
-      .gte("opened_at", todayStart.toISOString());
-    if (!process.env.VITEST) {
-      if (botTradeIds.length > 0) {
-        todayQuery = todayQuery.or(`bot_id.eq.${bot.id},id.in.(${botTradeIds.join(",")})`);
-      } else {
-        todayQuery = todayQuery.eq("bot_id", bot.id);
+    let tradesTodayCount = 0;
+    if (bot.max_trades_per_day && bot.max_trades_per_day > 0) {
+      if (process.env.VITEST) {
+        const { data: tradesToday } = await supabase
+          .from("trades")
+          .select("id")
+          .eq("account_id", bot.account_id)
+          .gte("opened_at", todayStart.toISOString());
+        tradesTodayCount = (tradesToday ?? []).length;
+      } else if (botTradeIds.length > 0) {
+        const { data: tradesToday } = await supabase
+          .from("trades")
+          .select("id")
+          .eq("account_id", bot.account_id)
+          .gte("opened_at", todayStart.toISOString())
+          .in("id", botTradeIds);
+        tradesTodayCount = (tradesToday ?? []).length;
       }
     }
-    const { data: tradesToday } = await todayQuery;
-
-    const tradesTodayCount = (tradesToday ?? []).length;
     if (bot.max_trades_per_day && bot.max_trades_per_day > 0 && tradesTodayCount >= bot.max_trades_per_day) {
       await writeDecision(
         "blocked",

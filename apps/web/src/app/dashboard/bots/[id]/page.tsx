@@ -49,7 +49,7 @@ export default async function BotDetailPage({
   const lastErr = typeof botRecord.last_error === "string" ? botRecord.last_error : null;
   const createdAt = typeof botRecord.created_at === "string" ? botRecord.created_at : new Date().toISOString();
 
-  // Load decision log
+  // 1. Load recent decision log for the audit view (50 items)
   const { data: rawDecisions } = await supabase
     .from("bot_decisions")
     .select("id,cycle_id,action,symbol,reasoning,evidence,created_at")
@@ -59,48 +59,61 @@ export default async function BotDetailPage({
 
   const decisions = (rawDecisions ?? []) as unknown as BotDecisionItem[];
 
-  // Extract trade IDs from recent decisions as secondary fallback
-  const decisionTradeIds = decisions
-    .map((d) => {
-      const ev = d.evidence as Record<string, unknown> | null;
-      if (typeof ev?.tradeId === "string") return ev.tradeId;
-      if (typeof ev?.trade_id === "string") return ev.trade_id;
-      return null;
-    })
-    .filter((tid): tid is string => Boolean(tid));
+  // 2. Fetch trade IDs created by this bot from enter decisions (up to 500)
+  const { data: enterDecisions } = await supabase
+    .from("bot_decisions")
+    .select("trade_id,evidence")
+    .eq("bot_id", id)
+    .eq("action", "enter")
+    .order("id", { ascending: false })
+    .limit(500);
 
-  // 1. Load active trades initiated by this bot (directly by bot_id or recent decision evidence)
-  let activeQuery = supabase
-    .from("trades")
-    .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,created_at")
-    .in("status", ["active", "entry_open"])
-    .order("created_at", { ascending: false });
+  const botTradeIds = Array.from(
+    new Set(
+      (enterDecisions ?? [])
+        .map((d) => {
+          if (typeof (d as { trade_id?: string | null }).trade_id === "string") {
+            return (d as { trade_id: string }).trade_id;
+          }
+          const ev = d.evidence as Record<string, unknown> | null;
+          if (typeof ev?.tradeId === "string") return ev.tradeId;
+          if (typeof ev?.trade_id === "string") return ev.trade_id;
+          return null;
+        })
+        .filter((tid): tid is string => Boolean(tid))
+    )
+  );
 
-  if (decisionTradeIds.length > 0) {
-    activeQuery = activeQuery.or(`bot_id.eq.${id},id.in.(${decisionTradeIds.join(",")})`);
-  } else {
-    activeQuery = activeQuery.eq("bot_id", id);
+  let openPositions: OpenTradeItem[] = [];
+  let closedTrades: ClosedTradeItem[] = [];
+
+  if (botTradeIds.length > 0) {
+    // 3. Load active trades for this bot (batches of 200 max)
+    const lookupIds = botTradeIds.slice(0, 200);
+    const { data: rawActive } = await supabase
+      .from("trades")
+      .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl")
+      .in("id", lookupIds)
+      .in("status", ["active", "entry_open"])
+      .order("id", { ascending: false })
+      .limit(50);
+
+    openPositions = (rawActive ?? []).map((t) => ({
+      ...t,
+      created_at: new Date().toISOString(),
+    }));
+
+    // 4. Load closed trades archive for this bot
+    const { data: rawClosed } = await supabase
+      .from("trades")
+      .select("id,symbol,side,status,entry_avg,exit_price,exit_reason,qty,leverage,sl,realized_pnl,opened_at,closed_at")
+      .in("id", lookupIds)
+      .in("status", ["closed", "stopped"])
+      .order("closed_at", { ascending: false })
+      .limit(100);
+
+    closedTrades = rawClosed ?? [];
   }
-
-  const { data: rawActive } = await activeQuery;
-  let openPositions: OpenTradeItem[] = rawActive ?? [];
-
-  // 2. Load closed trades archive initiated by this bot
-  let closedQuery = supabase
-    .from("trades")
-    .select("id,symbol,side,status,entry_avg,exit_price,exit_reason,qty,leverage,sl,realized_pnl,opened_at,closed_at")
-    .in("status", ["closed", "stopped"])
-    .order("closed_at", { ascending: false })
-    .limit(100);
-
-  if (decisionTradeIds.length > 0) {
-    closedQuery = closedQuery.or(`bot_id.eq.${id},id.in.(${decisionTradeIds.join(",")})`);
-  } else {
-    closedQuery = closedQuery.eq("bot_id", id);
-  }
-
-  const { data: rawClosed } = await closedQuery;
-  let closedTrades: ClosedTradeItem[] = rawClosed ?? [];
 
   // 3. Load TP targets for all found bot trades to display in tables
   const allBotTradeIds = [...openPositions.map((t) => t.id), ...closedTrades.map((t) => t.id)];
