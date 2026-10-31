@@ -172,8 +172,8 @@ export async function GET(request: NextRequest) {
             .limit(100),
         ]);
 
-        openPositions = (activeRes.data ?? []) as unknown as DbTradeRecord[];
-        closedTrades = (closedRes.data ?? []) as unknown as DbTradeRecord[];
+        openPositions = activeRes.data ?? [];
+        closedTrades = closedRes.data ?? [];
 
         // Fetch targets
         const allTradeIds = [...openPositions.map((t) => t.id), ...closedTrades.map((t) => t.id)];
@@ -186,14 +186,13 @@ export async function GET(request: NextRequest) {
 
           const targetsByTradeId = new Map<string, Array<{ idx: number; price: number; share_pct: number; status: string }>>();
           for (const tg of rawTargets ?? []) {
-            const row = tg as { trade_id: unknown; idx: unknown; price: unknown; share_pct: unknown; status: unknown };
-            const tid = String(row.trade_id);
+            const tid = String(tg.trade_id);
             const list = targetsByTradeId.get(tid) ?? [];
             list.push({
-              idx: Number(row.idx),
-              price: Number(row.price),
-              share_pct: Number(row.share_pct),
-              status: String(row.status),
+              idx: Number(tg.idx),
+              price: Number(tg.price),
+              share_pct: Number(tg.share_pct),
+              status: String(tg.status),
             });
             targetsByTradeId.set(tid, list);
           }

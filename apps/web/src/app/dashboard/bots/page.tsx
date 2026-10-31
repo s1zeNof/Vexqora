@@ -96,7 +96,7 @@ export default async function BotsPage({
       }
 
       if (d.action === "enter") {
-        const ev = d.evidence as Record<string, unknown> | null;
+        const ev = d.evidence;
         const tradeId =
           typeof d.trade_id === "string"
             ? d.trade_id
