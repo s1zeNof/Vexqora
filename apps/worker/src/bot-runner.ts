@@ -88,6 +88,13 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     symbol?: string,
     signalId?: string
   ) {
+    const tradeId =
+      typeof evidence.tradeId === "string"
+        ? evidence.tradeId
+        : typeof evidence.trade_id === "string"
+        ? evidence.trade_id
+        : null;
+
     const { error } = await supabase.from("bot_decisions").insert({
       bot_id: bot.id,
       cycle_id: cycleId,
@@ -96,6 +103,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       reasoning,
       evidence,
       signal_id: signalId ?? null,
+      trade_id: tradeId,
     });
     if (error) {
       logger.warn({ botId: bot.id, cycleId, error }, "Failed to write bot_decisions row");

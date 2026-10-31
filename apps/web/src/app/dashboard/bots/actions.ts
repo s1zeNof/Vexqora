@@ -480,6 +480,7 @@ export async function triggerBotScan(formData: FormData) {
       cycle_id: cycleId,
       action: "enter",
       symbol: selectedOpportunity.symbol,
+      trade_id: resolvedTradeId || null,
       reasoning: `⚡ Real-time Scan executed. Autonomous AI Engine identified momentum setup on ${selectedOpportunity.symbol} (${selectedOpportunity.changePct >= 0 ? "+" : ""}${selectedOpportunity.changePct.toFixed(2)}% 24h, Turnover $${(selectedOpportunity.turnover / 1e6).toFixed(1)}M). ${selectedOpportunity.reasoning}`,
       evidence: {
         symbol: selectedOpportunity.symbol,

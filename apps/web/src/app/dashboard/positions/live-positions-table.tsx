@@ -249,6 +249,33 @@ export function LivePositionsTable({
     };
   }, [isPaperTrading, openTrades, prices, router]);
 
+  // 4. Periodic 3s AJAX sync check to catch background worker executions
+  useEffect(() => {
+    let active = true;
+    const syncTimer = setInterval(async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try {
+        const res = await fetch("/api/bots/live", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as { success?: boolean; bots?: Array<{ active_positions_count: number }> };
+          if (active && data.success && Array.isArray(data.bots)) {
+            const totalActive = data.bots.reduce((sum, b) => sum + (b.active_positions_count ?? 0), 0);
+            if (totalActive !== openTrades.length) {
+              router.refresh();
+            }
+          }
+        }
+      } catch {
+        // ignore sync network flicker
+      }
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(syncTimer);
+    };
+  }, [openTrades.length, router]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       {/* Live Stream Indicator Bar */}

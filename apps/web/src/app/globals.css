@@ -2324,6 +2324,202 @@ input:focus, select:focus, textarea:focus {
   color: #94A3B8;
 }
 
+/* ─── Bot Live Stream & Activity Ribbon ─────────────────────────────────────── */
+.bot-live-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono), monospace;
+  font-weight: 600;
+  color: #00e5ff;
+}
+
+.sync-indicator-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00e5ff;
+  box-shadow: 0 0 6px #00e5ff;
+  transition: transform 0.2s;
+}
+
+.sync-indicator-dot--syncing {
+  transform: scale(1.4);
+  box-shadow: 0 0 10px #00e5ff;
+}
+
+.bot-card__title-link {
+  color: #F8FAFC;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.bot-card__title-link:hover {
+  color: #00e5ff;
+}
+
+.bot-card__live-banner {
+  background: #120e24;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bot-pos-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.bot-pos-indicator--active {
+  color: #35f2d0;
+}
+
+.bot-pos-indicator--idle {
+  color: #A59CC4;
+}
+
+.bot-pos-indicator__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #35f2d0;
+  box-shadow: 0 0 8px #35f2d0;
+  flex-shrink: 0;
+  animation: beacon-pulse 1.8s infinite;
+}
+
+.bot-pos-indicator__dot-idle {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #64748B;
+  flex-shrink: 0;
+}
+
+.bot-card__runner-pulse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.runner-pulse-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono), monospace;
+}
+
+.runner-pulse-tag--active {
+  color: #00e676;
+}
+
+.runner-pulse-tag--waiting {
+  color: #FFC24B;
+}
+
+.runner-pulse-tag--paused {
+  color: #94A3B8;
+}
+
+.bot-card__latest-decision {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bot-card__decision-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.bot-decision-pill {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.bot-decision-pill--enter {
+  background: rgba(53, 242, 208, 0.15);
+  color: #35f2d0;
+  border: 1px solid rgba(53, 242, 208, 0.3);
+}
+
+.bot-decision-pill--wait {
+  background: rgba(165, 156, 196, 0.12);
+  color: #A59CC4;
+  border: 1px solid rgba(165, 156, 196, 0.25);
+}
+
+.bot-decision-pill--blocked {
+  background: rgba(255, 79, 154, 0.15);
+  color: #FF4F9A;
+  border: 1px solid rgba(255, 79, 154, 0.3);
+}
+
+.bot-decision-pill--manage {
+  background: rgba(0, 229, 255, 0.12);
+  color: #00e5ff;
+  border: 1px solid rgba(0, 229, 255, 0.3);
+}
+
+.bot-decision-pill--exit {
+  background: rgba(255, 79, 154, 0.2);
+  color: #FF4F9A;
+  border: 1px solid #FF4F9A;
+}
+
+.bot-decision-symbol {
+  color: #F1EEFF;
+  font-weight: 600;
+}
+
+.bot-decision-time {
+  margin-left: auto;
+  color: #64748B;
+  font-size: 10.5px;
+}
+
+.bot-decision-text {
+  font-size: 11.5px;
+  color: #A59CC4;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.bot-live-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(53, 242, 208, 0.08);
+  border: 1px solid rgba(53, 242, 208, 0.25);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono), monospace;
+  font-weight: 600;
+  color: #35f2d0;
+}
+
 .bot-card__actions {
   display: flex;
   gap: 8px;

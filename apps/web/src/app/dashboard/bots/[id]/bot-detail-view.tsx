@@ -117,17 +117,71 @@ export function BotDetailView({
   const [activeTab, setActiveTab] = useState<"radar" | "active" | "archive" | "decisions" | "config">("radar");
   const [now, setNow] = useState(0);
   const [isMounted, setIsMounted] = useState(false);
-  const [isPending, setIsPending] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isAjaxSyncing, setIsAjaxSyncing] = useState(false);
   const [radarData, setRadarData] = useState<RadarTickerItem[]>([]);
   const [isRadarLoading, setIsRadarLoading] = useState(true);
   const [radarCategory, setRadarCategory] = useState<"volume" | "gainers" | "losers" | "volatility">("volume");
   const [radarSearch, setRadarSearch] = useState("");
   const [totalPairs, setTotalPairs] = useState(0);
 
+  // Live client states
+  const [botData, setBotData] = useState(bot);
+  const [liveDecisions, setLiveDecisions] = useState(decisions);
+  const [liveOpenPositions, setLiveOpenPositions] = useState(openPositions);
+  const [liveClosedTrades, setLiveClosedTrades] = useState(closedTrades);
+
+  // Sync when props update
+  useEffect(() => { setBotData(bot); }, [bot]);
+  useEffect(() => { setLiveDecisions(decisions); }, [decisions]);
+  useEffect(() => { setLiveOpenPositions(openPositions); }, [openPositions]);
+  useEffect(() => { setLiveClosedTrades(closedTrades); }, [closedTrades]);
+
+  // 3-second live AJAX polling for bot state, decisions, and positions
+  useEffect(() => {
+    let active = true;
+
+    async function pollLiveBot() {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try {
+        setIsAjaxSyncing(true);
+        const res = await fetch(`/api/bots/live?botId=${bot.id}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            success?: boolean;
+            bot?: typeof bot;
+            decisions?: BotDecisionItem[];
+            openPositions?: OpenTradeItem[];
+            closedTrades?: ClosedTradeItem[];
+          };
+          if (active && data.success) {
+            if (data.bot) setBotData(data.bot);
+            if (Array.isArray(data.decisions)) setLiveDecisions(data.decisions);
+            if (Array.isArray(data.openPositions)) setLiveOpenPositions(data.openPositions);
+            if (Array.isArray(data.closedTrades)) setLiveClosedTrades(data.closedTrades);
+          }
+        }
+      } catch {
+        // preserve current state on error
+      } finally {
+        if (active) setIsAjaxSyncing(false);
+      }
+    }
+
+    const interval = setInterval(() => {
+      void pollLiveBot();
+    }, 3000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [bot.id]);
+
   // Live prices for active open positions to calculate real-time Unrealized PnL
   const openSymbols = useMemo(() => {
-    return Array.from(new Set(openPositions.map((t) => t.symbol.toUpperCase()))).filter(Boolean);
-  }, [openPositions]);
+    return Array.from(new Set(liveOpenPositions.map((t) => t.symbol.toUpperCase()))).filter(Boolean);
+  }, [liveOpenPositions]);
 
   const [livePrices, setLivePrices] = useState<Record<string, number>>(initialPrices);
 
@@ -250,25 +304,112 @@ export function BotDetailView({
     };
   }, [radarCategory, radarSearch, activeTab]);
 
-  const heartbeatTime = bot.last_heartbeat_at ? new Date(bot.last_heartbeat_at).getTime() : 0;
+  const heartbeatTime = botData.last_heartbeat_at ? new Date(botData.last_heartbeat_at).getTime() : 0;
   const secondsSinceHeartbeat = isMounted && heartbeatTime > 0 && now > 0 ? Math.max(0, Math.floor((now - heartbeatTime) / 1000)) : null;
 
-  const allocated = Number(bot.allocated_capital);
-  const realizedPnl = closedTrades.reduce((sum, t) => sum + Number(t.realized_pnl ?? 0), 0);
-  const totalTradesCount = closedTrades.length;
-  const winningTrades = closedTrades.filter((t) => Number(t.realized_pnl ?? 0) > 0).length;
+  const allocated = Number(botData.allocated_capital);
+  const realizedPnl = liveClosedTrades.reduce((sum, t) => sum + Number(t.realized_pnl ?? 0), 0);
+  const totalTradesCount = liveClosedTrades.length;
+  const winningTrades = liveClosedTrades.filter((t) => Number(t.realized_pnl ?? 0) > 0).length;
   const winRate = totalTradesCount > 0 ? (winningTrades / totalTradesCount) * 100 : null;
 
   // Use actual audited performance based on this bot's closed trades
-  const balance = totalTradesCount > 0 ? Math.max(0, allocated + realizedPnl) : Number(bot.current_balance);
+  const balance = totalTradesCount > 0 ? Math.max(0, allocated + realizedPnl) : Number(botData.current_balance);
   const pnl = balance - allocated;
   const pnlPct = allocated > 0 ? (pnl / allocated) * 100 : 0;
   const pnlColor = pnl > 0 ? "#00e676" : pnl < 0 ? "#ef4444" : "#94a3b8";
 
-  const target = bot.target_balance ? Number(bot.target_balance) : null;
+  const target = botData.target_balance ? Number(botData.target_balance) : null;
   const targetPct = target && target > allocated ? Math.min(100, Math.max(0, ((balance - allocated) / (target - allocated)) * 100)) : null;
 
-  const latestDecision = decisions[0];
+  const latestDecision = liveDecisions[0];
+
+  const handleBotAction = (intent: "start" | "pause" | "stop") => {
+    const newStatus = intent === "start" ? "running" : intent === "pause" ? "paused" : "stopped";
+    setBotData((prev) => ({ ...prev, status: newStatus as BotStatus }));
+
+    const formData = new FormData();
+    formData.append("id", botData.id);
+    formData.append("intent", intent);
+
+    void (async () => {
+      try {
+        await setBotStatus(formData);
+        const res = await fetch(`/api/bots/live?botId=${botData.id}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as { success?: boolean; bot?: typeof botData };
+          if (data.success && data.bot) setBotData(data.bot);
+        }
+      } catch {
+        // revert on failure
+      }
+    })();
+  };
+
+  const handleScanNow = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isScanning) return;
+    setIsScanning(true);
+
+    const formData = new FormData();
+    formData.append("id", botData.id);
+
+    void (async () => {
+      try {
+        await triggerBotScan(formData);
+        const res = await fetch(`/api/bots/live?botId=${botData.id}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            success?: boolean;
+            bot?: typeof botData;
+            decisions?: BotDecisionItem[];
+            openPositions?: OpenTradeItem[];
+            closedTrades?: ClosedTradeItem[];
+          };
+          if (data.success) {
+            if (data.bot) setBotData(data.bot);
+            if (Array.isArray(data.decisions)) setLiveDecisions(data.decisions);
+            if (Array.isArray(data.openPositions)) setLiveOpenPositions(data.openPositions);
+            if (Array.isArray(data.closedTrades)) setLiveClosedTrades(data.closedTrades);
+          }
+        }
+      } catch {
+        // ignore
+      } finally {
+        setIsScanning(false);
+      }
+    })();
+  };
+
+  const handleClosePosition = (tradeId: string) => {
+    setLiveOpenPositions((prev) => prev.filter((p) => p.id !== tradeId));
+
+    const formData = new FormData();
+    formData.append("trade_id", tradeId);
+    formData.append("bot_id", botData.id);
+
+    void (async () => {
+      try {
+        await closeTradeManually(formData);
+        const res = await fetch(`/api/bots/live?botId=${botData.id}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            success?: boolean;
+            bot?: typeof botData;
+            openPositions?: OpenTradeItem[];
+            closedTrades?: ClosedTradeItem[];
+          };
+          if (data.success) {
+            if (data.bot) setBotData(data.bot);
+            if (Array.isArray(data.openPositions)) setLiveOpenPositions(data.openPositions);
+            if (Array.isArray(data.closedTrades)) setLiveClosedTrades(data.closedTrades);
+          }
+        }
+      } catch {
+        // revert
+      }
+    })();
+  };
 
   return (
     <div className="bot-detail-root">
@@ -280,9 +421,15 @@ export function BotDetailView({
           </svg>
           <span>All Trading Bots</span>
         </Link>
-        <div className="bot-detail-environment-badge">
-          <span className="dot-cyan" />
-          <span>Vexqora Paper Engine · Real Market Feed</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="bot-live-sync-pill" title="Real-time AJAX synchronization active every 3 seconds">
+            <span className={`sync-indicator-dot ${isAjaxSyncing ? "sync-indicator-dot--syncing" : ""}`} />
+            <span>AJAX Live Stream (3s)</span>
+          </div>
+          <div className="bot-detail-environment-badge">
+            <span className="dot-cyan" />
+            <span>Vexqora Paper Engine · Real Market Feed</span>
+          </div>
         </div>
       </div>
 
@@ -290,19 +437,28 @@ export function BotDetailView({
       <header className="bot-engine-header">
         <div className="bot-engine-header__left">
           <div className="bot-engine-identity">
-            <div className={`bot-pulse-radar bot-pulse-radar--${bot.status}`}>
+            <div className={`bot-pulse-radar bot-pulse-radar--${botData.status}`}>
               <span className="bot-pulse-radar__core" />
               <span className="bot-pulse-radar__wave" />
             </div>
             <div>
               <div className="bot-engine-title-row">
-                <h1>{bot.name}</h1>
-                <span className="badge-tag badge-tag--paper">{bot.mode.toUpperCase()}</span>
-                <span className={`badge-tag badge-tag--${bot.status}`}>{bot.status.toUpperCase()}</span>
-                <span className="badge-tag badge-tag--strategy">{bot.strategy.toUpperCase()}</span>
+                <h1>{botData.name}</h1>
+                <span className="badge-tag badge-tag--paper">{botData.mode.toUpperCase()}</span>
+                <span className={`badge-tag badge-tag--${botData.status}`}>{botData.status.toUpperCase()}</span>
+                <span className="badge-tag badge-tag--strategy">{botData.strategy.toUpperCase()}</span>
+                {liveOpenPositions.length > 0 ? (
+                  <span className="badge-tag" style={{ background: "rgba(53, 242, 208, 0.15)", color: "#35f2d0", border: "1px solid rgba(53, 242, 208, 0.35)" }}>
+                    🔥 В РИНКУ ({liveOpenPositions.length}/5)
+                  </span>
+                ) : (
+                  <span className="badge-tag" style={{ background: "rgba(165, 156, 196, 0.1)", color: "#A59CC4", border: "1px solid rgba(165, 156, 196, 0.2)" }}>
+                    💤 У КЕШІ (СКАНО)
+                  </span>
+                )}
               </div>
               <p className="bot-engine-desc">
-                {bot.description || "24/7 Autonomous Market-Adaptive AI Trading Agent"}
+                {botData.description || "24/7 Autonomous Market-Adaptive AI Trading Agent"}
               </p>
             </div>
           </div>
@@ -312,13 +468,13 @@ export function BotDetailView({
           {/* Heartbeat Status Indicator */}
           <div className="bot-heartbeat-box">
             <div className="bot-heartbeat-status">
-              <span className={isMounted && secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60 ? "beacon-active" : bot.status === "running" ? "beacon-stalled" : "beacon-idle"} />
+              <span className={isMounted && secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60 ? "beacon-active" : botData.status === "running" ? "beacon-stalled" : "beacon-idle"} />
               <strong>
-                {bot.status === "running"
+                {botData.status === "running"
                   ? isMounted && secondsSinceHeartbeat !== null && secondsSinceHeartbeat < 60
                     ? "RUNNER ACTIVE"
                     : "RUNNER IDLE"
-                  : bot.status.toUpperCase()}
+                  : botData.status.toUpperCase()}
               </strong>
             </div>
             <span className="bot-heartbeat-timer mono" suppressHydrationWarning>
@@ -334,28 +490,25 @@ export function BotDetailView({
 
           {/* Quick Actions: Force Scan & Controls */}
           <div className="bot-controls-group">
-            <form action={triggerBotScan} onSubmit={() => setIsPending(true)} className="inline-form">
-              <input type="hidden" name="id" value={bot.id} />
+            <form onSubmit={handleScanNow} className="inline-form">
               <button
                 type="submit"
-                disabled={isPending}
+                disabled={isScanning}
                 className="btn-terminal btn-terminal--scan"
                 title="Force a real-time Bybit market scan cycle now"
               >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className={isPending ? "spin-icon" : ""}>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className={isScanning ? "spin-icon" : ""}>
                   <path d="M13 3l-3 3M10 3h3v3M3 8a5 5 0 018.5-3.5L13 6M3 13l3-3M6 13H3v-3M13 8a5 5 0 01-8.5 3.5L3 10" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <span>{isPending ? "Analyzing..." : "⚡ Scan Market Now"}</span>
+                <span>{isScanning ? "Analyzing Bybit..." : "⚡ Scan Market Now"}</span>
               </button>
             </form>
 
-            <form action={setBotStatus} className="inline-form">
-              <input type="hidden" name="id" value={bot.id} />
-              {bot.status !== "running" && (
+            <div className="inline-form" style={{ display: "flex", gap: "6px" }}>
+              {botData.status !== "running" && (
                 <button
-                  type="submit"
-                  name="intent"
-                  value="start"
+                  type="button"
+                  onClick={() => handleBotAction("start")}
                   className="btn-terminal btn-terminal--start"
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor">
@@ -364,11 +517,10 @@ export function BotDetailView({
                   <span>Start Bot</span>
                 </button>
               )}
-              {bot.status === "running" && (
+              {botData.status === "running" && (
                 <button
-                  type="submit"
-                  name="intent"
-                  value="pause"
+                  type="button"
+                  onClick={() => handleBotAction("pause")}
                   className="btn-terminal btn-terminal--pause"
                 >
                   <svg viewBox="0 0 16 16" fill="currentColor">
@@ -378,9 +530,8 @@ export function BotDetailView({
                 </button>
               )}
               <button
-                type="submit"
-                name="intent"
-                value="stop"
+                type="button"
+                onClick={() => handleBotAction("stop")}
                 className="btn-terminal btn-terminal--stop"
               >
                 <svg viewBox="0 0 16 16" fill="currentColor">
@@ -388,13 +539,13 @@ export function BotDetailView({
                 </svg>
                 <span>Emergency Stop</span>
               </button>
-            </form>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Warning Banner if runner is idle */}
-      {bot.status === "running" && (secondsSinceHeartbeat === null || secondsSinceHeartbeat >= 60) && (
+      {botData.status === "running" && (secondsSinceHeartbeat === null || secondsSinceHeartbeat >= 60) && (
         <div className="bot-alert-banner bot-alert-banner--warning">
           <svg
             width={20}
@@ -417,7 +568,7 @@ export function BotDetailView({
       )}
 
       {/* Error Banner if any */}
-      {bot.status === "error" && bot.last_error && (
+      {botData.status === "error" && botData.last_error && (
         <div className="bot-alert-banner">
           <svg
             width={20}
@@ -434,7 +585,7 @@ export function BotDetailView({
             <line x1="10" y1="14" x2="10.01" y2="14" strokeWidth="2.5" strokeLinecap="round" />
           </svg>
           <div>
-            <strong>Bot Runner Error:</strong> {bot.last_error}
+            <strong>Bot Runner Error:</strong> {botData.last_error}
           </div>
         </div>
       )}
@@ -482,8 +633,8 @@ export function BotDetailView({
 
         <div className="metric-tile">
           <span className="metric-tile__label">Open Positions</span>
-          <strong className="metric-tile__value mono" style={{ color: openPositions.length > 0 ? "#00e5ff" : "#94a3b8" }}>
-            {openPositions.length} Active
+          <strong className="metric-tile__value mono" style={{ color: liveOpenPositions.length > 0 ? "#00e5ff" : "#94a3b8" }}>
+            {liveOpenPositions.length} Active
           </strong>
           <span className="metric-tile__sub">Market exposure</span>
         </div>
@@ -530,7 +681,7 @@ export function BotDetailView({
             <path d="M10 5h4v4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <span>Active Trades</span>
-          <span className="tab-counter">{openPositions.length}</span>
+          <span className="tab-counter">{liveOpenPositions.length}</span>
         </button>
 
         <button
@@ -543,7 +694,7 @@ export function BotDetailView({
             <path d="M5 7h6M5 10h4" strokeLinecap="round" />
           </svg>
           <span>Closed Trades Archive</span>
-          <span className="tab-counter">{closedTrades.length}</span>
+          <span className="tab-counter">{liveClosedTrades.length}</span>
         </button>
 
         <button
@@ -555,7 +706,7 @@ export function BotDetailView({
             <path d="M4 4h8M4 8h8M4 12h5" strokeLinecap="round" />
           </svg>
           <span>Decision Audit Log</span>
-          <span className="tab-counter">{decisions.length}</span>
+          <span className="tab-counter">{liveDecisions.length}</span>
         </button>
 
         <button
@@ -687,7 +838,7 @@ export function BotDetailView({
                 </div>
               ) : (
                 radarData.map((item) => {
-                  const hasActivePosition = openPositions.some((p) => p.symbol === item.symbol);
+                  const hasActivePosition = liveOpenPositions.some((p) => p.symbol === item.symbol);
                   return (
                     <div
                       key={item.symbol}
@@ -732,11 +883,11 @@ export function BotDetailView({
       {activeTab === "active" && (
         <div className="terminal-panel">
           <div className="terminal-panel__header">
-            <h3>Active Open Positions ({openPositions.length})</h3>
+            <h3>Active Open Positions ({liveOpenPositions.length})</h3>
             <span className="terminal-panel__status mono">Auto SL/TP Managed by Worker</span>
           </div>
 
-          {openPositions.length === 0 ? (
+          {liveOpenPositions.length === 0 ? (
             <div className="empty-panel-state">
               <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="6" y="8" width="28" height="24" rx="4" />
@@ -763,7 +914,7 @@ export function BotDetailView({
                   </tr>
                 </thead>
                 <tbody>
-                  {openPositions.map((pos) => {
+                  {liveOpenPositions.map((pos) => {
                     const isLong = pos.side === "long";
                     const direction = isLong ? 1 : -1;
                     const markPrice = livePrices[pos.symbol.toUpperCase()] ?? pos.entry_avg;
@@ -827,13 +978,13 @@ export function BotDetailView({
                           </Link>
                         </td>
                         <td>
-                          <form action={closeTradeManually}>
-                            <input type="hidden" name="trade_id" value={pos.id} />
-                            <input type="hidden" name="bot_id" value={bot.id} />
-                            <button type="submit" className="btn-close-position">
-                              Exit Trade
-                            </button>
-                          </form>
+                          <button
+                            type="button"
+                            onClick={() => handleClosePosition(pos.id)}
+                            className="btn-close-position"
+                          >
+                            Exit Trade
+                          </button>
                         </td>
                       </tr>
                     );
@@ -849,11 +1000,11 @@ export function BotDetailView({
       {activeTab === "archive" && (
         <div className="terminal-panel">
           <div className="terminal-panel__header">
-            <h3>Settled Trade Archive ({closedTrades.length})</h3>
+            <h3>Settled Trade Archive ({liveClosedTrades.length})</h3>
             <span className="terminal-panel__status mono">Audited Paper Executions</span>
           </div>
 
-          {closedTrades.length === 0 ? (
+          {liveClosedTrades.length === 0 ? (
             <div className="empty-panel-state">
               <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <rect x="6" y="8" width="28" height="24" rx="3" />
@@ -879,7 +1030,7 @@ export function BotDetailView({
                   </tr>
                 </thead>
                 <tbody>
-                  {closedTrades.map((t) => {
+                  {liveClosedTrades.map((t) => {
                     const pnlVal = Number(t.realized_pnl ?? 0);
                     const isPositive = pnlVal > 0;
                     return (
@@ -941,18 +1092,18 @@ export function BotDetailView({
       {activeTab === "decisions" && (
         <div className="terminal-panel">
           <div className="terminal-panel__header">
-            <h3>Autonomous 30-Second Cycle Log ({decisions.length})</h3>
+            <h3>Autonomous 30-Second Cycle Log ({liveDecisions.length})</h3>
             <span className="terminal-panel__status mono">Immutable DB Records</span>
           </div>
 
-          {decisions.length === 0 ? (
+          {liveDecisions.length === 0 ? (
             <div className="empty-panel-state">
               <strong>No decisions logged yet</strong>
               <p>Start the bot to initiate the 30-second automated market cycle.</p>
             </div>
           ) : (
             <div className="decisions-stream">
-              {decisions.map((dec) => (
+              {liveDecisions.map((dec) => (
                 <div key={dec.id} className="decision-item">
                   <div className="decision-item__head">
                     <span className={`decision-badge decision-badge--${dec.action}`}>
@@ -985,7 +1136,7 @@ export function BotDetailView({
             <div className="config-box">
               <h4>Strategy Policy</h4>
               <dl className="config-dl">
-                <div><dt>Strategy Mode</dt><dd className="mono text-cyan">{bot.strategy.toUpperCase()}</dd></div>
+                <div><dt>Strategy Mode</dt><dd className="mono text-cyan">{botData.strategy.toUpperCase()}</dd></div>
                 <div><dt>Regime Handling</dt><dd>Autonomous Regime Detection</dd></div>
                 <div><dt>Direction</dt><dd>Dynamic Long &amp; Short</dd></div>
                 <div><dt>Execution Adapter</dt><dd className="mono">Vexqora Paper Engine</dd></div>
@@ -995,19 +1146,19 @@ export function BotDetailView({
             <div className="config-box">
               <h4>Risk &amp; Safety Guardrails</h4>
               <form action={updateBotSettings} className="bot-settings-form">
-                <input type="hidden" name="id" value={bot.id} />
-                <label>Risk per trade (%)<input name="risk_per_trade_pct" type="number" min="0.1" max="100" step="0.1" defaultValue={bot.risk_per_trade_pct} placeholder="0.1% – 100%" /></label>
+                <input type="hidden" name="id" value={botData.id} />
+                <label>Risk per trade (%)<input name="risk_per_trade_pct" type="number" min="0.1" max="100" step="0.1" defaultValue={botData.risk_per_trade_pct} placeholder="0.1% – 100%" /></label>
                 <label>
                   Trading Direction
-                  <select name="direction" defaultValue={bot.direction || "both"}>
+                  <select name="direction" defaultValue={botData.direction || "both"}>
                     <option value="both">🤖 Dynamic (Autonomous AI Market Choice)</option>
                     <option value="long">📈 Long Only</option>
                     <option value="short">📉 Short Only</option>
                   </select>
                 </label>
-                <label>Target balance (USDT)<input name="target_balance" type="number" min="0" step="0.01" defaultValue={bot.target_balance ?? ""} placeholder="No target (continuous)" /></label>
-                <label>When target reached<select name="goal_action" defaultValue={bot.goal_action}><option value="pause">Pause</option><option value="stop">Stop</option><option value="continue">Continue</option></select></label>
-                <label>Max daily loss limit (%)<input name="max_daily_loss_pct" type="number" min="0.1" max="100" step="0.5" defaultValue={bot.max_daily_loss_pct} placeholder="0.1% – 100%" /></label>
+                <label>Target balance (USDT)<input name="target_balance" type="number" min="0" step="0.01" defaultValue={botData.target_balance ?? ""} placeholder="No target (continuous)" /></label>
+                <label>When target reached<select name="goal_action" defaultValue={botData.goal_action}><option value="pause">Pause</option><option value="stop">Stop</option><option value="continue">Continue</option></select></label>
+                <label>Max daily loss limit (%)<input name="max_daily_loss_pct" type="number" min="0.1" max="100" step="0.5" defaultValue={botData.max_daily_loss_pct} placeholder="0.1% – 100%" /></label>
                 <button type="submit" className="btn-terminal btn-terminal--scan">Save Settings</button>
               </form>
             </div>
