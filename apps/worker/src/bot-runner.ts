@@ -1,6 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 import { calculateScalpingEconomics } from "@crypto-bot/trading/scalping-economics";
+import {
+  filterBotUniverseCandidates,
+  evaluateCandidateTechnicalStructure,
+  roundPriceByTick,
+  calculateWilderATR,
+  type BotOpportunityCandidate,
+  type BybitLinearTicker,
+} from "@crypto-bot/trading";
+import { fetchRecentKlines } from "@crypto-bot/exchange";
 import { logger } from "./logger";
 
 interface BotRow {
@@ -253,17 +262,7 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       }
 
       // Autonomous AI Engine Market Scan for live trading bot
-      let scannedOpportunity: {
-        symbol: string;
-        entry: number;
-        sl: number;
-        tp1: number;
-        tp2: number;
-        tp3: number;
-        side: "long" | "short";
-        changePct: number;
-        turnover: number;
-      } | null = null;
+      let scannedOpportunity: BotOpportunityCandidate | null = null;
 
       try {
         const { data: currentOpen } = await supabase
@@ -278,69 +277,47 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         if (res.ok) {
           const data = (await res.json()) as {
             result?: {
-              list?: Array<{ symbol: string; lastPrice: string; price24hPcnt: string; turnover24h: string }>;
+              list?: BybitLinearTicker[];
             };
           };
           const list = data.result?.list ?? [];
 
-          // Scan all active Bybit Linear USDT perpetual contracts with volume >= $100k (all coins in universe)
-          const scored = list
-            .filter((t) => t.symbol.endsWith("USDT") && !activeSyms.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 100_000)
-            .map((t) => {
-              const lastPrice = Number(t.lastPrice);
-              const changePct = Number(t.price24hPcnt) * 100;
-              const turnover = Number(t.turnover24h ?? 0);
-              return { symbol: t.symbol, lastPrice, changePct, turnover };
-            });
+          // 1. Institutional Universe Filter:
+          // Eliminates extreme pump-and-dump exhaustion (> +16% or < -16%), dead volume (< $500k), and already active coins.
+          // Prioritizes healthy momentum (+1% to +15% for LONG, -1% to -15% for SHORT).
+          const filteredCandidates = filterBotUniverseCandidates(list, {
+            direction: (bot.direction as "long" | "short" | "both") ?? "both",
+            activeSymbols: Array.from(activeSyms),
+            minTurnover24h: 500_000,
+            minPriceChangePct: 1.0,
+            maxPriceChangePct: 16.0,
+          });
 
-function roundPrice(val: number): number {
-  if (val < 0.001) return Number(val.toFixed(7));
-  if (val < 0.01) return Number(val.toFixed(6));
-  if (val < 0.1) return Number(val.toFixed(5));
-  if (val < 1) return Number(val.toFixed(4));
-  if (val < 10) return Number(val.toFixed(3));
-  return Number(val.toFixed(2));
-}
+          // 2. Technical and Structural Filter:
+          // Check top 5 momentum candidates for EMA20/50 alignment, RSI headroom, Wilder ATR volatility,
+          // and structural swing SL/TP with positive risk-adjusted expectancy.
+          for (const cand of filteredCandidates.slice(0, 5)) {
+            try {
+              const klines = await fetchRecentKlines(cand.symbol, "15", 50);
+              if (!klines || klines.length < 25) continue;
 
-          if (scored.length > 0) {
-            let best: { symbol: string; lastPrice: number; changePct: number; turnover: number } | undefined;
-            let isLong = true;
+              const evaluation = evaluateCandidateTechnicalStructure({
+                symbol: cand.symbol,
+                side: cand.candidateSide,
+                klines,
+                changePct: cand.changePct,
+                turnover: cand.turnover,
+                depositUsdt: accountBalance,
+                maxLeverage: Math.min(bot.max_leverage, 20),
+                riskPerTradePct: bot.risk_per_trade_pct,
+              });
 
-            if (bot.direction === "long") {
-              scored.sort((a, b) => b.changePct - a.changePct);
-              best = scored[0];
-              isLong = true;
-            } else if (bot.direction === "short") {
-              scored.sort((a, b) => a.changePct - b.changePct);
-              best = scored[0];
-              isLong = false;
-            } else {
-              scored.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
-              best = scored[0];
-              isLong = (best?.changePct ?? 0) >= 0;
-            }
-
-            if (best) {
-              const entry = best.lastPrice;
-              // Dynamic Stop Loss based on market volatility, not hardcoded constants
-              const volatilityPct = Math.max(0.015, Math.min(0.06, (Math.abs(best.changePct) / 100) * 0.35 || 0.02));
-              const sl = roundPrice(isLong ? entry * (1 - volatilityPct) : entry * (1 + volatilityPct));
-              // Dynamic Take Profit targets based on Risk-to-Reward (1.5R, 2.5R, 4.0R)
-              const tp1 = roundPrice(isLong ? entry * (1 + volatilityPct * 1.5) : entry * (1 - volatilityPct * 1.5));
-              const tp2 = roundPrice(isLong ? entry * (1 + volatilityPct * 2.5) : entry * (1 - volatilityPct * 2.5));
-              const tp3 = roundPrice(isLong ? entry * (1 + volatilityPct * 4.0) : entry * (1 - volatilityPct * 4.0));
-
-              scannedOpportunity = {
-                symbol: best.symbol,
-                entry,
-                sl,
-                tp1,
-                tp2,
-                tp3,
-                side: isLong ? "long" : "short",
-                changePct: best.changePct,
-                turnover: best.turnover,
-              };
+              if (evaluation) {
+                scannedOpportunity = evaluation;
+                break;
+              }
+            } catch {
+              // try next candidate
             }
           }
         }
@@ -349,20 +326,35 @@ function roundPrice(val: number): number {
       }
 
       if (!scannedOpportunity) {
-        await writeDecision("wait", "No active signals in the last 48h.", { checked: now });
+        await writeDecision(
+          "wait",
+          "Universe momentum scan complete. Evaluated active pairs; none passed 15m structural trend (EMA20/50), RSI headroom (38-68), and positive risk-adjusted expectancy.",
+          { checked: now }
+        );
         return;
       }
 
       // Dynamic position sizing based on bot's configured leverage and risk_per_trade_pct
+      // Strictly enforces per-slot exposure guard so deposit is never dumped into 1 position
       const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
       const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
       const stopDistancePct = Math.max(0.005, Math.abs(scannedOpportunity.entry - scannedOpportunity.sl) / scannedOpportunity.entry);
       const maxCapitalRisk = accountBalance * riskPct;
       const targetNotional = maxCapitalRisk / stopDistancePct;
-      const maxAllowedNotional = Math.min(accountBalance * effectiveLeverage, availableMargin * effectiveLeverage);
+
+      const remainingSlots = Math.max(1, maxPositions - openCount);
+      const slotMargin = Math.min(availableMargin, availableMargin / remainingSlots);
+      const maxTradeMargin = Math.min(availableMargin, (accountBalance * MAX_MARGIN_UTILIZATION) / maxPositions);
+      const safeTradeMargin = Math.max(1, Math.min(slotMargin, maxTradeMargin));
+      const maxAllowedNotional = safeTradeMargin * effectiveLeverage;
+
       const notional = Math.min(targetNotional, maxAllowedNotional);
       if (!Number.isFinite(notional) || notional < 5) {
-        await writeDecision("blocked", "Available capital is below the exchange minimum after exposure controls.", { availableMargin, minNotional: 5 });
+        await writeDecision(
+          "blocked",
+          "Available capital is below the exchange minimum after exposure controls.",
+          { availableMargin, safeTradeMargin, minNotional: 5 }
+        );
         return;
       }
       const qty = Number((notional / scannedOpportunity.entry).toFixed(scannedOpportunity.entry < 1 ? 1 : 4));
@@ -378,6 +370,12 @@ function roundPrice(val: number): number {
           qty,
           leverage: effectiveLeverage,
           sl: scannedOpportunity.sl,
+          trailing_stop: {
+            distance: { type: "percent", value: scannedOpportunity.trailingDistancePct },
+            controlMode: "auto",
+            initialQty: qty,
+            activated: false,
+          },
           realized_pnl: 0,
         })
         .select("id")
@@ -396,7 +394,7 @@ function roundPrice(val: number): number {
 
       await writeDecision(
         "enter",
-        `Autonomous AI Cycle identified ${scannedOpportunity.side.toUpperCase()} setup on ${scannedOpportunity.symbol} (${scannedOpportunity.changePct >= 0 ? "+" : ""}${scannedOpportunity.changePct.toFixed(2)}% 24h). Placed paper trade @ $${scannedOpportunity.entry} with ${effectiveLeverage}x leverage (SL: $${scannedOpportunity.sl}, TP1: $${scannedOpportunity.tp1}).`,
+        `Autonomous AI Cycle identified ${scannedOpportunity.side.toUpperCase()} setup on ${scannedOpportunity.symbol} (${scannedOpportunity.changePct >= 0 ? "+" : ""}${scannedOpportunity.changePct.toFixed(2)}% 24h). ${scannedOpportunity.reasoning}`,
         {
           symbol: scannedOpportunity.symbol,
           tradeId: newTrade.id,
@@ -405,14 +403,20 @@ function roundPrice(val: number): number {
           tp1: scannedOpportunity.tp1,
           tp2: scannedOpportunity.tp2,
           tp3: scannedOpportunity.tp3,
+          trailingDistancePct: scannedOpportunity.trailingDistancePct,
+          atr14: scannedOpportunity.atr14,
+          rsi14: scannedOpportunity.rsi14,
+          ema20: scannedOpportunity.ema20,
+          ema50: scannedOpportunity.ema50,
           notional,
+          marginUsed: notional / effectiveLeverage,
           leverage: effectiveLeverage,
           change24h: scannedOpportunity.changePct,
-          source: "autonomous_cycle", availableMargin,
+          source: "autonomous_cycle",
+          availableMargin,
         },
         scannedOpportunity.symbol
-      );
-      return;
+      );      return;
     }
 
     // Evaluate each signal through scalping economics
@@ -496,6 +500,21 @@ function roundPrice(val: number): number {
     }
     const qty = econ.positionNotionalUsdt / entry;
 
+    // Calculate adaptive trailing stop distance (2.0% - 3.5%)
+    let trailingDistancePct = 2.0;
+    if (!process.env.VITEST) {
+      try {
+        const klines = await fetchRecentKlines(symbol, "15", 30);
+        const atr = calculateWilderATR(klines, 14);
+        if (atr && entry > 0) {
+          const atrPct = (atr / entry) * 100;
+          trailingDistancePct = Math.max(2.0, Math.min(3.5, Number((atrPct * 1.4).toFixed(2))));
+        }
+      } catch {
+        // fallback to 2.0%
+      }
+    }
+
     // Insert paper trade
     const { data: newTrade, error: tradeErr } = await supabase
       .from("trades")
@@ -509,6 +528,12 @@ function roundPrice(val: number): number {
         qty,
         leverage: bot.max_leverage,
         sl,
+        trailing_stop: {
+          distance: { type: "percent", value: trailingDistancePct },
+          controlMode: "auto",
+          initialQty: qty,
+          activated: false,
+        },
         realized_pnl: 0,
       })
       .select("id")
@@ -523,9 +548,18 @@ function roundPrice(val: number): number {
       return;
     }
 
+    const tp2 = (parsed as Record<string, unknown>).tp2
+      ? Number((parsed as Record<string, unknown>).tp2)
+      : (side === "long" ? roundPriceByTick(entry + Math.abs(entry - sl) * 2.5) : roundPriceByTick(entry - Math.abs(entry - sl) * 2.5));
+    const tp3 = (parsed as Record<string, unknown>).tp3
+      ? Number((parsed as Record<string, unknown>).tp3)
+      : (side === "long" ? roundPriceByTick(entry + Math.abs(entry - sl) * 3.8) : roundPriceByTick(entry - Math.abs(entry - sl) * 3.8));
+
     // Insert TP targets (40% / 30% / 30%)
     await supabase.from("trade_targets").insert([
       { trade_id: newTrade.id, idx: 1, price: tp1, share_pct: 40, status: "open" },
+      { trade_id: newTrade.id, idx: 2, price: tp2, share_pct: 30, status: "open" },
+      { trade_id: newTrade.id, idx: 3, price: tp3, share_pct: 30, status: "open" },
     ]);
 
     await writeDecision(

@@ -126,3 +126,44 @@ export function calculateWilderADX(klines: Kline[], period = 14): WilderADXResul
     trendStrength
   };
 }
+
+/**
+ * Computes canonical J. Welles Wilder Jr. Average True Range (ATR).
+ * Requires at least `period + 1` candles.
+ */
+export function calculateWilderATR(klines: Kline[], period = 14): number | null {
+  if (klines.length <= period) {
+    return null;
+  }
+
+  const trList: number[] = [];
+  for (let i = 1; i < klines.length; i++) {
+    const curr = klines[i]!;
+    const prev = klines[i - 1]!;
+    const tr = Math.max(
+      curr.high - curr.low,
+      Math.abs(curr.high - prev.close),
+      Math.abs(curr.low - prev.close)
+    );
+    trList.push(tr);
+  }
+
+  if (trList.length < period) {
+    return null;
+  }
+
+  // Initial sum of first `period` true ranges
+  let smoothedTr = 0;
+  for (let i = 0; i < period; i++) {
+    smoothedTr += trList[i]!;
+  }
+  let atr = smoothedTr / period;
+
+  // Wilder smoothing for subsequent bars: ATR_t = ((ATR_{t-1} * (period - 1)) + TR_t) / period
+  for (let i = period; i < trList.length; i++) {
+    atr = (atr * (period - 1) + trList[i]!) / period;
+  }
+
+  return Number(atr.toFixed(6));
+}
+

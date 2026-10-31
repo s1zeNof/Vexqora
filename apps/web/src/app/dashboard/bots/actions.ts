@@ -4,6 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { randomUUID } from "crypto";
 import { createSupabaseServerClient } from "../../../lib/supabase/server";
+import {
+  filterBotUniverseCandidates,
+  evaluateCandidateTechnicalStructure,
+  type BotOpportunityCandidate,
+  type BybitLinearTicker,
+} from "@crypto-bot/trading";
+import { fetchRecentKlines } from "@crypto-bot/exchange";
 
 export async function createPaperBot(formData: FormData) {
   const supabase = await createSupabaseServerClient();
@@ -228,22 +235,37 @@ export async function triggerBotScan(formData: FormData) {
 
   const now = new Date().toISOString();
   const cycleId = randomUUID();
+  const balance = Number(bot.current_balance ?? bot.allocated_capital);
+
+  if (!Number.isFinite(balance) || balance <= 0) {
+    await supabase.from("bot_decisions").insert({
+      bot_id: id,
+      cycle_id: cycleId,
+      action: "blocked",
+      symbol: "UNIVERSE",
+      reasoning: "⚡ Scan triggered, but this bot has no available equity. New entries are disabled until Paper balance is funded.",
+      evidence: { balance, source: "scan_button" },
+    });
+    revalidatePath(`/dashboard/bots/${id}`);
+    return;
+  }
 
   // Check current open positions
   const { data: openTrades } = await supabase
     .from("trades")
-    .select("id, symbol")
+    .select("id, symbol, entry_avg, qty, leverage")
     .eq("account_id", bot.account_id)
     .in("status", ["active", "entry_open"]);
 
   interface SimpleOpenTrade {
     id: string;
     symbol: string;
+    entry_avg?: number;
+    qty?: number;
+    leverage?: number;
   }
   const openPositions = (openTrades ?? []) as SimpleOpenTrade[];
   const openSymbols = openPositions.map((p) => String(p.symbol));
-  // A manual scan must use the same survival limits as the autonomous runner.
-  // It is never permitted to bypass all position controls.
   const maxPositions = Math.min(Math.max(1, Number(bot.max_positions ?? 1)), 5);
 
   if (openPositions.length >= maxPositions) {
@@ -271,68 +293,88 @@ export async function triggerBotScan(formData: FormData) {
     return;
   }
 
-  // Fetch live Bybit linear tickers across the entire 900+ pair universe
-  const activeSymbols = new Set(openSymbols);
+  const openMargin = openPositions.reduce(
+    (sum, t) => sum + (Number(t.entry_avg ?? 0) * Number(t.qty ?? 0)) / Math.max(1, Number(t.leverage ?? 1)),
+    0
+  );
+  const marginBudget = balance * 0.5;
+  const availableMargin = Math.max(0, marginBudget - openMargin);
 
-  let selectedCandidate: {
-    symbol: string;
-    lastPrice: number;
-    changePct: number;
-    turnover: number;
-    side: "long" | "short";
-  } | null = null;
+  if (availableMargin < 1) {
+    await supabase.from("bot_decisions").insert({
+      bot_id: id,
+      cycle_id: cycleId,
+      action: "manage",
+      symbol: "UNIVERSE",
+      reasoning: `⚡ Market scan executed. Maximum safe margin utilization reached ($50% equity cap: $${marginBudget.toFixed(2)}). Managing existing positions only.`,
+      evidence: { openMargin, marginBudget, availableMargin, source: "scan_button" },
+    });
+    revalidatePath(`/dashboard/bots/${id}`);
+    return;
+  }
+
+  // Fetch live Bybit linear tickers across the perpetual universe
+  const activeSymbols = new Set(openSymbols);
+  let selectedOpportunity: BotOpportunityCandidate | null = null;
 
   try {
     const res = await fetch("https://api.bybit.com/v5/market/tickers?category=linear", { cache: "no-store" });
     if (res.ok) {
       const data = (await res.json()) as {
         result?: {
-          list?: Array<{ symbol: string; lastPrice: string; price24hPcnt: string; turnover24h: string }>;
+          list?: BybitLinearTicker[];
         };
       };
       const list = data.result?.list ?? [];
 
-      // Scan all active Bybit Linear USDT perpetual contracts with volume >= $100k (all coins in universe)
-      const scored = list
-        .filter((t) => t.symbol.endsWith("USDT") && !activeSymbols.has(t.symbol) && Number(t.lastPrice) > 0 && Number(t.turnover24h ?? 0) >= 100_000)
-        .map((t) => {
-          const lastPrice = Number(t.lastPrice);
-          const changePct = Number(t.price24hPcnt) * 100;
-          const turnover = Number(t.turnover24h ?? 0);
-          return { symbol: t.symbol, lastPrice, changePct, turnover };
-        });
+      // Institutional universe filter: eliminates extreme pump-and-dump exhaustion (> +16% or < -16%), dead volume (< $500k), and active coins
+      const filteredCandidates = filterBotUniverseCandidates(list, {
+        direction: (bot.direction as "long" | "short" | "both") ?? "both",
+        activeSymbols: Array.from(activeSymbols),
+        minTurnover24h: 500_000,
+        minPriceChangePct: 1.0,
+        maxPriceChangePct: 16.0,
+      });
 
-      if (scored.length > 0) {
-        // Sort according to direction preference
-        if (bot.direction === "long") {
-          scored.sort((a, b) => b.changePct - a.changePct);
-          const best = scored[0];
-          if (best) selectedCandidate = { ...best, side: "long" };
-        } else if (bot.direction === "short") {
-          scored.sort((a, b) => a.changePct - b.changePct);
-          const best = scored[0];
-          if (best) selectedCandidate = { ...best, side: "short" };
-        } else {
-          // Both: pick highest absolute volatility/momentum
-          scored.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
-          const best = scored[0];
-          if (best) selectedCandidate = { ...best, side: best.changePct >= 0 ? "long" : "short" };
+      // Technical structure filter: checks EMA20/50 alignment, RSI headroom, Wilder ATR, swing levels, and positive expectancy
+      for (const cand of filteredCandidates.slice(0, 5)) {
+        try {
+          const klines = await fetchRecentKlines(cand.symbol, "15", 50);
+          if (!klines || klines.length < 25) continue;
+
+          const evaluation = evaluateCandidateTechnicalStructure({
+            symbol: cand.symbol,
+            side: cand.candidateSide,
+            klines,
+            changePct: cand.changePct,
+            turnover: cand.turnover,
+            depositUsdt: balance,
+            maxLeverage: Math.min(Number(bot.max_leverage ?? 3), 20),
+            riskPerTradePct: Number(bot.risk_per_trade_pct ?? 1),
+          });
+
+          if (evaluation) {
+            selectedOpportunity = evaluation;
+            break;
+          }
+        } catch {
+          // try next candidate
         }
       }
     }
   } catch {
-    // If Bybit fetch fails, candidate remains null
+    // network or api error
   }
 
-  // If no candidate available, write wait decision
-  if (!selectedCandidate) {
+  // If no setup qualified
+  if (!selectedOpportunity) {
     await supabase.from("bot_decisions").insert({
       bot_id: id,
       cycle_id: cycleId,
       action: "wait",
       symbol: "UNIVERSE",
-      reasoning: "⚡ Market scan executed. Current market conditions across primary pairs are in low volatility compression. Standby for confirmed directional momentum breakout.",
-      evidence: { source: "manual_trigger", timestamp: now },
+      reasoning: "⚡ Market scan executed. Universe momentum screener checked active pairs; none passed 15m structural trend (EMA20/50), RSI headroom (38-68), and positive risk-adjusted expectancy.",
+      evidence: { source: "scan_button", timestamp: now },
     });
 
     await supabase
@@ -345,64 +387,47 @@ export async function triggerBotScan(formData: FormData) {
     return;
   }
 
-  const roundPrice = (val: number) => {
-    if (val < 0.001) return Number(val.toFixed(7));
-    if (val < 0.01) return Number(val.toFixed(6));
-    if (val < 0.1) return Number(val.toFixed(5));
-    if (val < 1) return Number(val.toFixed(4));
-    if (val < 10) return Number(val.toFixed(3));
-    return Number(val.toFixed(2));
-  };
-
-  // Dynamic Stop Loss based on coin volatility, never arbitrary fixed 1.2%
-  const entry = selectedCandidate.lastPrice;
-  const isLong = selectedCandidate.side === "long";
-  const volatilityPct = Math.max(0.015, Math.min(0.06, (Math.abs(selectedCandidate.changePct) / 100) * 0.35 || 0.02));
-  const sl = roundPrice(isLong ? entry * (1 - volatilityPct) : entry * (1 + volatilityPct));
-  // Dynamic Take Profit targets based on Risk-to-Reward (1.5R, 2.5R, 4.0R)
-  const tp1 = roundPrice(isLong ? entry * (1 + volatilityPct * 1.5) : entry * (1 - volatilityPct * 1.5));
-  const tp2 = roundPrice(isLong ? entry * (1 + volatilityPct * 2.5) : entry * (1 - volatilityPct * 2.5));
-  const tp3 = roundPrice(isLong ? entry * (1 + volatilityPct * 4.0) : entry * (1 - volatilityPct * 4.0));
-
-  const balance = Number(bot.current_balance ?? bot.allocated_capital);
-  if (!Number.isFinite(balance) || balance <= 0) {
-    await supabase.from("bot_decisions").insert({
-      bot_id: id, cycle_id: cycleId, action: "blocked", symbol: selectedCandidate.symbol,
-      reasoning: "Scan found a setup, but this bot has no available equity. New entries are disabled.",
-      evidence: { balance, source: "scan_button" },
-    });
-    revalidatePath(`/dashboard/bots/${id}`);
-    return;
-  }
+  // Dynamic position sizing based on risk per trade & exposure controls
   const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
   const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
+  const stopDistancePct = Math.max(0.005, Math.abs(selectedOpportunity.entry - selectedOpportunity.sl) / selectedOpportunity.entry);
   const maxCapitalRisk = balance * riskPct;
-  const targetNotional = maxCapitalRisk / volatilityPct;
-  const maxAllowedNotional = balance * 0.5 * effectiveLeverage;
+  const targetNotional = maxCapitalRisk / stopDistancePct;
+  const maxAllowedNotional = Math.min(balance * effectiveLeverage, availableMargin * effectiveLeverage);
   const notional = Math.min(targetNotional, maxAllowedNotional);
+
   if (!Number.isFinite(notional) || notional < 5) {
     await supabase.from("bot_decisions").insert({
-      bot_id: id, cycle_id: cycleId, action: "blocked", symbol: selectedCandidate.symbol,
-      reasoning: "Scan found a setup, but it is below the minimum viable notional after risk controls.",
-      evidence: { balance, maxAllowedNotional, source: "scan_button" },
+      bot_id: id,
+      cycle_id: cycleId,
+      action: "blocked",
+      symbol: selectedOpportunity.symbol,
+      reasoning: "Scan found a setup, but calculated size is below the $5 minimum notional after risk controls.",
+      evidence: { balance, maxAllowedNotional, availableMargin, source: "scan_button" },
     });
     revalidatePath(`/dashboard/bots/${id}`);
     return;
   }
-  const qty = Number((notional / entry).toFixed(entry < 1 ? 1 : 4));
+  const qty = Number((notional / selectedOpportunity.entry).toFixed(selectedOpportunity.entry < 1 ? 1 : 4));
 
-  // Place real paper trade into database
+  // Place paper trade into database
   const { data: newTrade, error: tradeErr } = await supabase
     .from("trades")
     .insert({
       account_id: bot.account_id,
-      symbol: selectedCandidate.symbol,
-      side: selectedCandidate.side,
+      symbol: selectedOpportunity.symbol,
+      side: selectedOpportunity.side,
       status: "active",
-      entry_avg: entry,
+      entry_avg: selectedOpportunity.entry,
       qty,
       leverage: effectiveLeverage,
-      sl,
+      sl: selectedOpportunity.sl,
+      trailing_stop: {
+        distance: { type: "percent", value: selectedOpportunity.trailingDistancePct },
+        controlMode: "auto",
+        initialQty: qty,
+        activated: false,
+      },
       realized_pnl: 0,
     })
     .select("id")
@@ -413,21 +438,18 @@ export async function triggerBotScan(formData: FormData) {
       bot_id: id,
       cycle_id: cycleId,
       action: "blocked",
-      symbol: selectedCandidate.symbol,
-      reasoning: `Market scan found setup on ${selectedCandidate.symbol}, but trade insertion failed: ${tradeErr?.message ?? "unknown error"}.`,
+      symbol: selectedOpportunity.symbol,
+      reasoning: `Market scan found setup on ${selectedOpportunity.symbol}, but trade insertion failed: ${tradeErr?.message ?? "unknown error"}.`,
       evidence: { error: tradeErr },
     });
   } else {
     // Insert multi-stage Take Profit targets (40% / 30% / 30%)
     await supabase.from("trade_targets").insert([
-      { trade_id: newTrade.id, idx: 1, price: tp1, share_pct: 40, status: "open" },
-      { trade_id: newTrade.id, idx: 2, price: tp2, share_pct: 30, status: "open" },
-      { trade_id: newTrade.id, idx: 3, price: tp3, share_pct: 30, status: "open" },
+      { trade_id: newTrade.id, idx: 1, price: selectedOpportunity.tp1, share_pct: 40, status: "open" },
+      { trade_id: newTrade.id, idx: 2, price: selectedOpportunity.tp2, share_pct: 30, status: "open" },
+      { trade_id: newTrade.id, idx: 3, price: selectedOpportunity.tp3, share_pct: 30, status: "open" },
     ]);
 
-    const formattedPrice = `$${entry.toLocaleString("en-US", { minimumFractionDigits: entry < 1 ? 4 : 2 })}`;
-    const formattedSl = `$${sl.toLocaleString("en-US", { minimumFractionDigits: entry < 1 ? 4 : 2 })}`;
-    const formattedTp1 = `$${tp1.toLocaleString("en-US", { minimumFractionDigits: entry < 1 ? 4 : 2 })}`;
 
     const rawTradeId = (newTrade as { id?: unknown }).id;
     const resolvedTradeId = typeof rawTradeId === "string" ? rawTradeId : "";
@@ -438,21 +460,27 @@ export async function triggerBotScan(formData: FormData) {
       bot_id: id,
       cycle_id: cycleId,
       action: "enter",
-      symbol: selectedCandidate.symbol,
-      reasoning: `⚡ Real-time Scan executed. Autonomous AI Engine identified momentum setup on ${selectedCandidate.symbol} (${selectedCandidate.changePct >= 0 ? "+" : ""}${selectedCandidate.changePct.toFixed(2)}% 24h, Turnover $${(selectedCandidate.turnover / 1e6).toFixed(1)}M). Placed paper ${selectedCandidate.side.toUpperCase()} @ ${formattedPrice} with ${effectiveLeverage}x leverage (Notional: $${notional.toFixed(2)} USDT, SL: ${formattedSl}, TP1: ${formattedTp1}).`,
+      symbol: selectedOpportunity.symbol,
+      reasoning: `⚡ Real-time Scan executed. Autonomous AI Engine identified momentum setup on ${selectedOpportunity.symbol} (${selectedOpportunity.changePct >= 0 ? "+" : ""}${selectedOpportunity.changePct.toFixed(2)}% 24h, Turnover $${(selectedOpportunity.turnover / 1e6).toFixed(1)}M). ${selectedOpportunity.reasoning}`,
       evidence: {
-        symbol: selectedCandidate.symbol,
+        symbol: selectedOpportunity.symbol,
         tradeId: resolvedTradeId,
-        entry,
-        sl,
-        tp1,
-        tp2,
-        tp3,
+        entry: selectedOpportunity.entry,
+        sl: selectedOpportunity.sl,
+        tp1: selectedOpportunity.tp1,
+        tp2: selectedOpportunity.tp2,
+        tp3: selectedOpportunity.tp3,
+        trailingDistancePct: selectedOpportunity.trailingDistancePct,
+        atr14: selectedOpportunity.atr14,
+        rsi14: selectedOpportunity.rsi14,
+        ema20: selectedOpportunity.ema20,
+        ema50: selectedOpportunity.ema50,
         qty,
         notional,
+        marginUsed: notional / effectiveLeverage,
         leverage: effectiveLeverage,
-        change24h: selectedCandidate.changePct,
-        turnover24h: selectedCandidate.turnover,
+        change24h: selectedOpportunity.changePct,
+        turnover24h: selectedOpportunity.turnover,
         strategy: resolvedStrategy,
         source: "scan_button",
       },

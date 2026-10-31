@@ -135,7 +135,7 @@ export function evaluatePaperTrade(
   const initialQty = trade.trailing_stop?.initialQty ?? trade.qty;
 
   let trailingState: PaperTrailingStopState = {
-    distance: { type: "percent", value: 1 },
+    distance: { type: "percent", value: 2.0 },
     ...trade.trailing_stop,
     initialQty,
     controlMode
@@ -350,7 +350,7 @@ export function evaluatePaperTrade(
   if (isTrailingActive && remainingQty > 0) {
     const trailPct = trailingState.distance?.type === "percent"
       ? trailingState.distance.value
-      : (trailingState.distance?.value ? (trailingState.distance.value / trade.entry_avg) * 100 : 1);
+      : (trailingState.distance?.value ? (trailingState.distance.value / trade.entry_avg) * 100 : 2.0);
 
     if (isLong) {
       const currentPeak = Math.max(trailingState.highestPrice ?? currentPrice, currentPrice);

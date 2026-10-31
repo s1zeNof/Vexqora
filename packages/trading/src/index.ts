@@ -25,3 +25,4 @@ export * from "./adx";
 export * from "./thesis-store";
 export * from "./execution-evidence";
 export * from "./scalping-economics";
+export * from "./bot-strategy";

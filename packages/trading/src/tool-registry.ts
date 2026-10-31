@@ -30,7 +30,7 @@ import {
   type EconomicCalendarItem
 } from "./news-feed";
 import type { NewsEvent } from "./news";
-import { calculateWilderADX } from "./adx";
+import { calculateWilderADX, calculateWilderATR } from "./adx";
 import {
   defaultThesisStore,
   type DurableTradeThesisStore,
@@ -415,6 +415,46 @@ export class LeadTraderToolRegistry {
             : (adxResult.trendStrength === "WEAK_OR_CONSOLIDATING"
                 ? "Weak trend / range consolidation"
                 : "Developing trend")
+        }
+      };
+    }
+
+    if (name === "ATR") {
+      const period = params.period ?? 14;
+      const atrVal = calculateWilderATR(klines, period);
+
+      if (atrVal === null) {
+        return {
+          toolName: "compute_indicator",
+          status: "INSUFFICIENT_DATA",
+          exchange: "Bybit",
+          marketType: "linear",
+          symbol,
+          source: "MathEngine",
+          asOfMs,
+          receivedAtMs,
+          candlesUsed: klines.length,
+          qualityWarnings: [`ATR(${period}) requires at least ${period + 1} candles.`],
+          data: null,
+          error: `Insufficient candle history for ATR(${period}).`
+        };
+      }
+
+      return {
+        toolName: "compute_indicator",
+        status: "OK",
+        exchange: "Bybit",
+        marketType: "linear",
+        symbol,
+        source: "MathEngine",
+        asOfMs,
+        receivedAtMs,
+        candlesUsed: klines.length,
+        qualityWarnings: [],
+        data: {
+          indicator: `ATR_${period}`,
+          value: atrVal,
+          details: `Canonical Wilder ATR(${period}): ${atrVal}`
         }
       };
     }
