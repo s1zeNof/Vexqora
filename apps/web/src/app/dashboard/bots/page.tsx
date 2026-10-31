@@ -104,6 +104,43 @@ export default async function BotsPage({
 
   const paperBalance = Number(paperAccount?.paper_balance ?? 0);
 
+  // Never present the mutable runner cache as profit. Reconcile the list from
+  // the same closed-trade ledger used by the detail page, so a stale or broken
+  // current_balance cannot falsely mark a target as reached.
+  const botRows = (bots ?? []) as unknown as BotRow[];
+  const botIds = botRows.map((bot) => bot.id);
+  const auditedBalanceByBot = new Map<string, number>();
+  if (botIds.length > 0) {
+    const { data: enterDecisions } = await supabase
+      .from("bot_decisions")
+      .select("bot_id,trade_id,evidence")
+      .in("bot_id", botIds)
+      .eq("action", "enter")
+      .limit(500);
+    const tradeIdsByBot = new Map<string, string[]>();
+    for (const decision of enterDecisions ?? []) {
+      const evidence = decision.evidence as Record<string, unknown> | null;
+      const tradeId = typeof decision.trade_id === "string" ? decision.trade_id : typeof evidence?.tradeId === "string" ? evidence.tradeId : null;
+      const botId = typeof decision.bot_id === "string" ? decision.bot_id : null;
+      if (tradeId && botId) tradeIdsByBot.set(botId, [...(tradeIdsByBot.get(botId) ?? []), tradeId]);
+    }
+    const allTradeIds = Array.from(new Set(Array.from(tradeIdsByBot.values()).flat()));
+    if (allTradeIds.length > 0) {
+      const { data: closedTrades } = await supabase
+        .from("trades")
+        .select("id,realized_pnl")
+        .in("id", allTradeIds)
+        .in("status", ["closed", "stopped"]);
+      const pnlByTrade = new Map((closedTrades ?? []).map((trade) => [trade.id, Number(trade.realized_pnl ?? 0)]));
+      for (const bot of botRows) {
+        const ids = tradeIdsByBot.get(bot.id) ?? [];
+        if (ids.some((tradeId) => pnlByTrade.has(tradeId))) {
+          auditedBalanceByBot.set(bot.id, Math.max(0, Number(bot.allocated_capital) + ids.reduce((sum, tradeId) => sum + (pnlByTrade.get(tradeId) ?? 0), 0)));
+        }
+      }
+    }
+  }
+
   return (
     <div className="bots-page">
       <header className="bots-page__header">
@@ -172,7 +209,8 @@ export default async function BotsPage({
           </div>
         ) : (
           <div className="bots-grid">
-            {(bots as unknown as BotRow[]).map((bot) => {
+            {botRows.map((bot) => {
+              const displayedBalance = auditedBalanceByBot.get(bot.id) ?? Number(bot.current_balance);
               const hasTarget = bot.target_balance !== null && bot.target_balance > bot.allocated_capital;
               return (
                 <article key={bot.id} className={`bot-card bot-card--${bot.status}`}>
@@ -198,11 +236,11 @@ export default async function BotsPage({
                     </div>
                     <div className="bot-card__metric">
                       <span>Current Balance</span>
-                      <strong className="mono">${Number(bot.current_balance).toFixed(2)}</strong>
+                      <strong className="mono">${displayedBalance.toFixed(2)}</strong>
                     </div>
                     <div className="bot-card__metric">
                       <span>PnL</span>
-                      <PnlValue allocated={Number(bot.allocated_capital)} current={Number(bot.current_balance)} />
+                      <PnlValue allocated={Number(bot.allocated_capital)} current={displayedBalance} />
                     </div>
                     {bot.target_balance && (
                       <div className="bot-card__metric">
@@ -214,7 +252,7 @@ export default async function BotsPage({
 
                   {hasTarget && (
                     <ProgressBar
-                      current={Number(bot.current_balance)}
+                      current={displayedBalance}
                       target={Number(bot.target_balance)}
                       allocated={Number(bot.allocated_capital)}
                     />

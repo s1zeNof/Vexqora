@@ -242,9 +242,9 @@ export async function triggerBotScan(formData: FormData) {
   }
   const openPositions = (openTrades ?? []) as SimpleOpenTrade[];
   const openSymbols = openPositions.map((p) => String(p.symbol));
-  // Manual AI scans are constrained by allocated capital and risk guards, not
-  // by an arbitrary position-count ceiling.
-  const maxPositions = Number.POSITIVE_INFINITY;
+  // A manual scan must use the same survival limits as the autonomous runner.
+  // It is never permitted to bypass all position controls.
+  const maxPositions = Math.min(Math.max(1, Number(bot.max_positions ?? 1)), 5);
 
   if (openPositions.length >= maxPositions) {
     await supabase.from("bot_decisions").insert({
@@ -365,12 +365,30 @@ export async function triggerBotScan(formData: FormData) {
   const tp3 = roundPrice(isLong ? entry * (1 + volatilityPct * 4.0) : entry * (1 - volatilityPct * 4.0));
 
   const balance = Number(bot.current_balance ?? bot.allocated_capital);
+  if (!Number.isFinite(balance) || balance <= 0) {
+    await supabase.from("bot_decisions").insert({
+      bot_id: id, cycle_id: cycleId, action: "blocked", symbol: selectedCandidate.symbol,
+      reasoning: "Scan found a setup, but this bot has no available equity. New entries are disabled.",
+      evidence: { balance, source: "scan_button" },
+    });
+    revalidatePath(`/dashboard/bots/${id}`);
+    return;
+  }
   const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
   const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
   const maxCapitalRisk = balance * riskPct;
   const targetNotional = maxCapitalRisk / volatilityPct;
-  const maxAllowedNotional = balance * effectiveLeverage;
-  const notional = Math.max(5.0, Math.min(targetNotional, maxAllowedNotional));
+  const maxAllowedNotional = balance * 0.5 * effectiveLeverage;
+  const notional = Math.min(targetNotional, maxAllowedNotional);
+  if (!Number.isFinite(notional) || notional < 5) {
+    await supabase.from("bot_decisions").insert({
+      bot_id: id, cycle_id: cycleId, action: "blocked", symbol: selectedCandidate.symbol,
+      reasoning: "Scan found a setup, but it is below the minimum viable notional after risk controls.",
+      evidence: { balance, maxAllowedNotional, source: "scan_button" },
+    });
+    revalidatePath(`/dashboard/bots/${id}`);
+    return;
+  }
   const qty = Number((notional / entry).toFixed(entry < 1 ? 1 : 4));
 
   // Place real paper trade into database

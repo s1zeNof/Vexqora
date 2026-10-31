@@ -47,6 +47,11 @@ interface SignalRow {
 }
 
 const BOT_RUNNER_INTERVAL_MS = 30_000;
+// A bot may be configured with a higher value, but Paper execution must never
+// turn a single strategy into an unbounded portfolio. This is a non-bypassable
+// circuit breaker; capital/exposure checks below are the primary guard.
+const HARD_MAX_CONCURRENT_POSITIONS = 5;
+const MAX_MARGIN_UTILIZATION = 0.5;
 
 async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void> {
   const cycleId = randomUUID();
@@ -91,6 +96,21 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
   try {
     const accountBalance = Number(bot.current_balance);
 
+    if (!Number.isFinite(accountBalance) || accountBalance <= 0) {
+      await writeDecision("blocked", "No bot equity is available. New entries are disabled until the Paper balance is repaired or funded.", { accountBalance });
+      return;
+    }
+
+    // Goals are checked before any new entry. Previously this ran after an
+    // order was inserted, so a bot could continue opening positions after its
+    // target had already been reached.
+    if (bot.target_balance && accountBalance >= bot.target_balance && bot.goal_action !== "continue") {
+      const newStatus = bot.goal_action === "stop" ? "stopped" : "paused";
+      await supabase.from("trading_bots").update({ status: newStatus, autonomous_enabled: false, updated_at: now }).eq("id", bot.id);
+      await writeDecision("manage", `Target balance $${bot.target_balance.toFixed(2)} reached. Bot ${newStatus}; no new positions will be opened.`, { accountBalance, targetBalance: bot.target_balance });
+      return;
+    }
+
     // A paper account may be shared by manual trades and multiple bots. Every
     // bot risk limit must use only trades created by that bot.
     let botTradeIds: string[] = [];
@@ -110,23 +130,26 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
     }
 
     // Check current open position capacity for this bot
-    const maxPositions = bot.max_positions > 0 ? bot.max_positions : 1;
+    const maxPositions = Math.min(Math.max(1, bot.max_positions || 1), HARD_MAX_CONCURRENT_POSITIONS);
     let openCount = 0;
+    let openMargin = 0;
     if (process.env.VITEST) {
       const { data: openPositions } = await supabase
         .from("trades")
-        .select("id")
+        .select("id,entry_avg,qty,leverage")
         .eq("account_id", bot.account_id)
         .in("status", ["active", "entry_open"]);
       openCount = (openPositions ?? []).length;
+      openMargin = (openPositions ?? []).reduce((sum: number, trade: { entry_avg?: number; qty?: number; leverage?: number }) => sum + (Number(trade.entry_avg) * Number(trade.qty) / Math.max(1, Number(trade.leverage))), 0);
     } else if (botTradeIds.length > 0) {
       const { data: openBotTrades } = await supabase
         .from("trades")
-        .select("id")
+        .select("id,entry_avg,qty,leverage")
         .eq("account_id", bot.account_id)
         .in("status", ["active", "entry_open"])
         .in("id", botTradeIds);
       openCount = (openBotTrades ?? []).length;
+      openMargin = (openBotTrades ?? []).reduce((sum: number, trade: { entry_avg?: number; qty?: number; leverage?: number }) => sum + (Number(trade.entry_avg) * Number(trade.qty) / Math.max(1, Number(trade.leverage))), 0);
     } else {
       openCount = 0;
     }
@@ -137,6 +160,13 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
         `Bot position capacity reached: managing ${openCount}/${maxPositions} active positions. Monitoring market for TP/SL and trailing exits.`,
         { openCount, maxPositions }
       );
+      return;
+    }
+
+    const marginBudget = accountBalance * MAX_MARGIN_UTILIZATION;
+    const availableMargin = Math.max(0, marginBudget - openMargin);
+    if (availableMargin < 1) {
+      await writeDecision("manage", "Maximum safe margin utilization reached. Managing existing positions only.", { openCount, openMargin, marginBudget, availableMargin });
       return;
     }
 
@@ -329,8 +359,12 @@ function roundPrice(val: number): number {
       const stopDistancePct = Math.max(0.005, Math.abs(scannedOpportunity.entry - scannedOpportunity.sl) / scannedOpportunity.entry);
       const maxCapitalRisk = accountBalance * riskPct;
       const targetNotional = maxCapitalRisk / stopDistancePct;
-      const maxAllowedNotional = accountBalance * effectiveLeverage;
-      const notional = Math.max(5.0, Math.min(targetNotional, maxAllowedNotional));
+      const maxAllowedNotional = Math.min(accountBalance * effectiveLeverage, availableMargin * effectiveLeverage);
+      const notional = Math.min(targetNotional, maxAllowedNotional);
+      if (!Number.isFinite(notional) || notional < 5) {
+        await writeDecision("blocked", "Available capital is below the exchange minimum after exposure controls.", { availableMargin, minNotional: 5 });
+        return;
+      }
       const qty = Number((notional / scannedOpportunity.entry).toFixed(scannedOpportunity.entry < 1 ? 1 : 4));
 
       const { data: newTrade, error: tradeErr } = await supabase
@@ -374,7 +408,7 @@ function roundPrice(val: number): number {
           notional,
           leverage: effectiveLeverage,
           change24h: scannedOpportunity.changePct,
-          source: "autonomous_cycle",
+          source: "autonomous_cycle", availableMargin,
         },
         scannedOpportunity.symbol
       );
@@ -455,6 +489,11 @@ function roundPrice(val: number): number {
       slippageBps: 3,
     });
 
+    const maxNotional = availableMargin * Math.max(1, Math.min(bot.max_leverage, 20));
+    if (econ.positionNotionalUsdt > maxNotional || econ.marginUsedUsdt > availableMargin) {
+      await writeDecision("blocked", "Signal passed analysis but exceeds the remaining safe margin budget.", { availableMargin, requestedMargin: econ.marginUsedUsdt, requestedNotional: econ.positionNotionalUsdt });
+      return;
+    }
     const qty = econ.positionNotionalUsdt / entry;
 
     // Insert paper trade
@@ -511,18 +550,6 @@ function roundPrice(val: number): number {
       "Bot runner: paper trade placed"
     );
 
-    // Check goal: if target_balance is set and we've reached/exceeded it
-    if (bot.target_balance && accountBalance >= bot.target_balance) {
-      const newStatus =
-        bot.goal_action === "stop" ? "stopped" : bot.goal_action === "pause" ? "paused" : "running";
-      if (newStatus !== "running") {
-        await supabase
-          .from("trading_bots")
-          .update({ status: newStatus, autonomous_enabled: false, updated_at: new Date().toISOString() })
-          .eq("id", bot.id);
-        logger.info({ botId: bot.id, goal_action: bot.goal_action }, "Bot reached target balance");
-      }
-    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error({ botId: bot.id, cycleId, error: message }, "Bot cycle error");
