@@ -151,8 +151,30 @@ export default async function BotDetailPage({
     }));
   }
 
+  const uniqueSymbols = Array.from(new Set(openPositions.map((t) => t.symbol.toUpperCase()))).filter(Boolean);
+  const initialPrices: Record<string, number> = {};
+  if (uniqueSymbols.length > 0) {
+    await Promise.all(
+      uniqueSymbols.map(async (symbol) => {
+        try {
+          const res = await fetch(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${encodeURIComponent(symbol)}`, {
+            next: { revalidate: 2 }
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { result?: { list?: Array<{ lastPrice: string }> } };
+            const last = data.result?.list?.[0]?.lastPrice;
+            if (last) initialPrices[symbol] = Number(last);
+          }
+        } catch {
+          // ignore
+        }
+      })
+    );
+  }
+
   return (
     <BotDetailView
+      initialPrices={initialPrices}
       bot={{
         id: botId,
         name: botName,

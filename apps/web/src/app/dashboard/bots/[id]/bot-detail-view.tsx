@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatCryptoPrice } from "../../../../lib/format";
 import { setBotStatus, triggerBotScan, closeTradeManually, updateBotSettings } from "../actions";
 
@@ -68,6 +68,20 @@ export interface ClosedTradeItem {
   targets?: TradeTargetItem[];
 }
 
+interface BybitWsTickerMessage {
+  topic?: string;
+  data?: {
+    symbol?: string;
+    lastPrice?: string;
+  };
+}
+
+interface TickerApiResponse {
+  ticker?: {
+    lastPrice?: number;
+  };
+}
+
 interface BotDetailViewProps {
   bot: {
     id: string;
@@ -90,6 +104,7 @@ interface BotDetailViewProps {
   decisions: BotDecisionItem[];
   openPositions: OpenTradeItem[];
   closedTrades: ClosedTradeItem[];
+  initialPrices?: Record<string, number>;
 }
 
 export function BotDetailView({
@@ -97,6 +112,7 @@ export function BotDetailView({
   decisions,
   openPositions,
   closedTrades,
+  initialPrices = {},
 }: BotDetailViewProps) {
   const [activeTab, setActiveTab] = useState<"radar" | "active" | "archive" | "decisions" | "config">("radar");
   const [now, setNow] = useState(0);
@@ -107,6 +123,92 @@ export function BotDetailView({
   const [radarCategory, setRadarCategory] = useState<"volume" | "gainers" | "losers" | "volatility">("volume");
   const [radarSearch, setRadarSearch] = useState("");
   const [totalPairs, setTotalPairs] = useState(0);
+
+  // Live prices for active open positions to calculate real-time Unrealized PnL
+  const openSymbols = useMemo(() => {
+    return Array.from(new Set(openPositions.map((t) => t.symbol.toUpperCase()))).filter(Boolean);
+  }, [openPositions]);
+
+  const [livePrices, setLivePrices] = useState<Record<string, number>>(initialPrices);
+
+  useEffect(() => {
+    setLivePrices((prev) => ({ ...prev, ...initialPrices }));
+  }, [initialPrices]);
+
+  useEffect(() => {
+    if (openSymbols.length === 0) return;
+
+    let isMounted = true;
+    let ws: WebSocket | null = null;
+    let pingInterval: NodeJS.Timeout | null = null;
+
+    try {
+      ws = new WebSocket("wss://stream.bybit.com/v5/public/linear");
+
+      ws.onopen = () => {
+        if (!isMounted || !ws || ws.readyState !== WebSocket.OPEN) return;
+        const subArgs = openSymbols.map((s) => `tickers.${s}`);
+        ws.send(JSON.stringify({ op: "subscribe", args: subArgs }));
+
+        pingInterval = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ op: "ping" }));
+          }
+        }, 20000);
+      };
+
+      ws.onmessage = (event: MessageEvent<string>) => {
+        if (!isMounted) return;
+        try {
+          const msg = JSON.parse(event.data) as BybitWsTickerMessage;
+          if (msg.topic?.startsWith("tickers.") && msg.data?.lastPrice) {
+            const sym = msg.data.symbol ?? msg.topic.replace("tickers.", "");
+            const newPrice = Number(msg.data.lastPrice);
+            if (Number.isFinite(newPrice) && newPrice > 0) {
+              setLivePrices((prev) => ({ ...prev, [sym.toUpperCase()]: newPrice }));
+            }
+          }
+        } catch {
+          // ignore malformed message
+        }
+      };
+    } catch {
+      // ws fallback
+    }
+
+    // Ajax fallback polling every 2s
+    const pollTimer = setInterval(() => {
+      void (async () => {
+        for (const sym of openSymbols) {
+          try {
+            const res = await fetch(`/api/market/ticker?symbol=${encodeURIComponent(sym)}`);
+            if (res.ok) {
+              const data = (await res.json()) as TickerApiResponse;
+              const p = Number(data.ticker?.lastPrice);
+              if (Number.isFinite(p) && p > 0) {
+                setLivePrices((prev) => ({ ...prev, [sym.toUpperCase()]: p }));
+              }
+            }
+          } catch {
+            // ignore network error
+          }
+        }
+      })();
+    }, 2000);
+
+    return () => {
+      isMounted = false;
+      if (pingInterval) clearInterval(pingInterval);
+      clearInterval(pollTimer);
+      if (ws) {
+        try {
+          ws.close();
+        } catch {
+          // ignore close error
+        }
+      }
+    };
+  }, [openSymbols]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -662,7 +764,24 @@ export function BotDetailView({
                 </thead>
                 <tbody>
                   {openPositions.map((pos) => {
-                    const isProfit = Number(pos.realized_pnl ?? 0) >= 0;
+                    const isLong = pos.side === "long";
+                    const direction = isLong ? 1 : -1;
+                    const markPrice = livePrices[pos.symbol.toUpperCase()] ?? pos.entry_avg;
+                    const entryPrice = Number(pos.entry_avg ?? 0);
+                    const qty = Number(pos.qty ?? 0);
+                    const leverage = Number(pos.leverage ?? 1);
+
+                    let pnlDisplay = "$0.00 (+0.00%)";
+                    let isProfit = true;
+
+                    if (markPrice !== null && entryPrice > 0 && qty > 0) {
+                      const diff = markPrice - entryPrice;
+                      const unrealizedPnl = diff * qty * direction;
+                      const pnlPct = (diff / entryPrice) * leverage * 100 * direction;
+                      isProfit = unrealizedPnl >= 0;
+                      pnlDisplay = `${isProfit ? "+" : ""}$${unrealizedPnl.toFixed(2)} (${isProfit ? "+" : ""}${pnlPct.toFixed(2)}%)`;
+                    }
+
                     return (
                       <tr key={pos.id}>
                         <td>
@@ -680,11 +799,15 @@ export function BotDetailView({
                         <td className="mono">
                           {pos.targets && pos.targets.length > 0 ? (
                             <div className="tp-targets-inline">
-                              {pos.targets.map((tgt) => (
-                                <span key={tgt.idx} className={`tp-badge tp-badge--${tgt.status}`}>
-                                  TP{tgt.idx}: ${formatCryptoPrice(tgt.price)} ({tgt.share_pct}%)
-                                </span>
-                              ))}
+                              {pos.targets.map((tgt) => {
+                                const isFilled = tgt.status === "filled";
+                                return (
+                                  <span key={tgt.idx} className={`tp-badge tp-badge--${tgt.status}`}>
+                                    {isFilled ? "✓ " : ""}TP{tgt.idx}: ${formatCryptoPrice(tgt.price)} ({tgt.share_pct}%)
+                                    {isFilled ? " HIT" : ""}
+                                  </span>
+                                );
+                              })}
                             </div>
                           ) : (
                             <span className="text-muted">Dynamic ATR</span>
@@ -693,7 +816,7 @@ export function BotDetailView({
                         <td className="mono">{pos.qty ?? "—"}</td>
                         <td className="mono text-red">{pos.sl ? `${formatCryptoPrice(pos.sl)}` : "—"}</td>
                         <td className={`mono ${isProfit ? "text-green" : "text-red"}`}>
-                          ${pos.realized_pnl ? Number(pos.realized_pnl).toFixed(2) : "$0.00"}
+                          {pnlDisplay}
                         </td>
                         <td>
                           <span className="status-live-tag">{pos.status.toUpperCase()}</span>
