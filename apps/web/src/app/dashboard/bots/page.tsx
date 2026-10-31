@@ -21,6 +21,16 @@ interface BotRow {
   created_at: string;
 }
 
+interface RawDecisionRow {
+  bot_id: string;
+  trade_id: string | null;
+  action: string;
+  symbol: string | null;
+  reasoning: string;
+  evidence: Record<string, unknown> | null;
+  created_at: string;
+}
+
 export default async function BotsPage({
   searchParams,
 }: {
@@ -71,8 +81,9 @@ export default async function BotsPage({
       .order("created_at", { ascending: false })
       .limit(600);
 
-    for (const d of decisions ?? []) {
-      const bid = String(d.bot_id);
+    const decisionRows = (decisions ?? []) as unknown as RawDecisionRow[];
+    for (const d of decisionRows) {
+      const bid = d.bot_id;
       if (!latestDecisionByBot.has(bid)) {
         const dTime = new Date(d.created_at).getTime();
         latestDecisionByBot.set(bid, {

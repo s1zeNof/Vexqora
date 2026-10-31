@@ -326,7 +326,7 @@ export function BotDetailView({
 
   const handleBotAction = (intent: "start" | "pause" | "stop") => {
     const newStatus = intent === "start" ? "running" : intent === "pause" ? "paused" : "stopped";
-    setBotData((prev) => ({ ...prev, status: newStatus as BotStatus }));
+    setBotData((prev) => ({ ...prev, status: newStatus }));
 
     const formData = new FormData();
     formData.append("id", botData.id);
