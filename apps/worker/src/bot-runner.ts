@@ -337,22 +337,32 @@ async function runBotCycle(supabase: SupabaseClient, bot: BotRow): Promise<void>
       // Dynamic position sizing based on bot's configured leverage and risk_per_trade_pct
       // Strictly enforces per-slot exposure guard so deposit is never dumped into 1 position
       const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
+      const minMarginNeeded = 5.0 / effectiveLeverage;
+
+      if (availableMargin < minMarginNeeded) {
+        await writeDecision(
+          "blocked",
+          `Available margin (${availableMargin.toFixed(2)}) is below the required margin (${minMarginNeeded.toFixed(2)}) to open a $5 minimum position with ${effectiveLeverage}x leverage.`,
+          { availableMargin, minMarginNeeded, minNotional: 5 }
+        );
+        return;
+      }
+
+      const remainingSlots = Math.max(1, maxPositions - openCount);
+      const slotMargin = Math.min(availableMargin, availableMargin / remainingSlots);
+      const safeTradeMargin = Math.max(minMarginNeeded, Math.min(availableMargin, slotMargin));
+      const maxAllowedNotional = safeTradeMargin * effectiveLeverage;
+
       const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
       const stopDistancePct = Math.max(0.005, Math.abs(scannedOpportunity.entry - scannedOpportunity.sl) / scannedOpportunity.entry);
       const maxCapitalRisk = accountBalance * riskPct;
       const targetNotional = maxCapitalRisk / stopDistancePct;
 
-      const remainingSlots = Math.max(1, maxPositions - openCount);
-      const slotMargin = Math.min(availableMargin, availableMargin / remainingSlots);
-      const maxTradeMargin = Math.min(availableMargin, (accountBalance * MAX_MARGIN_UTILIZATION) / maxPositions);
-      const safeTradeMargin = Math.max(1, Math.min(slotMargin, maxTradeMargin));
-      const maxAllowedNotional = safeTradeMargin * effectiveLeverage;
-
-      const notional = Math.min(targetNotional, maxAllowedNotional);
+      const notional = Math.min(maxAllowedNotional, Math.max(5.0, targetNotional));
       if (!Number.isFinite(notional) || notional < 5) {
         await writeDecision(
           "blocked",
-          "Available capital is below the exchange minimum after exposure controls.",
+          `Calculated order size (${notional.toFixed(2)}) is below the $5 exchange minimum notional.`,
           { availableMargin, safeTradeMargin, minNotional: 5 }
         );
         return;

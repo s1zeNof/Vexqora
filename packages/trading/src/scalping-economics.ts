@@ -53,10 +53,11 @@ export function calculateScalpingEconomics(input: ScalpingEconomicsInput): Scalp
   if (!finitePositive(stopMovePct) || !finitePositive(rewardMovePct)) return empty;
 
   const leverage = Math.min(Math.max(input.leverage, 1), 100);
+  const minNotional = Math.max(0, input.minimumNotionalUsdt);
   const riskBudgetUsdt = input.depositUsdt * Math.min(Math.max(input.riskPerTradePct, 0.1), 100) / 100;
   const riskSizedNotional = riskBudgetUsdt / stopMovePct;
   const capitalCappedNotional = input.depositUsdt * 0.9 * leverage;
-  const positionNotionalUsdt = Math.min(riskSizedNotional, capitalCappedNotional);
+  const positionNotionalUsdt = Math.min(capitalCappedNotional, Math.max(minNotional, riskSizedNotional));
   const feeRate = Math.max(0, input.takerFeeBps) / 10_000;
   const spreadRate = Math.max(0, input.spreadBps) / 10_000;
   const slippageRate = Math.max(0, input.slippageBps) / 10_000;

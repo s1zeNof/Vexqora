@@ -389,12 +389,31 @@ export async function triggerBotScan(formData: FormData) {
 
   // Dynamic position sizing based on risk per trade & exposure controls
   const effectiveLeverage = Math.max(1, Math.min(125, Number(bot.max_leverage ?? 3)));
+  const minMarginNeeded = 5.0 / effectiveLeverage;
+
+  if (availableMargin < minMarginNeeded) {
+    await supabase.from("bot_decisions").insert({
+      bot_id: id,
+      cycle_id: cycleId,
+      action: "blocked",
+      symbol: selectedOpportunity.symbol,
+      reasoning: `⚡ Available margin (${availableMargin.toFixed(2)}) is below the required margin (${minMarginNeeded.toFixed(2)}) to open a $5 minimum position with ${effectiveLeverage}x leverage.`,
+      evidence: { balance, availableMargin, minMarginNeeded, minNotional: 5, source: "scan_button" },
+    });
+    revalidatePath(`/dashboard/bots/${id}`);
+    return;
+  }
+
+  const remainingSlots = Math.max(1, maxPositions - openPositions.length);
+  const slotMargin = Math.min(availableMargin, availableMargin / remainingSlots);
+  const safeTradeMargin = Math.max(minMarginNeeded, Math.min(availableMargin, slotMargin));
+  const maxAllowedNotional = safeTradeMargin * effectiveLeverage;
+
   const riskPct = Math.max(0.001, Number(bot.risk_per_trade_pct ?? 1) / 100);
   const stopDistancePct = Math.max(0.005, Math.abs(selectedOpportunity.entry - selectedOpportunity.sl) / selectedOpportunity.entry);
   const maxCapitalRisk = balance * riskPct;
   const targetNotional = maxCapitalRisk / stopDistancePct;
-  const maxAllowedNotional = Math.min(balance * effectiveLeverage, availableMargin * effectiveLeverage);
-  const notional = Math.min(targetNotional, maxAllowedNotional);
+  const notional = Math.min(maxAllowedNotional, Math.max(5.0, targetNotional));
 
   if (!Number.isFinite(notional) || notional < 5) {
     await supabase.from("bot_decisions").insert({
@@ -402,7 +421,7 @@ export async function triggerBotScan(formData: FormData) {
       cycle_id: cycleId,
       action: "blocked",
       symbol: selectedOpportunity.symbol,
-      reasoning: "Scan found a setup, but calculated size is below the $5 minimum notional after risk controls.",
+      reasoning: `Scan found setup on ${selectedOpportunity.symbol}, but calculated size (${notional.toFixed(2)}) is below the $5 exchange minimum notional.`,
       evidence: { balance, maxAllowedNotional, availableMargin, source: "scan_button" },
     });
     revalidatePath(`/dashboard/bots/${id}`);
