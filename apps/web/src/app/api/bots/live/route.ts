@@ -158,7 +158,7 @@ export async function GET(request: NextRequest) {
         const [activeRes, closedRes] = await Promise.all([
           supabase
             .from("trades")
-            .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,created_at")
+            .select("id,symbol,side,status,entry_avg,qty,leverage,sl,realized_pnl,opened_at")
             .in("id", lookupIds)
             .in("status", ["active", "entry_open"])
             .order("id", { ascending: false })
@@ -172,7 +172,19 @@ export async function GET(request: NextRequest) {
             .limit(100),
         ]);
 
-        openPositions = activeRes.data ?? [];
+        if (activeRes.error) {
+          return NextResponse.json({ error: `Could not load active bot trades: ${activeRes.error.message}` }, { status: 500 });
+        }
+        if (closedRes.error) {
+          return NextResponse.json({ error: `Could not load closed bot trades: ${closedRes.error.message}` }, { status: 500 });
+        }
+
+        // The table records opened_at, while the terminal view expects a
+        // display timestamp named created_at.
+        openPositions = (activeRes.data ?? []).map((trade) => ({
+          ...trade,
+          created_at: trade.opened_at ?? new Date().toISOString(),
+        }));
         closedTrades = closedRes.data ?? [];
 
         // Fetch targets
