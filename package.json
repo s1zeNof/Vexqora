@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "npm run dev --workspace=@crypto-bot/web",
     "dev:worker": "npm run dev --workspace=@crypto-bot/worker",
+    "dev:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1 web",
+    "dev:local:worker": "powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1 worker",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",

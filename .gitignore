@@ -10,6 +10,7 @@ coverage/
 .turbo/
 supabase/.temp/
 supabase/.branches/
+.vexqora-local.env
 data/
 .venv/
 *.parquet
