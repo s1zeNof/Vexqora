@@ -44,12 +44,12 @@ export function PulseFeedClient({ initialSignals }: { initialSignals: PulseSigna
     return () => clearInterval(timer);
   }, [lastRefreshed]);
 
-  // Periodic soft refresh of scanner feed every 30s
+  // The worker owns scanning; this page only needs a restrained status refresh.
   useEffect(() => {
     const timer = setInterval(() => {
       router.refresh();
       setLastRefreshed(Date.now());
-    }, 30000);
+    }, 120000);
     return () => clearInterval(timer);
   }, [router]);
 

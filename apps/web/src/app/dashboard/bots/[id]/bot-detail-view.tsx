@@ -297,7 +297,7 @@ export function BotDetailView({
     void loadRadar();
     const interval = setInterval(() => {
       void loadRadar();
-    }, 6000);
+    }, 30000);
     return () => {
       active = false;
       clearInterval(interval);

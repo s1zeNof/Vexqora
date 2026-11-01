@@ -317,7 +317,8 @@ export function TradeCompanionPanel({
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
-  // Realtime background sync: poll every 3.5s with cursor delta and optimistic message reconciliation (P0.2 & P1.8)
+  // Cursor-based reconciliation is intentionally infrequent; frequent polling
+  // adds database egress without improving the trading engine.
   useEffect(() => {
     if (!session?.id) return;
     const interval = setInterval(() => {
@@ -360,7 +361,7 @@ export function TradeCompanionPanel({
           // silent background sync catch
         }
       })();
-    }, 3500);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [session?.id]);

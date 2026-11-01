@@ -152,9 +152,10 @@ export function LivePositionsTable({
     };
   }, [symbols]);
 
-  // 2. High-frequency 1.5s live polling fallback across active symbols
+  // 2. HTTP is strictly a fallback. Running it beside a healthy WebSocket was
+  // multiplying requests for every open position and can exhaust quota.
   useEffect(() => {
-    if (symbols.length === 0) return;
+    if (symbols.length === 0 || wsConnected) return;
 
     let isMounted = true;
     const interval = setInterval(() => {
@@ -189,13 +190,13 @@ export function LivePositionsTable({
           // ignore network error
         }
       })();
-    }, 1500);
+    }, 5000);
 
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [symbols]);
+  }, [symbols, wsConnected]);
 
   // 3. Automated Paper Matching Engine Ticking for Active Autopilot Positions
   const lastTickTimeRef = useRef<number>(0);
