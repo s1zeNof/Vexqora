@@ -1,5 +1,10 @@
 -- Stage 4 Execution Worker: queue claiming, state persistence and kill-switch functions
 
+-- PostgreSQL cannot change a function's OUT/return row type via CREATE OR
+-- REPLACE. The initial schema has an earlier job-claiming signature, so drop
+-- that exact overload before installing the worker contract.
+drop function if exists public.claim_execution_job(text, interval);
+
 create or replace function public.claim_execution_job(
   p_worker_id text default 'worker-1',
   p_lock_duration interval default interval '2 minutes'
